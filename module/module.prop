@@ -1,0 +1,6 @@
+id=vpn-to-hotspot-usb
+name=VPN Tethering Ultra
+version=v2.2
+versionCode=13
+author=Kubarev
+description=Wi-Fi Hotspot / USB Tethering via VPN. Press ▶ Actions to toggle VPN on/off.
