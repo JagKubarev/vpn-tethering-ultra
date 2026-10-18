@@ -60,6 +60,20 @@
 #      а не спит 3с (из-за этого жали повторно и режим откатывался).
 #   6. Честный лог про BPF offload; umask 022 для файлов в /data/local/tmp.
 # ============================================================================
+# v3.9.6-hybrid.5 — свой DNS для раздачи через dnsproxy (AdGuard, bin/):
+#   - direct: DNS клиентов (любой :53) -> REDIRECT на локальный dnsproxy ->
+#     DoH/DoT (по умолчанию dns.comss.one), с кэшем и шифрованными фолбэками.
+#     Оператор видит только TLS до DNS-сервера, а не сами запросы.
+#   - VPN: по умолчанию как раньше (DNAT в DNS VPN). Опционально cache/doh —
+#     только если трафик root реально идёт в tun (иначе DNS утёк бы мимо VPN).
+#   - Порт dnsproxy закрыт для всего, кроме tether и lo; в hard/blocked режется.
+#   - Смена режима = перезапуск dnsproxy (keep-alive DoH-соединения не должны
+#     пережить переход direct <-> VPN на старом маршруте).
+#   - dnsproxy упал и не поднялся -> откат на обычный DNAT, клиенты не без DNS.
+#   - CA для Go-бинаря берутся из APEX conscrypt (Android 14+), только системные.
+#   - ФИКС (жил с 3.9.4): после кратковременного обрыва VPN без смены tun
+#     guard оставался в hard навсегда — раздача без интернета до ребута/тоггла.
+# ============================================================================
 
 umask 022
 
@@ -76,6 +90,26 @@ KILL_SWITCH_STRICT=1   # 1 = выбран режим VPN, а VPN не подня
                        # 0 = как в 3.9.4: после 3 промахов уходим в direct.
 RULE_WATCHDOG=1        # 1 = каждые ~6с проверять, что ip rule/цепочки живы,
                        #     и пересобирать их, если netd их снёс.
+
+# ---------------------------- DNS (dnsproxy) ----------------------------
+DNS_DIRECT="doh"       # direct-режим: doh   = DNS_UPSTREAMS через dnsproxy
+                       #               plain = как раньше, DNAT на 1.1.1.1
+DNS_VPN="dnat"         # VPN-режим:    dnat  = DNAT в DNS из VPN (как раньше; нужен,
+                       #                       если VPN-клиент роутит по доменам/fakeip)
+                       #               cache = DNS из VPN через dnsproxy + кэш
+                       #               doh   = DNS_VPN_UPSTREAMS через туннель + кэш
+                       #                       (замер: ~200мс вместо ~550мс, кэш ~5мс)
+# Основные апстримы (DoH https://, DoT tls://, DoQ quic://, обычный ip:53)
+DNS_UPSTREAMS="https://dns.comss.one/dns-query tls://dns.comss.one"
+# Если основные недоступны. Только шифрованные — иначе запросы ушли бы
+# оператору открытым текстом.
+DNS_FALLBACKS="https://dns.google/dns-query tls://1.1.1.1"
+# Апстримы для DNS_VPN=doh (идут через туннель)
+DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
+# Чем резолвить имена самих апстримов (dns.comss.one). Подмена тут не
+# страшна: TLS-сертификат апстрима всё равно проверяется.
+DNS_BOOTSTRAP="77.88.8.8:53 1.1.1.1:53 8.8.8.8:53"
+DNSPROXY_PORT=5354
 # =====================================================================
 
 FORCE_PUBLIC_DNS=0
@@ -209,6 +243,23 @@ done
 [ -z "$CONNTRACK_BIN" ] && command -v conntrack >/dev/null 2>&1 && CONNTRACK_BIN="conntrack"
 CONNTRACK_WARNED=0
 
+case "$(uname -m 2>/dev/null)" in
+    aarch64|arm64) _DP_CANDIDATES="$MODULE_DIR/bin/dnsproxy-arm64" ;;
+    armv*|arm)     _DP_CANDIDATES="$MODULE_DIR/bin/dnsproxy-arm" ;;
+    *)             _DP_CANDIDATES="$MODULE_DIR/bin/dnsproxy-arm64 $MODULE_DIR/bin/dnsproxy-arm" ;;
+esac
+DNSPROXY_BIN=""
+for _c in $_DP_CANDIDATES; do
+    [ -x "$_c" ] && DNSPROXY_BIN="$_c" && break
+done
+DNSPROXY_PID_FILE="/data/local/tmp/vpn_tether_dnsproxy.pid"
+DNSPROXY_LOG="/data/local/tmp/vpn_tether_dnsproxy.log"
+CHAIN_DNSP="VPN_TETHER_DNSP"
+DNSPROXY_SIG=""        # "<режим>|<апстримы>" запущенного экземпляра
+DNS_STATE=""           # что сейчас обслуживает DNS клиентов (для статуса)
+DNS_STATE_MODE=""      # vpn | direct — для какого режима поставлен DNS
+DNS_STATE_IFACES=""
+
 LAST_TUN_INDEX=""
 LAST_TETHER_IFACES=""
 LAST_WAN_IFACE=""
@@ -304,6 +355,7 @@ update_status() {
     [ -n "$profile" ] && status_line="$status_line [$profile]"
     [ -n "$tun0_mtu" ] && status_line="$status_line | tun0 MTU: $tun0_mtu"
     [ $CURRENT_MSS -gt 0 ] && status_line="$status_line | MSS: $CURRENT_MSS ($MSS_METHOD)"
+    [ "$mode" != "blocked" ] && [ -n "$DNS_STATE" ] && status_line="$status_line | DNS: $DNS_STATE"
     
     printf '%s\n%s' "$status_line" "$ifaces" > "$STATUS_FILE"
 }
@@ -599,7 +651,7 @@ get_vpn_dns() {
         if [ -n "$dumpsys_out" ]; then
             log "VPN block found (first 80 chars): $(echo "$dumpsys_out" | head -1 | cut -b1-80)..."
             
-            local dns_block=$(echo "$dumpsys_out" | grep -o 'DnsAddresses: \[[^]]*\]')
+            local dns_block=$(echo "$dumpsys_out" | grep -o 'DnsAddresses: \[[^]]*\]' | head -1)
             log "Raw DNS block: ${dns_block:-<none>}"
             
             if [ -n "$dns_block" ]; then
@@ -870,7 +922,7 @@ apply_sysctl_optimizations() {
 
     apply_network_profile "$CURRENT_NET_PROFILE"
     
-    log "Network engine: v3.9.5"
+    log "Network engine: v3.9.6"
 }
 
 apply_advanced_speed_tweaks() {
@@ -1004,6 +1056,216 @@ setup_dns_redirect() {
     fi
 }
 
+# ============================================================================
+# DNS через dnsproxy
+# ============================================================================
+dnsproxy_alive() {
+    local pid
+    pid=$(cat "$DNSPROXY_PID_FILE" 2>/dev/null)
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && \
+        grep -q dnsproxy "/proc/$pid/cmdline" 2>/dev/null
+}
+
+# dnsproxy слушает 0.0.0.0 (адрес раздачи меняется при каждом старте
+# хотспота), поэтому доступ режем фаерволом: только tether-ифейсы и lo.
+dnsproxy_port_guard() {
+    local iface
+    $iptables -N "$CHAIN_DNSP" 2>/dev/null
+    $iptables -F "$CHAIN_DNSP" 2>/dev/null
+    $iptables -A "$CHAIN_DNSP" -i lo -j RETURN 2>/dev/null
+    for iface in "$@"; do
+        $iptables -A "$CHAIN_DNSP" -i "$iface" -j RETURN 2>/dev/null
+    done
+    $iptables -A "$CHAIN_DNSP" -j DROP 2>/dev/null
+    $iptables -C INPUT -p udp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null || \
+        $iptables -I INPUT 1 -p udp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null
+    $iptables -C INPUT -p tcp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null || \
+        $iptables -I INPUT 1 -p tcp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null
+}
+
+dnsproxy_port_guard_down() {
+    local _n=0
+    while [ $_n -lt 8 ] && $iptables -D INPUT -p udp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null; do _n=$((_n + 1)); done
+    _n=0
+    while [ $_n -lt 8 ] && $iptables -D INPUT -p tcp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null; do _n=$((_n + 1)); done
+    $iptables -F "$CHAIN_DNSP" 2>/dev/null
+    $iptables -X "$CHAIN_DNSP" 2>/dev/null
+}
+
+dnsproxy_stop() {
+    local pid i
+    pid=$(cat "$DNSPROXY_PID_FILE" 2>/dev/null)
+    if [ -n "$pid" ] && grep -q dnsproxy "/proc/$pid/cmdline" 2>/dev/null; then
+        kill "$pid" 2>/dev/null
+        i=0
+        while [ $i -lt 10 ] && kill -0 "$pid" 2>/dev/null; do sleep 0.2; i=$((i + 1)); done
+        kill -9 "$pid" 2>/dev/null
+        log "dnsproxy остановлен (pid $pid)"
+    fi
+    rm -f "$DNSPROXY_PID_FILE"
+    DNSPROXY_SIG=""
+}
+
+# Осиротевшие экземпляры от убитого демона (pid-файл мог потеряться)
+dnsproxy_kill_strays() {
+    local f pid
+    for f in $(grep -l "$MODULE_DIR/bin/dnsproxy" /proc/[0-9]*/cmdline 2>/dev/null); do
+        pid="${f#/proc/}"; pid="${pid%/cmdline}"
+        [ "$pid" = "$$" ] && continue
+        kill -9 "$pid" 2>/dev/null && log "Убит осиротевший dnsproxy $pid"
+    done
+}
+
+# dnsproxy_start <тег режима> <апстримы...>
+# Перезапускает только при смене режима/апстримов. 0 = порт слушается.
+dnsproxy_start() {
+    local tag="$1"; shift
+    local ups="$*" sig args u i
+
+    [ -n "$DNSPROXY_BIN" ] || { log "WARNING: нет bin/dnsproxy, DNS по-старому"; return 1; }
+    sig="$tag|$ups"
+    if [ "$sig" = "$DNSPROXY_SIG" ] && dnsproxy_alive; then
+        return 0
+    fi
+    dnsproxy_stop
+
+    args="-l 0.0.0.0 -p $DNSPROXY_PORT --cache --cache-optimistic --timeout=5s --refuse-any"
+    for u in $ups; do args="$args -u $u"; done
+    for u in $DNS_FALLBACKS; do args="$args -f $u"; done
+    for u in $DNS_BOOTSTRAP; do args="$args -b $u"; done
+
+    : > "$DNSPROXY_LOG"
+    # Статический Go не находит CA Android 14+ (лежат в APEX conscrypt) ->
+    # "x509: certificate signed by unknown authority". Только системные CA:
+    # пользовательские (cacerts-added, напр. AdGuard HTTPS-фильтр) не берём.
+    SSL_CERT_DIR="/apex/com.android.conscrypt/cacerts:/system/etc/security/cacerts" \
+        $DNSPROXY_BIN $args -o "$DNSPROXY_LOG" >/dev/null 2>&1 < /dev/null &
+    echo $! > "$DNSPROXY_PID_FILE"
+
+    i=0
+    while [ $i -lt 25 ]; do
+        sleep 0.2
+        dnsproxy_alive || break
+        if ss -lun 2>/dev/null | grep -qE "[:.]$DNSPROXY_PORT[[:space:]]"; then
+            DNSPROXY_SIG="$sig"
+            log "dnsproxy запущен (pid $(cat "$DNSPROXY_PID_FILE"), $tag): $ups"
+            return 0
+        fi
+        i=$((i + 1))
+    done
+    log "ERROR: dnsproxy не поднялся: $(tail -n 3 "$DNSPROXY_LOG" 2>/dev/null | tr '\n' ' ')"
+    dnsproxy_stop
+    return 1
+}
+
+# Трафик root (dnsproxy) идёт в tun? Если VPN-приложение в per-app режиме
+# или исключает системные uid, cache/doh в VPN-режиме ушли бы мимо VPN.
+root_routed_via_tun() {
+    $ip route get 1.1.1.1 uid 0 2>/dev/null | grep -q "dev $TUN_NAME"
+}
+
+dns_redirect_to_proxy() {
+    local iface added=0
+    cleanup_dns_redirect
+    $iptables -t nat -N "$CHAIN_DNS" 2>/dev/null
+    $iptables -t nat -F "$CHAIN_DNS"
+    $iptables -t nat -C PREROUTING -j "$CHAIN_DNS" 2>/dev/null || \
+        $iptables -t nat -I PREROUTING 1 -j "$CHAIN_DNS" 2>/dev/null
+    # REDIRECT = на основной адрес входящего ифейса (адрес раздачи):порт
+    for iface in "$@"; do
+        $iptables -t nat -A "$CHAIN_DNS" -i "$iface" -p udp --dport 53 -j REDIRECT --to-ports "$DNSPROXY_PORT" 2>/dev/null && added=$((added + 1))
+        $iptables -t nat -A "$CHAIN_DNS" -i "$iface" -p tcp --dport 53 -j REDIRECT --to-ports "$DNSPROXY_PORT" 2>/dev/null && added=$((added + 1))
+    done
+    log "DNS -> dnsproxy :$DNSPROXY_PORT ($added rules)"
+}
+
+direct_dns_servers() {
+    local sys_dns=$(getprop net.dns1 2>/dev/null)
+    [ -z "$sys_dns" ] && sys_dns="1.1.1.1"
+    echo "${sys_dns}|2606:4700:4700::1111"
+}
+
+# apply_dns_mode <vpn|direct> <"v4|v6"> <ifaces...>
+# Ставит DNS для клиентов. Любой сбой dnsproxy -> старый DNAT.
+apply_dns_mode() {
+    local mode="$1" servers="$2"
+    shift 2 2>/dev/null || shift $#
+    local ifaces="$*" want="" ups="" dns4
+
+    if [ -z "$ifaces" ]; then
+        dnsproxy_stop
+        dnsproxy_port_guard_down
+        DNS_STATE=""
+        return 0
+    fi
+    dns4="${servers%%|*}"
+
+    if [ "$mode" = "direct" ]; then
+        [ "$DNS_DIRECT" = "doh" ] && { want="doh"; ups="$DNS_UPSTREAMS"; }
+    else
+        case "$DNS_VPN" in
+            cache) want="cache"; ups="$dns4:53" ;;
+            doh)   want="doh";   ups="$DNS_VPN_UPSTREAMS" ;;
+        esac
+        # Каждая пересборка VPN = новый экземпляр: keep-alive DoH-соединение
+        # могло открыться через WAN, пока tun пропадал, и так бы и осталось.
+        DNSPROXY_SIG=""
+        if [ -n "$want" ] && ! root_routed_via_tun; then
+            log "WARNING: трафик root идёт мимо $TUN_NAME (per-app VPN?) — DNS_VPN=$DNS_VPN выключен, DNAT в DNS VPN"
+            want=""
+        fi
+    fi
+
+    if [ -n "$want" ] && [ -n "$ups" ]; then
+        dnsproxy_port_guard $ifaces
+        if dnsproxy_start "$mode-$want" $ups; then
+            dns_redirect_to_proxy $ifaces
+            DNS_STATE="dnsproxy $want"
+            DNS_STATE_MODE="$mode"
+            DNS_STATE_IFACES="$ifaces"
+            return 0
+        fi
+        log "WARNING: dnsproxy недоступен, откат на обычный DNAT"
+    fi
+
+    dnsproxy_stop
+    dnsproxy_port_guard_down
+    setup_dns_redirect "$servers" $ifaces
+    DNS_STATE="DNAT ${dns4:-?}"
+    DNS_STATE_MODE="$mode"
+    DNS_STATE_IFACES="$ifaces"
+    return 0
+}
+
+# Из цикла: dnsproxy умер -> поднять; не поднялся -> DNAT, клиенты не без DNS.
+dns_watchdog() {
+    local saved_sig
+    case "$DNS_STATE" in dnsproxy*) ;; *) return 0 ;; esac
+    if dnsproxy_alive; then
+        # dnsproxy пишет в лог только старт и ошибки, но за недели набегает
+        if [ "$(wc -c < "$DNSPROXY_LOG" 2>/dev/null || echo 0)" -gt 1048576 ]; then
+            tail -c 262144 "$DNSPROXY_LOG" > "$DNSPROXY_LOG.tmp" 2>/dev/null && \
+                cat "$DNSPROXY_LOG.tmp" > "$DNSPROXY_LOG"
+            rm -f "$DNSPROXY_LOG.tmp"
+        fi
+        return 0
+    fi
+
+    log "WATCHDOG: dnsproxy умер, перезапускаю"
+    saved_sig="$DNSPROXY_SIG"
+    DNSPROXY_SIG=""
+    dnsproxy_start "${saved_sig%%|*}" ${saved_sig#*|} && return 0
+
+    log "WATCHDOG: dnsproxy не поднялся, DNS клиентов -> DNAT"
+    if [ "$DNS_STATE_MODE" = "direct" ]; then
+        setup_dns_redirect "$(direct_dns_servers)" $DNS_STATE_IFACES
+    else
+        setup_dns_redirect "$(get_vpn_dns)" $DNS_STATE_IFACES
+    fi
+    dnsproxy_port_guard_down
+    DNS_STATE="DNAT (dnsproxy упал)"
+}
+
 # --- перенесено из 3.9.11 (без изменений логики) ---
 flush_conntrack() {
     if [ "$TARGETED_CT_FLUSH" != "1" ]; then
@@ -1127,6 +1389,8 @@ guard_apply() {
         for iface in $ifaces; do
             $iptables -A "$CHAIN_GUARD_IN" -i "$iface" -p udp --dport 53 -j DROP 2>/dev/null
             $iptables -A "$CHAIN_GUARD_IN" -i "$iface" -p tcp --dport 53 -j DROP 2>/dev/null
+            $iptables -A "$CHAIN_GUARD_IN" -i "$iface" -p udp --dport "$DNSPROXY_PORT" -j DROP 2>/dev/null
+            $iptables -A "$CHAIN_GUARD_IN" -i "$iface" -p tcp --dport "$DNSPROXY_PORT" -j DROP 2>/dev/null
         done
     fi
     $iptables -C INPUT -j "$CHAIN_GUARD_IN" 2>/dev/null || \
@@ -1299,6 +1563,7 @@ setup_direct_rules() {
     $iptables -C FORWARD -j ACCEPT 2>/dev/null || $iptables -A FORWARD -j ACCEPT
 
     if [ -z "$tether_ifaces" ]; then
+        apply_dns_mode direct ""
         update_status "direct" "no-tether" "$CURRENT_NET_PROFILE"
         return 0
     fi
@@ -1307,15 +1572,13 @@ setup_direct_rules() {
     apply_sysctl_optimizations
     apply_advanced_speed_tweaks
     
-    local sys_dns=$(getprop net.dns1 2>/dev/null)
-    [ -z "$sys_dns" ] && sys_dns="1.1.1.1"
-    setup_dns_redirect "${sys_dns}|2606:4700:4700::1111" $tether_ifaces
+    apply_dns_mode direct "$(direct_dns_servers)" $tether_ifaces
     
     CURRENT_MSS=0
     MSS_METHOD="none"
     update_status "direct" "$(echo $tether_ifaces | tr ' ' '/')" "$CURRENT_NET_PROFILE"
     $ip route flush cache 2>/dev/null
-    log "Direct mode done (DNS: $sys_dns)"
+    log "Direct mode done (DNS: $DNS_STATE)"
     return 0
 }
 
@@ -1333,6 +1596,12 @@ setup_blocked_rules() {
     $ip6tables -C FORWARD -j DROP 2>/dev/null || $ip6tables -I FORWARD -j DROP 2>/dev/null
     # cleanup_all_rules сносит хуки, но не цепочку guard — подтверждаем её
     guard_apply hard $tether_ifaces
+
+    # В blocked DNS не нужен; dnsproxy гасим, чтобы при выходе из blocked
+    # он стартовал заново уже на правильном маршруте
+    dnsproxy_stop
+    dnsproxy_port_guard_down
+    DNS_STATE=""
 
     CURRENT_MSS=0
     update_status "blocked" "$(echo $tether_ifaces | tr ' ' '/')" "$CURRENT_NET_PROFILE"
@@ -1453,7 +1722,7 @@ $ip link set dev "$TUN_NAME" mtu "$tun_mtu" 2>/dev/null && \
     fi
 
     local vpn_dns=$(get_vpn_dns)
-    setup_dns_redirect "$vpn_dns" $tether_ifaces
+    apply_dns_mode vpn "$vpn_dns" $tether_ifaces
 
     # IPv6 уже заблокирован в начале функции, здесь только подтверждаем хук
     $ip6tables -C FORWARD -j DROP 2>/dev/null || $ip6tables -I FORWARD -j DROP 2>/dev/null
@@ -1576,7 +1845,12 @@ apply_state() {
     fi
 
     if is_vpn_tether_enabled; then
+        # GUARD_STATE=hard при mode=on = был кратковременный обрыв VPN
+        # (гистерезис поставил hard и вышел). Если tun вернулся тот же, ни
+        # одно другое условие не срабатывало, и раздача навсегда оставалась
+        # без интернета под hard-guard. Пересобираем — setup вернёт armed.
         if { [ "$VPN_TETHER_MODE" != "on" ] && [ "$VPN_TETHER_MODE" != "degraded" ]; } || \
+           { [ "$VPN_TETHER_MODE" = "on" ] && [ "$GUARD_STATE" = "hard" ]; } || \
            [ "$tun_idx" != "$LAST_TUN_INDEX" ] || \
            [ "$tether_ifaces" != "$LAST_TETHER_IFACES" ] || [ "$vpn_just_restored" = "true" ] || [ "$FORCE_UPDATE" -eq 1 ]; then
             if [ -n "$tether_ifaces" ] && [ -n "$tun_idx" ]; then
@@ -1752,6 +2026,8 @@ handle_change() {
 
     apply_state "$tun_idx" $tether_ifaces || log "ERROR: apply_state failed"
 
+    dns_watchdog
+
     FORCE_UPDATE=0
 
     local pending=0
@@ -1787,6 +2063,8 @@ handle_usr1() {
 cleanup_on_exit() {
     log "Exiting, cleaning up..."
     cleanup_all_rules
+    dnsproxy_stop
+    dnsproxy_port_guard_down
     guard_down
     restore_hw_offload
     rm -f "$PID_FILE" "$RULES_FILE"
@@ -1816,10 +2094,10 @@ monitor_loop() {
     done
 }
 
-echo "=== VPN Tether v3.9.5-hybrid.4 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.9.6-hybrid.5 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
-log "Config: HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG ct_bin=${CONNTRACK_BIN:-none}"
+log "Config: HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
 
 disable_hw_offload
 
@@ -1843,6 +2121,10 @@ done
 
 TUN_NAME=$(detect_tun_name)
 log "TUN: $TUN_NAME"
+
+dnsproxy_kill_strays
+rm -f "$DNSPROXY_PID_FILE"
+dnsproxy_port_guard_down
 
 cleanup_all_rules
 clear_rules_file
