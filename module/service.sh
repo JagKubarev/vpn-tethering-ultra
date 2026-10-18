@@ -92,6 +92,7 @@
 #     * read_table_index при выключенном VPN гонял 15 попыток (~3с на вызов,
 #       2 вызова на итерацию); теперь нет tun-ифейса -> сразу выход.
 #       Заодно: "sleep 0.1138" вместо 1.138с (printf %03d от 1138).
+#   - 3.9.7.3: защита порта dnsproxy и в ip6tables (Go слушает [::]).
 # ============================================================================
 
 umask 022
@@ -1104,28 +1105,35 @@ dnsproxy_alive() {
 
 # dnsproxy слушает 0.0.0.0 (адрес раздачи меняется при каждом старте
 # хотспота), поэтому доступ режем фаерволом: только tether-ифейсы и lo.
+# Go слушает 0.0.0.0 как dual-stack ([::]:порт), поэтому режем и в ip6tables:
+# иначе у оператора с глобальным IPv6 порт был бы открытым резолвером.
 dnsproxy_port_guard() {
-    local iface
-    $iptables -N "$CHAIN_DNSP" 2>/dev/null
-    $iptables -F "$CHAIN_DNSP" 2>/dev/null
-    $iptables -A "$CHAIN_DNSP" -i lo -j RETURN 2>/dev/null
-    for iface in "$@"; do
-        $iptables -A "$CHAIN_DNSP" -i "$iface" -j RETURN 2>/dev/null
+    local iface t
+    for t in "$iptables" "$ip6tables"; do
+        $t -N "$CHAIN_DNSP" 2>/dev/null
+        $t -F "$CHAIN_DNSP" 2>/dev/null
+        $t -A "$CHAIN_DNSP" -i lo -j RETURN 2>/dev/null
+        for iface in "$@"; do
+            $t -A "$CHAIN_DNSP" -i "$iface" -j RETURN 2>/dev/null
+        done
+        $t -A "$CHAIN_DNSP" -j DROP 2>/dev/null
+        $t -C INPUT -p udp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null || \
+            $t -I INPUT 1 -p udp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null
+        $t -C INPUT -p tcp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null || \
+            $t -I INPUT 1 -p tcp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null
     done
-    $iptables -A "$CHAIN_DNSP" -j DROP 2>/dev/null
-    $iptables -C INPUT -p udp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null || \
-        $iptables -I INPUT 1 -p udp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null
-    $iptables -C INPUT -p tcp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null || \
-        $iptables -I INPUT 1 -p tcp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null
 }
 
 dnsproxy_port_guard_down() {
-    local _n=0
-    while [ $_n -lt 8 ] && $iptables -D INPUT -p udp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null; do _n=$((_n + 1)); done
-    _n=0
-    while [ $_n -lt 8 ] && $iptables -D INPUT -p tcp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null; do _n=$((_n + 1)); done
-    $iptables -F "$CHAIN_DNSP" 2>/dev/null
-    $iptables -X "$CHAIN_DNSP" 2>/dev/null
+    local _n t
+    for t in "$iptables" "$ip6tables"; do
+        _n=0
+        while [ $_n -lt 8 ] && $t -D INPUT -p udp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null; do _n=$((_n + 1)); done
+        _n=0
+        while [ $_n -lt 8 ] && $t -D INPUT -p tcp --dport "$DNSPROXY_PORT" -j "$CHAIN_DNSP" 2>/dev/null; do _n=$((_n + 1)); done
+        $t -F "$CHAIN_DNSP" 2>/dev/null
+        $t -X "$CHAIN_DNSP" 2>/dev/null
+    done
 }
 
 dnsproxy_stop() {
