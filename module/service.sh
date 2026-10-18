@@ -103,6 +103,8 @@
 #   - dnsproxy не отвечает/умер -> редирект телефона снимается сразу (DNS
 #     обычный), новая попытка через ~1 мин. Раздача dnsproxy больше не
 #     гасит, если им пользуется телефон (dnsproxy_release).
+#   - 3.9.8.1: dnsproxy перезапускается при каждой смене VPN up/down: старое
+#     keep-alive DoH-соединение на прежнем маршруте давало ~16с SERVFAIL.
 # ============================================================================
 # ============================================================================
 
@@ -1426,6 +1428,17 @@ dnsproxy_release() {
     dnsproxy_port_guard_down
 }
 
+dnsproxy_restart() {
+    local sig="$DNSPROXY_SIG"
+    [ -n "$sig" ] || return 0
+    DNSPROXY_SIG=""
+    if dnsproxy_start "${sig%%|*}" ${sig#*|}; then
+        log "dnsproxy перезапущен ($1)"
+    else
+        log "WARNING: dnsproxy не перезапустился ($1)"
+    fi
+}
+
 # ============================================================================
 # DNS самого телефона (DNS_PHONE)
 # ============================================================================
@@ -1474,6 +1487,13 @@ phone_status_refresh() {
 phone_dns_reconcile() {
     local up=0 want=0
     $ip addr show "$TUN_NAME" 2>/dev/null | grep -q "inet " && up=1
+    # VPN поднялся/упал = у root другой маршрут. Keep-alive DoH-соединение
+    # dnsproxy остаётся на старом пути и висит до таймаута — в логе 2.5 это
+    # ~16с SERVFAIL у клиентов на переключении Incy. Перезапуск сразу, без
+    # сглаживания (сглаживание — только для включения/снятия правил ниже).
+    if [ -n "$PHONE_VPN_SEEN" ] && [ "$up" != "$PHONE_VPN_SEEN" ] && dnsproxy_alive; then
+        dnsproxy_restart "VPN $([ "$up" = 1 ] && echo поднялся || echo пропал)"
+    fi
     if [ "$up" = "$PHONE_VPN_SEEN" ]; then
         PHONE_VPN_STABLE="$up"
     fi
