@@ -94,6 +94,17 @@
 #       Заодно: "sleep 0.1138" вместо 1.138с (printf %03d от 1138).
 #   - 3.9.7.3: защита порта dnsproxy и в ip6tables (Go слушает [::]).
 # ============================================================================
+# v3.9.8-hybrid.7 — DNS_PHONE: comss и для самого телефона.
+#   - VPN-клиент не поднят -> nat OUTPUT: DNS :53 приложений телефона ->
+#     тот же dnsproxy (экземпляр общий с раздачей в direct). VPN поднят ->
+#     правила снимаются, DNS как настроено в VPN-клиенте.
+#   - Состояние VPN проверяется каждую итерацию (а не в apply_state, который
+#     при выключенном хотспоте зовётся раз в ~10с), со сглаживанием x2.
+#   - dnsproxy не отвечает/умер -> редирект телефона снимается сразу (DNS
+#     обычный), новая попытка через ~1 мин. Раздача dnsproxy больше не
+#     гасит, если им пользуется телефон (dnsproxy_release).
+# ============================================================================
+# ============================================================================
 
 umask 022
 
@@ -134,6 +145,11 @@ DNSPROXY_PORT=5354
 # исключается из перехвата AdGuard и прочих transparent-proxy (nat OUTPUT).
 # Пусто = без исключения (DoH сломается, если HTTPS-фильтр AdGuard включён).
 DNSPROXY_GID=3999
+# DNS самого телефона. 1 = когда VPN не поднят, DNS-запросы приложений
+# телефона (:53) тоже идут через dnsproxy (DNS_UPSTREAMS). VPN поднят — не
+# трогаем, DNS идёт как настроено в VPN-клиенте. Только IPv4, если в ядре
+# нет ip6 nat. Не включать вместе с DNS-защитой AdGuard (будут драться).
+DNS_PHONE=1
 # =====================================================================
 
 FORCE_PUBLIC_DNS=0
@@ -279,6 +295,14 @@ done
 DNSPROXY_PID_FILE="/data/local/tmp/vpn_tether_dnsproxy.pid"
 DNSPROXY_LOG="/data/local/tmp/vpn_tether_dnsproxy.log"
 CHAIN_DNSP="VPN_TETHER_DNSP"
+CHAIN_PHONE_DNS="VPN_PHONE_DNS"
+PHONE_DNS_ON=0         # 1 = DNS телефона сейчас перенаправлен в dnsproxy
+PHONE_DNS_RETRY=0      # пропустить N итераций после неудачного старта
+PHONE_VPN_SEEN=""      # сглаживание: последнее наблюдение "VPN поднят?"
+PHONE_VPN_STABLE=""    # подтверждённое двумя итерациями подряд
+PHONE_DNS_V6=0
+LAST_STATUS_MODE=""
+LAST_STATUS_IFACES=""
 DNSPROXY_SIG=""        # "<режим>|<апстримы>" запущенного экземпляра
 DNS_STATE=""           # что сейчас обслуживает DNS клиентов (для статуса)
 DNS_STATE_MODE=""      # vpn | direct — для какого режима поставлен DNS
@@ -390,6 +414,9 @@ update_status() {
     [ -n "$tun0_mtu" ] && status_line="$status_line | tun0 MTU: $tun0_mtu"
     [ $CURRENT_MSS -gt 0 ] && status_line="$status_line | MSS: $CURRENT_MSS ($MSS_METHOD)"
     [ "$mode" != "blocked" ] && [ -n "$DNS_STATE" ] && status_line="$status_line | DNS: $DNS_STATE"
+    [ "$PHONE_DNS_ON" = "1" ] && status_line="$status_line | DNS телефона: dnsproxy"
+    LAST_STATUS_MODE="$mode"
+    LAST_STATUS_IFACES="$ifaces"
     
     printf '%s\n%s' "$status_line" "$ifaces" > "$STATUS_FILE"
 }
@@ -959,7 +986,7 @@ apply_sysctl_optimizations() {
 
     apply_network_profile "$CURRENT_NET_PROFILE"
     
-    log "Network engine: v3.9.7"
+    log "Network engine: v3.9.8"
 }
 
 apply_advanced_speed_tweaks() {
@@ -1306,8 +1333,7 @@ apply_dns_mode() {
     local ifaces="$*" want="" ups="" dns4
 
     if [ -z "$ifaces" ]; then
-        dnsproxy_stop
-        dnsproxy_port_guard_down
+        dnsproxy_release
         DNS_STATE=""
         return 0
     fi
@@ -1344,10 +1370,14 @@ apply_dns_mode() {
             fi
         fi
         log "WARNING: dnsproxy не отвечает ($(grep ERROR "$DNSPROXY_LOG" 2>/dev/null | tail -1 | cut -c1-160)), откат на обычный DNAT"
+        # Сломан — гасим и для телефона: phone_dns_reconcile снимет его
+        # редирект (dnsproxy мёртв) и попробует позже сам.
+        dnsproxy_stop
+        dnsproxy_port_guard_down
+    else
+        dnsproxy_release
     fi
 
-    dnsproxy_stop
-    dnsproxy_port_guard_down
     setup_dns_redirect "$servers" $ifaces
     DNS_STATE="DNAT ${dns4:-?}"
     DNS_STATE_MODE="$mode"
@@ -1383,6 +1413,118 @@ dns_watchdog() {
     fi
     dnsproxy_port_guard_down
     DNS_STATE="DNAT (dnsproxy упал)"
+}
+
+# Раздаче dnsproxy больше не нужен. Если им пользуется телефон — не гасим,
+# только сужаем доступ к порту до lo.
+dnsproxy_release() {
+    if [ "$PHONE_DNS_ON" = "1" ] && dnsproxy_alive; then
+        dnsproxy_port_guard
+        return 0
+    fi
+    dnsproxy_stop
+    dnsproxy_port_guard_down
+}
+
+# ============================================================================
+# DNS самого телефона (DNS_PHONE)
+# ============================================================================
+phone_dns_rules_on() {
+    local t
+    PHONE_DNS_V6=0
+    for t in "$iptables" "$ip6tables"; do
+        # ip6 nat есть не во всех ядрах (на OnePlus 13T, A15 — нет)
+        if ! $t -t nat -L "$CHAIN_PHONE_DNS" -n >/dev/null 2>&1; then
+            $t -t nat -N "$CHAIN_PHONE_DNS" 2>/dev/null || continue
+        fi
+        $t -t nat -F "$CHAIN_PHONE_DNS" 2>/dev/null
+        # сам dnsproxy (bootstrap :53) — мимо, иначе петля
+        [ -n "$DNSPROXY_GID" ] && \
+            $t -t nat -A "$CHAIN_PHONE_DNS" -m owner --gid-owner "$DNSPROXY_GID" -j RETURN 2>/dev/null
+        [ "$DNSPROXY_SU_G" = "1" ] || \
+            $t -t nat -A "$CHAIN_PHONE_DNS" -m owner --uid-owner 0 -j RETURN 2>/dev/null
+        $t -t nat -A "$CHAIN_PHONE_DNS" -o lo -j RETURN 2>/dev/null
+        $t -t nat -A "$CHAIN_PHONE_DNS" -p udp --dport 53 -j REDIRECT --to-ports "$DNSPROXY_PORT" 2>/dev/null
+        $t -t nat -A "$CHAIN_PHONE_DNS" -p tcp --dport 53 -j REDIRECT --to-ports "$DNSPROXY_PORT" 2>/dev/null
+        $t -t nat -C OUTPUT -j "$CHAIN_PHONE_DNS" 2>/dev/null || \
+            $t -t nat -I OUTPUT 1 -j "$CHAIN_PHONE_DNS" 2>/dev/null
+        [ "$t" = "$ip6tables" ] && PHONE_DNS_V6=1
+    done
+    # исключение dnsproxy из AdGuard обратно на первое место
+    dnsproxy_exempt
+}
+
+phone_dns_rules_off() {
+    local t _n
+    for t in "$iptables" "$ip6tables"; do
+        _n=0
+        while [ $_n -lt 8 ] && $t -t nat -D OUTPUT -j "$CHAIN_PHONE_DNS" 2>/dev/null; do _n=$((_n + 1)); done
+        $t -t nat -F "$CHAIN_PHONE_DNS" 2>/dev/null
+        $t -t nat -X "$CHAIN_PHONE_DNS" 2>/dev/null
+    done
+}
+
+phone_status_refresh() {
+    [ -n "$LAST_STATUS_MODE" ] && update_status "$LAST_STATUS_MODE" "$LAST_STATUS_IFACES" "$CURRENT_NET_PROFILE"
+}
+
+# Каждая итерация цикла (и при выключенном хотспоте). Состояние VPN берём
+# сами: apply_state при пустой раздаче вызывается редко. Сглаживание —
+# два одинаковых наблюдения подряд, чтобы реконнект VPN не дёргал правила.
+phone_dns_reconcile() {
+    local up=0 want=0
+    $ip addr show "$TUN_NAME" 2>/dev/null | grep -q "inet " && up=1
+    if [ "$up" = "$PHONE_VPN_SEEN" ]; then
+        PHONE_VPN_STABLE="$up"
+    fi
+    PHONE_VPN_SEEN="$up"
+    [ -z "$PHONE_VPN_STABLE" ] && return 0
+
+    [ "$DNS_PHONE" = "1" ] && [ "$PHONE_VPN_STABLE" = "0" ] && [ -n "$DNSPROXY_BIN" ] && want=1
+
+    if [ "$want" = "0" ]; then
+        if [ "$PHONE_DNS_ON" = "1" ]; then
+            phone_dns_rules_off
+            PHONE_DNS_ON=0
+            log "DNS телефона: как обычно (VPN поднят)"
+            case "$DNS_STATE" in dnsproxy*) dnsproxy_port_guard $DNS_STATE_IFACES ;; *) dnsproxy_stop; dnsproxy_port_guard_down ;; esac
+            phone_status_refresh
+        fi
+        PHONE_DNS_RETRY=0
+        return 0
+    fi
+
+    if [ "$PHONE_DNS_ON" = "1" ]; then
+        if dnsproxy_alive; then
+            # держим хук и исключение на месте (AdGuard/netd могли перетряхнуть)
+            $iptables -t nat -C OUTPUT -j "$CHAIN_PHONE_DNS" 2>/dev/null || phone_dns_rules_on
+            dnsproxy_exempt
+            return 0
+        fi
+        # dnsproxy умер — не держим DNS телефона в чёрной дыре
+        log "WARNING: dnsproxy умер, DNS телефона -> обычный"
+        phone_dns_rules_off
+        PHONE_DNS_ON=0
+        phone_status_refresh
+    fi
+
+    if [ "$PHONE_DNS_RETRY" -gt 0 ]; then
+        PHONE_DNS_RETRY=$((PHONE_DNS_RETRY - 1))
+        return 0
+    fi
+
+    # Экземпляр с DNS_UPSTREAMS и тегом direct-doh — общий с раздачей в direct
+    case "$DNS_STATE" in dnsproxy*) ;; *) dnsproxy_port_guard ;; esac
+    if dnsproxy_start "direct-doh" $DNS_UPSTREAMS && dnsproxy_probe; then
+        phone_dns_rules_on
+        PHONE_DNS_ON=1
+        log "DNS телефона -> dnsproxy :$DNSPROXY_PORT (VPN не поднят; IPv6: $([ "$PHONE_DNS_V6" = 1 ] && echo да || echo 'нет ip6 nat'))"
+        phone_status_refresh
+    else
+        log "WARNING: dnsproxy не отвечает, DNS телефона оставляю обычным (повтор через ~1 мин)"
+        PHONE_DNS_RETRY=30
+        case "$DNS_STATE" in dnsproxy*) ;; *) dnsproxy_stop; dnsproxy_port_guard_down ;; esac
+    fi
 }
 
 # --- перенесено из 3.9.11 (без изменений логики) ---
@@ -1716,10 +1858,9 @@ setup_blocked_rules() {
     # cleanup_all_rules сносит хуки, но не цепочку guard — подтверждаем её
     guard_apply hard $tether_ifaces
 
-    # В blocked DNS не нужен; dnsproxy гасим, чтобы при выходе из blocked
-    # он стартовал заново уже на правильном маршруте
-    dnsproxy_stop
-    dnsproxy_port_guard_down
+    # Раздаче в blocked DNS не нужен. Телефону (VPN не поднят) — может быть
+    # нужен, поэтому release, а не stop.
+    dnsproxy_release
     DNS_STATE=""
 
     CURRENT_MSS=0
@@ -2183,6 +2324,8 @@ handle_usr1() {
 cleanup_on_exit() {
     log "Exiting, cleaning up..."
     cleanup_all_rules
+    phone_dns_rules_off
+    PHONE_DNS_ON=0
     dnsproxy_stop
     dnsproxy_port_guard_down
     guard_down
@@ -2210,14 +2353,16 @@ monitor_loop() {
             wait $! 2>/dev/null
         fi
         handle_change || log "ERROR: handle_change failed, continuing anyway"
+        # отдельно от handle_change: тот рано выходит, когда хотспот выключен
+        phone_dns_reconcile
         _loop_count=$(( _loop_count + 1 ))
     done
 }
 
-echo "=== VPN Tether v3.9.7-hybrid.6 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.9.8-hybrid.7 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
-log "Config: HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
+log "Config: HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
 
 disable_hw_offload
 
@@ -2244,6 +2389,7 @@ TUN_NAME=$(detect_tun_name)
 log "TUN: $TUN_NAME"
 
 dnsproxy_kill_strays
+phone_dns_rules_off
 rm -f "$DNSPROXY_PID_FILE"
 dnsproxy_port_guard_down
 
