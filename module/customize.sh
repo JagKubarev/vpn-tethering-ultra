@@ -24,5 +24,5 @@ case "$ARCH" in
 esac
 set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/action.sh"  0 0 0755
-ui_print "- DNS раздачи: direct -> DoH (DNS_UPSTREAMS), VPN -> DNS VPN"
+ui_print "- DNS: раздача в direct и сам телефон без VPN -> DoH (DNS_UPSTREAMS)"
 ui_print "  настройки: блок DNS (dnsproxy) в начале service.sh"
