@@ -83,6 +83,15 @@
 #   - DoT (853) к comss режется по дороге (EOF) — по умолчанию только DoH.
 #   - После старта — настоящий DNS-запрос к dnsproxy (nc). Не ответил ->
 #     откат на DNAT, а не "клиенты без DNS".
+#   - 3.9.7.1: редирект на dnsproxy до проверки (не было окна с DNS оператора),
+#     проверка ~1-2с вместо 8-10с (nc -w 1 x5).
+#   - 3.9.7.2: тоггл в direct шёл 20-28с -> action.sh "демон не подтвердил":
+#     * флаг режима читается только при обработке USR1. Раньше action.sh
+#       менял файл, текущая итерация уже перестраивала всё по новому флагу
+#       (без ack), а следующая — ещё раз с FORCE (с ack). Две настройки.
+#     * read_table_index при выключенном VPN гонял 15 попыток (~3с на вызов,
+#       2 вызова на итерацию); теперь нет tun-ифейса -> сразу выход.
+#       Заодно: "sleep 0.1138" вместо 1.138с (printf %03d от 1138).
 # ============================================================================
 
 umask 022
@@ -342,7 +351,12 @@ log() {
     $ANDROID_LOG -t vpn_tether "$msg" 2>/dev/null || true
 }
 
-is_vpn_tether_enabled() { [ -f "$FLAG_FILE" ]; }
+# Режим берётся из кэша, а не из файла: action.sh меняет файл ДО сигнала, и
+# итерация, попавшая между ними, перестраивала всё без ack (а потом ещё раз).
+# Кэш обновляется только при обработке USR1 и на старте.
+VPN_TARGET=""
+refresh_vpn_target() { if [ -f "$FLAG_FILE" ]; then VPN_TARGET=1; else VPN_TARGET=0; fi; }
+is_vpn_tether_enabled() { [ "$VPN_TARGET" = "1" ]; }
 
 is_excluded_iface() {
     case "$1" in
@@ -771,6 +785,9 @@ read_table_index() {
     local iface=$1 attempts=15 delay_ms=100 index name cand last live
 
     [ -s /data/misc/net/rt_tables ] || { sleep 1; return 1; }
+    # Нет самого ифейса (VPN выключен) — ждать строку в rt_tables бессмысленно.
+    # Ретраи нужны только сразу после появления tun, пока netd не дописал таблицу.
+    $ip link show "$iface" >/dev/null 2>&1 || return 1
 
     while [ $attempts -gt 0 ]; do
         # ВАЖНО: раньше бралось ПЕРВОЕ совпадение. При реконнекте VPN Android
@@ -801,7 +818,7 @@ read_table_index() {
         fi
 
         attempts=$((attempts - 1))
-        [ $attempts -gt 0 ] && { sleep 0.$(printf "%03d" $delay_ms); [ $delay_ms -lt 1000 ] && delay_ms=$((delay_ms * 3 / 2)); }
+        [ $attempts -gt 0 ] && { sleep 0.$(printf "%03d" $delay_ms); delay_ms=$((delay_ms * 3 / 2)); [ $delay_ms -gt 999 ] && delay_ms=999; }
     done
     return 1
 }
@@ -1174,9 +1191,12 @@ dnsproxy_exempt_down() {
 dnsproxy_probe() {
     local out i
     [ -n "$BUSYBOX" ] || return 0   # нечем проверить — не блокируем запуск
-    for i in 1 2 3; do
+    # busybox nc после ответа ещё ждёт -w секунд тишины, поэтому -w 1 и
+    # несколько попыток: холодный старт (bootstrap + TLS) ~1.5с промахнётся
+    # в первую попытку, вторая уже ответит из готового соединения/кэша.
+    for i in 1 2 3 4 5; do
         out=$(printf '\022\064\001\000\000\001\000\000\000\000\000\000\007example\003com\000\000\001\000\001' | \
-              $BUSYBOX nc -u -w 4 127.0.0.1 "$DNSPROXY_PORT" 2>/dev/null | \
+              $BUSYBOX nc -u -w 1 127.0.0.1 "$DNSPROXY_PORT" 2>/dev/null | \
               $BUSYBOX od -An -tx1 -N8 2>/dev/null)
         # " 12 34 81 80 00 01 00 01": id, флаги (rcode = младшие 4 бита 4-го), qd, an
         set -- $out
@@ -1303,12 +1323,17 @@ apply_dns_mode() {
 
     if [ -n "$want" ] && [ -n "$ups" ]; then
         dnsproxy_port_guard $ifaces
-        if dnsproxy_start "$mode-$want" $ups && dnsproxy_probe; then
+        # Редирект ставим СРАЗУ после старта, проверку — после: иначе на всё
+        # время проверки клиенты без редиректа спрашивали dnsmasq раздачи
+        # (= DNS оператора). Не прошла — setup_dns_redirect ниже его заменит.
+        if dnsproxy_start "$mode-$want" $ups; then
             dns_redirect_to_proxy $ifaces
-            DNS_STATE="dnsproxy $want"
-            DNS_STATE_MODE="$mode"
-            DNS_STATE_IFACES="$ifaces"
-            return 0
+            if dnsproxy_probe; then
+                DNS_STATE="dnsproxy $want"
+                DNS_STATE_MODE="$mode"
+                DNS_STATE_IFACES="$ifaces"
+                return 0
+            fi
         fi
         log "WARNING: dnsproxy не отвечает ($(grep ERROR "$DNSPROXY_LOG" 2>/dev/null | tail -1 | cut -c1-160)), откат на обычный DNAT"
     fi
@@ -1984,6 +2009,7 @@ handle_change() {
     # сработать посреди apply_state, и "FORCE_UPDATE=0" после него терял сигнал.
     if [ "$USR1_PENDING" -eq 1 ]; then
         USR1_PENDING=0
+        refresh_vpn_target
         FORCE_UPDATE=1
         ack_token=$(cat "$REQ_FILE" 2>/dev/null)
         [ -z "$ack_token" ] && ack_token="noreq"
@@ -2188,6 +2214,7 @@ log "Config: HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL
 disable_hw_offload
 
 [ ! -f "$FLAG_FILE" ] && { touch "$FLAG_FILE"; log "VPN mode ENABLED by default after reboot"; }
+refresh_vpn_target
 
 # ВНИМАНИЕ: clear_rules_file здесь БЫЛ и стирал список правил ДО того, как
 # cleanup_all_rules успевал их удалить (ip_rule_del_all читает этот файл).
