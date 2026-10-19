@@ -1,6 +1,6 @@
 id=vpn-to-hotspot-usb
 name=VPN Tethering Ultra
-version=v2.6.1
-versionCode=22
+version=v2.6.2
+versionCode=23
 author=Kubarev
 description=Wi-Fi Hotspot / USB Tethering via VPN + kill-switch; DoH DNS (dnsproxy) for tethering in direct mode and for the phone itself when VPN is off. Press ▶ Actions to toggle VPN on/off.
