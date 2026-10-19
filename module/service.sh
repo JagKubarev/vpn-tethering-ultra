@@ -137,6 +137,11 @@
 #     * dnsproxy упал и не поднялся -> раздача на DNAT, но раз в ~минуту
 #       попытка вернуть dnsproxy (раньше — только при пересборке правил).
 #     * На старте снимается исключение AdGuard от убитого демона.
+#   - 2.6.1: после перезапуска dnsproxy (смена маршрута VPN) первая проверка
+#     здоровья — через интервал, а не сразу: ложное "DoH недоступен".
+#   - 2.6.1: в откате перед проверкой восстановления dnsproxy перезапускается:
+#     зависшее DoH-соединение задерживало возврат на DoH на целый цикл (60с).
+#   - 2.6.1: watchdog правил VPN — каждую итерацию, а не раз в 3.
 # ============================================================================
 # ============================================================================
 # ============================================================================
@@ -1580,12 +1585,17 @@ dnsproxy_release() {
     dnsproxy_port_guard_down
 }
 
+# dnsproxy_restart <причина> [quiet]
 dnsproxy_restart() {
     local sig="$DNSPROXY_SIG"
     [ -n "$sig" ] || return 0
     DNSPROXY_SIG=""
+    # Новый маршрут (только что поднятый VPN) первые секунды может не возить
+    # трафик: проверка сразу после перезапуска ложно решала "DoH недоступен"
+    # (лог 2.6, 07:42:55 -> 07:43:03). Первая проверка — через интервал.
+    DNS_HEALTH_LAST=$(date +%s)
     if dnsproxy_start "${sig%%|*}" ${sig#*|}; then
-        log "dnsproxy перезапущен ($1)"
+        [ "$2" = "quiet" ] || log "dnsproxy перезапущен ($1)"
     else
         log "WARNING: dnsproxy не перезапустился ($1)"
     fi
@@ -1647,6 +1657,15 @@ dns_health() {
     [ "$DNS_DEGRADED" = "1" ] && period="$DNS_HEALTH_RECOVER"
     [ $((now - DNS_HEALTH_LAST)) -lt "$period" ] && return 0
     DNS_HEALTH_LAST=$now
+
+    # В откате dnsproxy никто не пользуется, а его DoH-соединение, пока
+    # апстрим резали, зависло: первая проверка после возврата comss всё равно
+    # получала "context deadline", и возврат на DoH опаздывал на целый цикл
+    # (тест на демоне: 60с вместо ≤30с). Свежий экземпляр — свежее соединение.
+    if [ "$DNS_DEGRADED" = "1" ]; then
+        dnsproxy_restart "проверка восстановления" quiet
+        dnsproxy_alive || { DNS_HEALTH_LAST=$(date +%s); return 0; }
+    fi
 
     if dnsproxy_probe_cold; then
         dns_restore
@@ -2516,7 +2535,9 @@ handle_change() {
     # apply_state ничего не делал, а клиент тем временем шёл напрямую.
     if [ "$FORCE_UPDATE" -eq 0 ] && [ "$VPN_TETHER_MODE" = "on" ]; then
         WATCHDOG_TICK=$((WATCHDOG_TICK + 1))
-        if [ $WATCHDOG_TICK -ge 3 ]; then
+        # каждую итерацию (~2с): проверка дешёвая, а окно "netd снёс и маршрут,
+        # и guard" = время до проверки (тест: снесли оба — до ~6с при -ge 3)
+        if [ $WATCHDOG_TICK -ge 1 ]; then
             WATCHDOG_TICK=0
             verify_active_rules || {
                 log "WATCHDOG: пересобираю правила VPN"
