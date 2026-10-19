@@ -1,9 +1,10 @@
 #!/system/bin/sh
 
 # ============================================================================
-# VPN Tether Action Script v1.4 (ack от демона вместо sleep 3)
-# - Ослаблена проверка cmdline (исправляет ложное "Демон не запущен")
-# - Добавлена проверка по открытым файлам (лог и статус)
+# VPN Tether Action Script v2.0
+# - Переключение VPN / напрямую с подтверждением от демона (ack, не sleep)
+# - Понятный человеку вывод: что сейчас происходит и что будет при нажатии
+# - Статус берётся из полей КЛЮЧ=значение, которые пишет service.sh
 # ============================================================================
 
 # Определяем путь модуля
@@ -20,52 +21,158 @@ REQ_FILE="$MODULE_DIR/toggle_req"
 ACK_FILE="$MODULE_DIR/toggle_ack"
 PID_FILE="/data/local/tmp/vpn_tether.pid"
 LOG_FILE="/data/local/tmp/vpn_tether.log"
+USER_CONF="/data/adb/vpn_tether.conf"
+
+LINE="━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # ----------------------------------------------------------------------------
-# Функция проверки демона
+# Проверка, что демон — наш и живой
 # ----------------------------------------------------------------------------
 is_our_daemon() {
     local pid="$1"
-    
-    # 1. Процесс вообще существует?
     kill -0 "$pid" 2>/dev/null || return 1
-    
-    # 2. Проверяем, что это shell-процесс (sh/dash/bash/magisk/ksu)
     local cmd=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' ' ')
     case "$cmd" in
-        *sh*|*magisk*|*ksu*) ;; 
+        *sh*|*magisk*|*ksu*) ;;
         *) return 1 ;;
     esac
-
-    # 3. Решающая проверка: открыт ли наш лог-файл или статус-файл?
-    if ls -l "/proc/$pid/fd" 2>/dev/null | grep -qE "$LOG_FILE|$STATUS_FILE"; then
-        return 0
-    fi
-    
-    # 4. Fallback: проверяем рабочую директорию процесса
-    local cwd=$(ls -l "/proc/$pid/cwd" 2>/dev/null | awk '{print $NF}')
-    if [ "$cwd" = "$MODULE_DIR" ]; then
-        return 0
-    fi
-    
-    # 5. Последний fallback: ищем скрипт в открытых файлах
-    if ls -l "/proc/$pid/fd" 2>/dev/null | grep -q "service.sh"; then
-        return 0
-    fi
-
+    ls -l "/proc/$pid/fd" 2>/dev/null | grep -qE "$LOG_FILE|$STATUS_FILE" && return 0
+    [ "$(ls -l "/proc/$pid/cwd" 2>/dev/null | awk '{print $NF}')" = "$MODULE_DIR" ] && return 0
+    ls -l "/proc/$pid/fd" 2>/dev/null | grep -q "service.sh" && return 0
     return 1
 }
 
+# Значение поля из status (КЛЮЧ=значение)
+st() { sed -n "s/^$1=//p" "$STATUS_FILE" 2>/dev/null | head -1; }
+
+# rndis0 wlan2 -> "Wi-Fi, USB"
+friendly_ifaces() {
+    local out="" i n
+    for i in $*; do
+        case "$i" in
+            wlan*|ap*|swlan*|softap*|hotspot*) n="Wi-Fi" ;;
+            rndis*|ncm*|usb*)                 n="USB" ;;
+            bt-pan|bnep*)                     n="Bluetooth" ;;
+            eth*)                             n="Ethernet" ;;
+            *)                                n="$i" ;;
+        esac
+        case ", $out, " in *", $n, "*) ;; *) out="${out:+$out, }$n" ;; esac
+    done
+    echo "$out"
+}
+
 # ----------------------------------------------------------------------------
-# Основная логика
+# Красивый вывод текущего состояния
+# ----------------------------------------------------------------------------
+show_status() {
+    local mode target ifaces names vpn_up dns degraded phone phone_en dp up ks mtu mss upd
+    mode=$(st mode); target=$(st target); ifaces=$(st ifaces); vpn_up=$(st vpn_up)
+    dns=$(st dns_state); degraded=$(st dns_degraded); phone=$(st phone_dns)
+    phone_en=$(st dns_phone_enabled); dp=$(st dnsproxy_enable); up=$(st dns_upstream)
+    ks=$(st kill_switch); mtu=$(st mtu); mss=$(st mss); upd=$(st updated)
+    names=$(friendly_ifaces $ifaces)
+
+    if [ -z "$mode" ]; then
+        # старый формат status (демон ещё не обновлён) — показываем как есть
+        { read -r l1; read -r l2; } < "$STATUS_FILE" 2>/dev/null
+        echo "$LINE"; echo "${l1:-❓ Статус неизвестен}"; [ -n "$l2" ] && echo "📡 $l2"; echo "$LINE"
+        return
+    fi
+
+    echo "$LINE"
+    if [ -z "$names" ]; then
+        echo "💤  РАЗДАЧА СЕЙЧАС ВЫКЛЮЧЕНА"
+        echo "    Включи точку доступа или USB-модем."
+        echo "    Режим при включении: $([ "$target" = "vpn" ] && echo "через VPN 🛡" || echo "напрямую 🌍")"
+    elif [ "$mode" = "vpn" ]; then
+        echo "🛡  РАЗДАЧА ЧЕРЕЗ VPN"
+        echo "    Устройства выходят в интернет"
+        echo "    только через VPN."
+    elif [ "$mode" = "blocked" ]; then
+        echo "⛔  VPN НЕ ПОДКЛЮЧЁН"
+        echo "    Раздача на паузе, чтобы не"
+        echo "    засветить твой настоящий IP."
+        echo ""
+        echo "👉 Включи VPN-клиент — раздача"
+        echo "   заработает сама."
+    else
+        echo "🌍  РАЗДАЧА НАПРЯМУЮ"
+        echo "    Без VPN, через оператора."
+    fi
+    echo "$LINE"
+
+    [ -n "$names" ] && echo "📡 Раздаю на:  $names"
+
+    # DNS раздачи
+    if [ -n "$names" ] && [ "$mode" != "blocked" ]; then
+        local dline=""
+        if [ "$degraded" = "1" ]; then
+            if [ "$mode" = "vpn" ]; then
+                dline="⚠️ $up не отвечает,
+              пока работает DNS VPN"
+            else
+                dline="⚠️ $up не отвечает,
+              пока работает DNS оператора"
+            fi
+        else
+            case "$dns" in
+                "dnsproxy doh")
+                    if [ "$mode" = "vpn" ]; then dline="через VPN, зашифрован 🔒"
+                    else dline="$up, зашифрован 🔒"; fi ;;
+                "dnsproxy cache") dline="DNS VPN + кэш" ;;
+                "DNAT (dnsproxy упал)") dline="⚠️ обычный (dnsproxy не запустился)" ;;
+                DNAT*)
+                    if [ "$mode" = "vpn" ]; then dline="через VPN (${dns#DNAT })"
+                    else dline="обычный (${dns#DNAT })"; fi ;;
+            esac
+        fi
+        [ -n "$dline" ] && echo "🌐 DNS:        $dline"
+    fi
+
+    # DNS самого телефона
+    if [ "$dp" = "1" ] && [ "$phone_en" = "1" ]; then
+        if [ "$vpn_up" = "1" ]; then
+            echo "📱 DNS телефона: через VPN"
+        elif [ "$phone" = "1" ] && [ "$degraded" = "1" ]; then
+            echo "📱 DNS телефона: обычный ($up не отвечает)"
+        elif [ "$phone" = "1" ]; then
+            echo "📱 DNS телефона: $up 🔒"
+        fi
+    fi
+
+    if [ "$mode" = "vpn" ] && [ "$ks" = "1" ]; then
+        echo "🧱 Kill-switch: если VPN упадёт,"
+        echo "   раздача встанет, но IP не утечёт."
+    fi
+    [ "$mode" = "vpn" ] && [ -n "$mtu" ] && [ "${mss:-0}" -gt 0 ] 2>/dev/null && \
+        echo "⚙️  MTU $mtu · MSS $mss"
+
+    echo "$LINE"
+    if [ "$target" = "vpn" ]; then
+        echo "▶ Нажми ещё раз → раздавать напрямую"
+    else
+        echo "▶ Нажми ещё раз → раздавать через VPN"
+    fi
+    [ -n "$upd" ] && echo "   (статус на $upd)"
+}
+
+# ----------------------------------------------------------------------------
+# Демон не запущен
 # ----------------------------------------------------------------------------
 PID=$(cat "$PID_FILE" 2>/dev/null)
 
 if [ -z "$PID" ] || ! is_our_daemon "$PID"; then
-    echo "━━━━━━━━━━━━━━━━━━━━"
-    echo "❌ Демон не запущен"
-    echo "━━━━━━━━━━━━━━━━━━━━"
-    
+    echo "$LINE"
+    echo "❌  МОДУЛЬ НЕ ЗАПУЩЕН"
+    echo "$LINE"
+    if [ ! -f /data/misc/net/rt_tables ]; then
+        echo "⏳ Телефон ещё загружается."
+        echo "   Подожди минуту и нажми снова."
+    else
+        echo "Попробуй перезагрузить телефон."
+        echo "Если не поможет — пришли лог:"
+        echo "   $LOG_FILE"
+    fi
     if [ -f "$LOG_FILE" ]; then
         echo ""
         echo "📋 Последние строки лога:"
@@ -73,20 +180,6 @@ if [ -z "$PID" ] || ! is_our_daemon "$PID"; then
             echo "   $line"
         done
     fi
-    
-    # Дополнительная диагностика
-    if [ ! -f /data/misc/net/rt_tables ]; then
-        echo ""
-        echo "⏳ Система ещё загружается (нет rt_tables)"
-    fi
-    
-    if [ -f "$PID_FILE" ] && [ -n "$PID" ]; then
-        echo ""
-        echo "🔍 PID $PID существует, но это не наш демон"
-        echo "   (возможно, старый PID после перезагрузки)"
-    fi
-    
-    echo ""
     exit 0
 fi
 
@@ -98,33 +191,30 @@ _ack=$(cat "$ACK_FILE" 2>/dev/null)
 if [ -n "$_req" ] && [ "$_req" != "$_ack" ]; then
     _age=$(( $(date +%s) - ${_req%%-*} ))
     if [ "$_age" -ge 0 ] 2>/dev/null && [ "$_age" -lt 20 ]; then
-        echo "⏳ Предыдущее переключение ещё применяется (${_age}с), подожди пару секунд"
+        echo "⏳ Предыдущее переключение ещё"
+        echo "   применяется (${_age} с). Подожди"
+        echo "   пару секунд и нажми снова."
         exit 0
     fi
 fi
 
 # ----------------------------------------------------------------------------
-# Переключение флага
+# Переключение
 # ----------------------------------------------------------------------------
 if [ -f "$FLAG_FILE" ]; then
     rm -f "$FLAG_FILE"
-    echo "🔄 Переключение в DIRECT режим..."
+    echo "🔄 Переключаю: VPN → напрямую"
 else
     touch "$FLAG_FILE"
-    echo "🔄 Переключение в VPN режим..."
+    echo "🔄 Переключаю: напрямую → VPN"
 fi
 
-# ----------------------------------------------------------------------------
-# Сигнал демону
-# ----------------------------------------------------------------------------
-# Раньше: sleep 3 и читаем status. Пересборка идёт 2-8с, поэтому часто
-# показывался СТАРЫЙ статус, пользователь жал ещё раз — и режим откатывался.
-# Теперь демон пишет в ACK_FILE токен запроса, когда закончил.
+# Демон пишет в ACK_FILE токен запроса, когда закончил (а не "sleep 3").
 TOKEN="$(date +%s)-$$"
 echo "$TOKEN" > "$REQ_FILE"
 kill -USR1 "$PID" 2>/dev/null
 
-echo -n "⏳ Применяем правила"
+echo -n "⏳ Применяю"
 i=0
 done_ok=0
 while [ $i -lt 40 ]; do
@@ -136,22 +226,14 @@ while [ $i -lt 40 ]; do
         break
     fi
 done
-echo ""
-[ "$done_ok" -eq 1 ] || echo "⚠️ Демон не подтвердил за 20с — статус ниже может быть устаревшим"
-
-# ----------------------------------------------------------------------------
-# Чтение статуса
-# ----------------------------------------------------------------------------
-{ read -r status_line1; read -r status_line2; } < "$STATUS_FILE" 2>/dev/null
-
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━"
-echo "${status_line1:-❓ Статус неизвестен}"
-if [ -n "$status_line2" ] && [ "$status_line2" != "no-tether" ]; then
-    echo "📱 Интерфейсы: $status_line2"
-elif [ "$status_line2" = "no-tether" ]; then
-    echo "⚠️ Нет активных интерфейсов раздачи"
+if [ "$done_ok" -eq 1 ]; then
+    echo " готово ($(( (i + 1) / 2 )) с)"
+else
+    echo ""
+    echo "⚠️ Модуль не ответил за 20 с —"
+    echo "   статус ниже может быть старым."
 fi
-echo "━━━━━━━━━━━━━━━━━━━━"
+echo ""
 
+show_status
 exit 0
