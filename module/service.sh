@@ -247,7 +247,8 @@ NET_PROFILE_ADAPTIVE=0
 ZAPRET_ENABLE=0
 ZAPRET_MODE=list        # list = встроенный + свой + автосписок, all = все HTTPS
 ZAPRET_PHONE=1          # 1 = и приложения телефона (кроме VPN-клиентов)
-ZAPRET_STRATEGY=md5sig  # md5sig | badseq | disorder | seqovl
+ZAPRET_STRATEGY=md5sig  # md5sig | badseq | disorder | seqovl | custom (ZAPRET_ARGS)
+ZAPRET_ARGS=""          # для custom: аргументы --dpi-desync*, файлы подделок только @G/@Q (подбирает сканер в WebUI)
 ZAPRET_QUIC_BLOCK=1     # закрыть QUIC раздаче, пока zapret включён: браузер сразу идёт по TCP
 # =====================================================================
 
@@ -267,7 +268,15 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
         ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_MODE)     case "$val" in list|all) ;; *) ok=0 ;; esac ;;
-        ZAPRET_STRATEGY) case "$val" in md5sig|badseq|disorder|seqovl) ;; *) ok=0 ;; esac ;;
+        ZAPRET_STRATEGY) case "$val" in md5sig|badseq|disorder|seqovl|custom) ;; *) ok=0 ;; esac ;;
+        ZAPRET_ARGS)
+            # только --dpi-desync*; @ — лишь встроенные подделки (=@G / =@Q),
+            # никаких путей: строка уходит в nfqws, запущенный от root
+            case "$val" in *[!A-Za-z0-9,.:+_@=\ -]*) ok=0 ;; esac
+            for _t in $val; do
+                case "$_t" in --dpi-desync|--dpi-desync=*|--dpi-desync-*) ;; *) ok=0 ;; esac
+                case "$_t" in *@*) case "$_t" in *=@G|*=@Q) ;; *) ok=0 ;; esac ;; esac
+            done ;;
         DNS_DIRECT) case "$val" in doh|plain) ;; *) ok=0 ;; esac ;;
         DNS_VPN)    case "$val" in dnat|cache|doh) ;; *) ok=0 ;; esac ;;
         DNS_HEALTH_INTERVAL|DNS_HEALTH_RECOVER)
@@ -306,7 +315,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_QUIC_BLOCK"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -351,6 +360,12 @@ zapret_strategy_args() {
         badseq)   echo "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=badseq --dpi-desync-fake-tls=@$g" ;;
         disorder) echo "--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld" ;;
         seqovl)   echo "--dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=@$g --dpi-desync-fake-tls=@$g" ;;
+        custom)
+            if [ -n "$ZAPRET_ARGS" ]; then
+                echo "$ZAPRET_ARGS" | sed "s#=@G#=@$g#g; s#=@Q#=@$1/quic_initial_www_google_com.bin#g"
+            else
+                echo "--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@$g"
+            fi ;;
         *)        echo "--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@$g" ;;
     esac
 }
@@ -3359,7 +3374,7 @@ monitor_loop() {
 trap 'handle_usr1' USR1
 trap 'cleanup_on_exit' TERM INT
 
-echo "=== VPN Tether v2.9 (3.10.0-hybrid.13) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.10 (3.10.0-hybrid.14) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"

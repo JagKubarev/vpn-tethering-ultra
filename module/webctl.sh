@@ -35,6 +35,7 @@ DNSPROXY_PID_FILE=/data/local/tmp/vpn_tether_dnsproxy.pid
 DNSPROXY_PORT=5354
 ZLIST_USER=/data/adb/vpn_tether_zapret.txt
 ZLIST_AUTO=/data/adb/vpn_tether_zapret_auto.txt
+ZSCAN=/data/local/tmp/vpn_tether_zscan
 BB=/data/adb/ksu/bin/busybox
 [ -x "$BB" ] || BB=/data/adb/magisk/busybox
 [ -x "$BB" ] || BB=/data/adb/ap/bin/busybox
@@ -206,6 +207,32 @@ case "$1" in
         printf '%s\n' $out > "$ZLIST_USER.tmp" && mv -f "$ZLIST_USER.tmp" "$ZLIST_USER"
         chmod 600 "$ZLIST_USER"
         echo "OK $(echo $out | wc -w)" ;;
+
+    # --- подбор стратегии (zapret/scan.sh в фоне) ----------------------------
+    zscan-start)
+        mode="$2"; case "$mode" in quick|full) ;; *) echo "ERR режим"; exit 1 ;; esac
+        sites=""
+        for d in $(printf '%s' "$3" | tr 'A-Z' 'a-z' | tr ',;' '  '); do
+            d=${d#http://}; d=${d#https://}; d=${d%%/*}
+            case "$d" in ''|*[!a-z0-9.-]*|*..*|.*|*.|-*) echo "ERR неверный адрес: $d"; exit 1 ;; *.*) ;; *) echo "ERR неверный адрес: $d"; exit 1 ;; esac
+            sites="$sites $d"
+        done
+        pid=$(cat "$ZSCAN.pid" 2>/dev/null)
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "ERR подбор уже идёт"; exit 1; fi
+        rm -f "$ZSCAN.status" "$ZSCAN.results"
+        # отдельная сессия: страница может закрыться, подбор продолжится
+        setsid sh "$MODDIR/zapret/scan.sh" "$mode" "${sites# }" </dev/null >/dev/null 2>&1 &
+        echo "OK" ;;
+    zscan-stop)
+        pid=$(cat "$ZSCAN.pid" 2>/dev/null)
+        [ -n "$pid" ] && kill "$pid" 2>/dev/null
+        echo "OK" ;;
+    zscan-status)
+        cat "$ZSCAN.status" 2>/dev/null
+        pid=$(cat "$ZSCAN.pid" 2>/dev/null)
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "alive=1"; else echo "alive=0"; fi ;;
+    zscan-results)
+        cat "$ZSCAN.results" 2>/dev/null ;;
 
     sitetest)
         # Открывается ли сайт мимо VPN: без обхода и с текущей стратегией.
