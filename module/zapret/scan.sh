@@ -65,6 +65,9 @@ st state=running stage="подготовка" msg=""
 ip -4 addr show "$WAN" 2>/dev/null | grep -q "inet " || { st state=error msg="у $WAN нет адреса — сеть только что сменилась? Повтори через полминуты"; exit 1; }
 [ -x "$NQ" ] || { st state=error msg="нет nfqws"; exit 1; }
 mkdir -p "$TMP"
+# Сеть, в которой подбираем: лучшая стратегия запоминается для неё
+NETID=$(sh "$ZDIR/netid.sh" "$WAN" 2>/dev/null | head -1)
+PERNET=$(sh "$MODDIR/service.sh" --get ZAPRET_PER_NET 2>/dev/null)
 
 # мимо AdGuard; основной zapret не трогает запросы сканера
 $IPT -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
@@ -232,5 +235,40 @@ while IFS= read -r a; do
     run_strat "$a" "проверка"
 done < "$TMP/top"
 
+# Лучшая: ничего не ломает, открыла больше заблокированных (по худшему из
+# прогонов), перепроверена, быстрее. Та же логика, что у таблицы в WebUI.
+MSG=""
+NB=$(echo $BLOCKED | wc -w)
+BEST=$(awk -F'|' -v nb="$NB" '
+    { a = $5; ok = $1 + 0; brk = $3 + 0
+      if (!(a in runs)) { mn[a] = ok; mb[a] = brk; ns[a] = $2 + 0 }
+      runs[a]++; ms[a] += $4
+      if (ok < mn[a]) mn[a] = ok
+      if (brk > mb[a]) mb[a] = brk }
+    END {
+      for (a in runs) {
+        if (mb[a] > 0) continue
+        o = mn[a] - (ns[a] - nb); if (o <= 0) continue
+        t = ms[a] / runs[a]
+        if (b == "" || o > bo || (o == bo && runs[a] > br) || (o == bo && runs[a] == br && t < bt)) { b = a; bo = o; br = runs[a]; bt = t }
+      }
+      if (b != "") print bo "|" b
+    }' "$OUT.results")
+if [ "$PERNET" = "1" ] && [ -n "$BEST" ]; then
+    if [ -z "${NETID%%"|"*}" ]; then
+        MSG="не понял, что за сеть — стратегия не запомнена, примени вручную"
+    elif [ "$(sh "$ZDIR/netid.sh" "$WAN" 2>/dev/null | head -1)" != "$NETID" ]; then
+        MSG="сеть сменилась во время подбора — не запоминаю"
+    else
+        r=$(sh "$MODDIR/webctl.sh" znet-set custom "${BEST#*"|"}" "подбор: открыла ${BEST%%"|"*} из $NB" 2>/dev/null)
+        case "$r" in
+            OK*) MSG="лучшая запомнена для сети «${NETID#*"|"}» (открыла ${BEST%%"|"*} из $NB)" ;;
+            *)   MSG="не удалось запомнить: ${r#ERR }" ;;
+        esac
+    fi
+elif [ -z "$BEST" ]; then
+    MSG="ни одна стратегия не открыла заблокированные сайты без поломок"
+fi
+
 S_state=done
-st stage="готово" msg=""
+st stage="готово" msg="$MSG"

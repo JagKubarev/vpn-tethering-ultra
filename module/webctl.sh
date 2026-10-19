@@ -18,6 +18,10 @@
 #   webctl.sh zlist-set 'д1 д2'       записать свой список (с проверкой)
 #   webctl.sh zauto-clear             очистить автосписок
 #   webctl.sh sitetest ДОМЕН          открывается ли сайт мимо VPN без/с обходом
+#   webctl.sh znet                    текущая сеть + стратегии, запомненные для сетей
+#   webctl.sh znet-set СТР 'АРГ' [ЗАМЕТКА]   запомнить стратегию для текущей сети
+#   webctl.sh znet-del КЛЮЧ           забыть стратегию сети
+#   webctl.sh metatest                какие адреса Meta отдаёт DNS "как из Европы"
 # ============================================================================
 
 MODDIR="${0%/*}"
@@ -36,6 +40,7 @@ DNSPROXY_PORT=5354
 ZLIST_USER=/data/adb/vpn_tether_zapret.txt
 ZLIST_AUTO=/data/adb/vpn_tether_zapret_auto.txt
 ZSCAN=/data/local/tmp/vpn_tether_zscan
+ZNETS=/data/adb/vpn_tether_zapret_nets
 BB=/data/adb/ksu/bin/busybox
 [ -x "$BB" ] || BB=/data/adb/magisk/busybox
 [ -x "$BB" ] || BB=/data/adb/ap/bin/busybox
@@ -44,6 +49,14 @@ daemon_pid() {
     local pid
     pid=$(cat "$PID_FILE" 2>/dev/null)
     [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo "$pid"
+}
+
+# Текущая сеть: "<ключ>|<название>" (zapret/netid.sh по WAN из status)
+cur_net() {
+    local wan
+    wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
+    [ -n "$wan" ] || return 0
+    sh "$MODDIR/zapret/netid.sh" "$wan" 2>/dev/null | head -1
 }
 
 # Токен, по которому страница ждёт подтверждения от демона
@@ -142,6 +155,9 @@ case "$1" in
         n="${2:-200}"
         case "$n" in ''|*[!0-9]*) n=200 ;; esac
         tail -n "$n" "$LOG_FILE" 2>/dev/null
+        ;;
+    log-prev)   # лог прошлого запуска демона (до ребута/перезапуска)
+        tail -n 400 "$LOG_FILE.prev" 2>/dev/null
         ;;
 
     apps)
@@ -258,7 +274,7 @@ case "$1" in
             iptables -w 2 -t mangle -D VPN_ZAPRET -m owner --uid-owner 0 -j RETURN 2>/dev/null
             iptables -w 2 -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
         }
-        trap st_cleanup EXIT INT TERM
+        trap st_cleanup EXIT INT TERM HUP
         # мимо AdGuard (его прокси подменяет сертификаты) и мимо основного zapret
         iptables -w 2 -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
         iptables -w 2 -t mangle -I VPN_ZAPRET 1 -m owner --uid-owner 0 -j RETURN 2>/dev/null
@@ -275,10 +291,62 @@ case "$1" in
         echo "ip $ip"
         echo "direct $(one)"
         iptables -w 2 -t mangle -I POSTROUTING 1 $RULE_NFQ
-        "$nq" --qnum=$Q --uid=0:0 --bind-fix4 $(sh "$MODDIR/service.sh" --zapret-strategy) >/dev/null 2>&1 &
+        nk=$(cur_net); nk=${nk%%"|"*}
+        "$nq" --qnum=$Q --uid=0:0 --bind-fix4 $(sh "$MODDIR/service.sh" --zapret-strategy "$nk") >/dev/null 2>&1 &
         nqpid=$!
         sleep 0.7
         if kill -0 "$nqpid" 2>/dev/null; then echo "zapret $(one)"; else echo "zapret 000 0 nfqws"; fi
+        ;;
+
+    # --- стратегия для каждой сети ----------------------------------------
+    znet)
+        d=$(cur_net)
+        echo "C ${d%%"|"*}|${d#*"|"}"
+        [ -f "$ZNETS" ] && grep '|' "$ZNETS" | sed 's/^/N /'
+        ;;
+    znet-set)
+        st="$2"; a="$3"
+        note=$(printf '%s' "$4" | tr -d '\r\n|' | cut -c1-120)
+        sh "$MODDIR/service.sh" --check ZAPRET_STRATEGY "$st" 2>/dev/null || { echo "ERR стратегия"; exit 1; }
+        sh "$MODDIR/service.sh" --check ZAPRET_ARGS "$a" 2>/dev/null || { echo "ERR недопустимые параметры"; exit 1; }
+        if [ "$st" = custom ]; then [ -n "$a" ] || { echo "ERR нет параметров"; exit 1; }; else a=""; fi
+        d=$(cur_net); k=${d%%"|"*}; l=${d#*"|"}
+        [ -n "$k" ] || { echo "ERR не понял, что за сеть (нет Wi-Fi/мобильной сети или модуль её ещё не видел)"; exit 1; }
+        {
+            [ -f "$ZNETS" ] && K="$k" awk -F'|' '$1 != ENVIRON["K"]' "$ZNETS"
+            printf '%s|%s|%s|%s|%s|%s\n' "$k" "$st" "$a" "$l" "$note" "$(date '+%Y-%m-%d %H:%M')"
+        } > "$ZNETS.tmp" && chmod 600 "$ZNETS.tmp" && mv -f "$ZNETS.tmp" "$ZNETS"
+        echo "OK $l"
+        ;;
+    znet-del)
+        [ -n "$2" ] || { echo "ERR ключ"; exit 1; }
+        [ -f "$ZNETS" ] || { echo "OK"; exit 0; }
+        K="$2" awk -F'|' '$1 != ENVIRON["K"]' "$ZNETS" > "$ZNETS.tmp" && chmod 600 "$ZNETS.tmp" && mv -f "$ZNETS.tmp" "$ZNETS"
+        echo "OK"
+        ;;
+
+    # --- DNS Meta "как из Европы" --------------------------------------------
+    metatest)
+        # Как спрашивает dnsproxy для Meta: DNS_META_UPSTREAMS (Google) с ECS.
+        # Через JSON API того же Google — тот же ответ, но без разбора DNS-пакетов.
+        # Сравниваем с ответом без ECS (как для России).
+        ecs=$(sh "$MODDIR/service.sh" --get DNS_META_ECS 2>/dev/null)
+        [ -n "$ecs" ] || { echo "ERR нет DNS_META_ECS"; exit 1; }
+        CA=/apex/com.android.conscrypt/cacerts
+        [ -d "$CA" ] || CA=/system/etc/security/cacerts
+        # мимо AdGuard: его прокси подменяет сертификаты (как в sitetest)
+        iptables -w 2 -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
+        trap 'iptables -w 2 -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null' EXIT INT TERM HUP
+        a1() {
+            curl -s -m 6 --capath "$CA" "https://dns.google/resolve?name=$1&type=A$2" 2>/dev/null | \
+                grep -oE '"data":"[0-9.]+"' | grep -oE '[0-9.]+' | head -1
+        }
+        echo "ecs $ecs"
+        for n in www.instagram.com scontent.cdninstagram.com www.facebook.com static.xx.fbcdn.net; do
+            eu=$(a1 "$n" "&edns_client_subnet=$ecs/24")
+            ru=$(a1 "$n" "")
+            echo "host $n ${eu:--} ${ru:--}"
+        done
         ;;
 
     *)

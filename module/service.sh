@@ -162,10 +162,30 @@
 #     Настройки в /data/adb/vpn_tether.conf — переживают обновление модуля;
 #     файл не исполняется, только известные ключи с проверкой значений.
 # ============================================================================
+# v2.12 — стратегия zapret для каждой сети + DNS Meta "как из Европы":
+#   - ZAPRET_PER_NET: сеть узнаётся по названию Wi-Fi или оператору
+#     (zapret/netid.sh), стратегия для неё — в /data/adb/vpn_tether_zapret_nets.
+#     Подбор в WebUI сам запоминает лучшую для сети, где его запустили;
+#     при смене сети nfqws перезапускается с её стратегией. Нет своей —
+#     общая ZAPRET_STRATEGY. Записи файла проверяются, как ZAPRET_ARGS.
+#   - DNS_META_EU (по умолчанию выкл.): домены Meta основной dnsproxy отдаёт
+#     второму (127.0.0.1:5355, --edns-addr=DNS_META_ECS) -> Google отвечает
+#     адресами европейских узлов. Только без VPN (direct-doh).
+#   - В ip rule попадают только настоящие имена интерфейсов (в 2.11 после
+#     ребута нашлось "iif netd|wlan2"); прошлый лог -> vpn_tether.log.prev.
 # ============================================================================
 # ============================================================================
 
 umask 022
+
+# Демон — только без аргументов. С аргументом — служебный вызов из WebUI;
+# незнакомый (новый webctl.sh при старом service.sh и т.п.) -> выход, а не
+# второй демон. 20.10 так и было: "service.sh --get" у 2.11 запускал второй
+# демон, два экземпляра сносили правила друг друга (и MTU каскадом вниз).
+case "$1" in
+    ''|--defaults|--check|--get|--zapret-strategy) ;;
+    *) echo "service.sh: неизвестный аргумент '$1'" >&2; exit 2 ;;
+esac
 
 # ==================== USER CONFIG (0=выкл, 1=вкл) ====================
 DISABLE_HW_OFFLOAD=1   # выключать аппаратный tethering offload
@@ -250,6 +270,19 @@ ZAPRET_PHONE=1          # 1 = и приложения телефона (кром
 ZAPRET_STRATEGY=fakeddisorder  # fakeddisorder | md5sig | md5sig2 | badseq | disorder | seqovl | custom (ZAPRET_ARGS)
 ZAPRET_ARGS=""          # для custom: аргументы --dpi-desync*, файлы подделок только @G/@Q (подбирает сканер в WebUI)
 ZAPRET_QUIC_BLOCK=1     # закрыть QUIC раздаче, пока zapret включён: браузер сразу идёт по TCP
+# Своя стратегия для каждой сети: Wi-Fi — по названию, мобильная — по
+# оператору (zapret/netid.sh). Запоминается подбором в WebUI (лучшая) или
+# выбором вручную, хранится в ZAPRET_NETS_FILE; при смене сети nfqws сам
+# перезапускается с её стратегией. Сети без своей — ZAPRET_STRATEGY.
+ZAPRET_PER_NET=1
+# DNS для доменов Meta (Instagram, Facebook, Threads, Messenger) "как из
+# Европы": отдельный dnsproxy на 127.0.0.1 с EDNS Client Subnet. Google
+# отдаёт адреса европейских узлов Meta, они с обходом DPI открываются без
+# VPN (замер: ECS Амстердама -> 57.144.x). Только там, где DNS и так идёт
+# через DoH без VPN: раздача напрямую (DNS_DIRECT=doh) и DNS телефона.
+DNS_META_EU=0
+DNS_META_ECS="185.15.56.0"                       # "откуда" спрашиваем (Амстердам, /24)
+DNS_META_UPSTREAMS="https://dns.google/dns-query" # должен учитывать ECS (Cloudflare — нет)
 # =====================================================================
 
 # ------------------------------------------------------------------------
@@ -261,27 +294,49 @@ ZAPRET_QUIC_BLOCK=1     # закрыть QUIC раздаче, пока zapret в
 # ------------------------------------------------------------------------
 USER_CONF="/data/adb/vpn_tether.conf"
 USER_CONF_NOTE=""
+ZAPRET_NETS_FILE="/data/adb/vpn_tether_zapret_nets"   # ключ|стратегия|аргументы|название|заметка|дата
+
+zapret_strategy_valid() {
+    case "$1" in fakeddisorder|md5sig|md5sig2|badseq|disorder|seqovl|custom) return 0 ;; esac
+    return 1
+}
+# Только --dpi-desync*; @ — лишь встроенные подделки (=@G / =@Q), никаких
+# путей: строка уходит в nfqws, запущенный от root. И для vpn_tether.conf,
+# и для стратегий сетей (файл пишут WebUI и подбор).
+zapret_args_valid() {
+    local _t
+    case "$1" in *[!A-Za-z0-9,.:+_@=\ -]*) return 1 ;; esac
+    for _t in $1; do
+        case "$_t" in --dpi-desync|--dpi-desync=*|--dpi-desync-*) ;; *) return 1 ;; esac
+        case "$_t" in *@*) case "$_t" in *=@G|*=@Q) ;; *) return 1 ;; esac ;; esac
+    done
+    return 0
+}
+_ip4_valid() {
+    local IFS=. o n=0
+    case "$1" in ''|*[!0-9.]*|*..*|.*|*.) return 1 ;; esac
+    for o in $1; do
+        n=$((n + 1))
+        [ "$o" -le 255 ] 2>/dev/null || return 1
+    done
+    [ "$n" = 4 ]
+}
+
 _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списка)
     local key="$1" val="$2" ok=1
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
-        ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK)
+        ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_PER_NET|DNS_META_EU)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_MODE)     case "$val" in list|all) ;; *) ok=0 ;; esac ;;
-        ZAPRET_STRATEGY) case "$val" in fakeddisorder|md5sig|md5sig2|badseq|disorder|seqovl|custom) ;; *) ok=0 ;; esac ;;
-        ZAPRET_ARGS)
-            # только --dpi-desync*; @ — лишь встроенные подделки (=@G / =@Q),
-            # никаких путей: строка уходит в nfqws, запущенный от root
-            case "$val" in *[!A-Za-z0-9,.:+_@=\ -]*) ok=0 ;; esac
-            for _t in $val; do
-                case "$_t" in --dpi-desync|--dpi-desync=*|--dpi-desync-*) ;; *) ok=0 ;; esac
-                case "$_t" in *@*) case "$_t" in *=@G|*=@Q) ;; *) ok=0 ;; esac ;; esac
-            done ;;
+        ZAPRET_STRATEGY) zapret_strategy_valid "$val" || ok=0 ;;
+        ZAPRET_ARGS)     zapret_args_valid "$val" || ok=0 ;;
+        DNS_META_ECS)    _ip4_valid "$val" || ok=0 ;;
         DNS_DIRECT) case "$val" in doh|plain) ;; *) ok=0 ;; esac ;;
         DNS_VPN)    case "$val" in dnat|cache|doh) ;; *) ok=0 ;; esac ;;
         DNS_HEALTH_INTERVAL|DNS_HEALTH_RECOVER)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 2 ] && [ "$val" -le 600 ] || ok=0 ;; esac ;;
-        DNS_UPSTREAMS|DNS_FALLBACKS|DNS_VPN_UPSTREAMS|DNS_BOOTSTRAP)
+        DNS_UPSTREAMS|DNS_FALLBACKS|DNS_VPN_UPSTREAMS|DNS_BOOTSTRAP|DNS_META_UPSTREAMS)
             # только адреса апстримов: буквы, цифры, : / . - _ [ ] и пробелы
             case "$val" in ''|*[!A-Za-z0-9:/._\ \[\]-]*) ok=0 ;; esac ;;
         QUIC_BLOCK_APPS)
@@ -315,7 +370,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -350,31 +405,60 @@ conf_apply_overrides() {
 }
 conf_apply_overrides
 
+# Для WebUI: итоговое значение ключа (умолчание + vpn_tether.conf)
+if [ "$1" = "--get" ]; then
+    case " $CONF_KEYS " in *" $2 "*) eval "printf '%s\n' \"\$$2\"" ;; *) exit 2 ;; esac
+    exit 0
+fi
+
 # Аргументы стратегии nfqws. $1 — папка с fake-файлами (module/zapret).
 # Стратегии проверены сканером в 10 сетях (МегаФон, Дом.ру x2, Сибирский
 # телеком x3, Сибирские сети x3): fakeddisorder — полная или почти полная
 # везде; md5sig (midsld) теряет facebook у "Сибирских сетей"; md5sig2
 # (1,midsld) там идеальна, но у "Сибирского телекома" иногда рвёт TLS.
+# $2/$3 — стратегия и ZAPRET_ARGS (по умолчанию — общие из настроек).
 zapret_strategy_args() {
-    local g="$1/tls_clienthello_www_google_com.bin"
-    case "$ZAPRET_STRATEGY" in
+    local g="$1/tls_clienthello_www_google_com.bin" st="${2-$ZAPRET_STRATEGY}" za="${3-$ZAPRET_ARGS}"
+    case "$st" in
         md5sig)   echo "--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@$g" ;;
         md5sig2)  echo "--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@$g" ;;
         badseq)   echo "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=badseq --dpi-desync-fake-tls=@$g" ;;
         disorder) echo "--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld" ;;
         seqovl)   echo "--dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=@$g --dpi-desync-fake-tls=@$g" ;;
         custom)
-            if [ -n "$ZAPRET_ARGS" ]; then
-                echo "$ZAPRET_ARGS" | sed "s#=@G#=@$g#g; s#=@Q#=@$1/quic_initial_www_google_com.bin#g"
+            if [ -n "$za" ]; then
+                echo "$za" | sed "s#=@G#=@$g#g; s#=@Q#=@$1/quic_initial_www_google_com.bin#g"
             else
                 echo "--dpi-desync=fake,fakeddisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@$g"
             fi ;;
         *)        echo "--dpi-desync=fake,fakeddisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@$g" ;;
     esac
 }
-# Для WebUI ("проверить сайт"): стратегия с учётом vpn_tether.conf
+# Стратегия, запомненная для сети $1: "стратегия|аргументы" или ничего
+# (нет записи / запись не прошла проверку — тогда общая).
+zapret_net_entry() {
+    local line st za
+    [ -n "$1" ] && [ -f "$ZAPRET_NETS_FILE" ] || return 1
+    line=$(K="$1" awk -F'|' '$1 == ENVIRON["K"] { l = $0 } END { if (l != "") print l }' "$ZAPRET_NETS_FILE" 2>/dev/null)
+    [ -n "$line" ] || return 1
+    st=$(printf '%s\n' "$line" | cut -d'|' -f2)
+    za=$(printf '%s\n' "$line" | cut -d'|' -f3)
+    zapret_strategy_valid "$st" || return 2
+    zapret_args_valid "$za" || return 2
+    [ "$st" = custom ] && [ -z "$za" ] && return 2
+    [ "$st" = custom ] || za=""
+    printf '%s|%s\n' "$st" "$za"
+}
+# Для WebUI ("проверить сайт"): стратегия с учётом vpn_tether.conf и, если
+# передан ключ сети, — запомненной для неё
 if [ "$1" = "--zapret-strategy" ]; then
-    zapret_strategy_args "${0%/*}/zapret"
+    _e=""
+    [ "$ZAPRET_PER_NET" = "1" ] && _e=$(zapret_net_entry "$2")
+    if [ -n "$_e" ]; then
+        zapret_strategy_args "${0%/*}/zapret" "${_e%%"|"*}" "${_e#*"|"}"
+    else
+        zapret_strategy_args "${0%/*}/zapret"
+    fi
     exit 0
 fi
 
@@ -400,8 +484,15 @@ is_our_daemon() {
     
     local cmd=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' ' ')
     case "$cmd" in
-        *sh*|*magisk*|*ksu*) ;; 
+        *sh*|*magisk*|*ksu*) ;;
         *) return 1 ;;
+    esac
+
+    # Наш демон — это ".../service.sh" без аргументов. Проверки ниже его не
+    # узнавали: лог открыт только на время записи, а MODULE_DIR здесь ещё не
+    # задан (cwd сравнивался с пустой строкой) — и второй экземпляр забирал lock.
+    case "$cmd" in
+        *"/vpn-to-hotspot-usb/service.sh"|*"/vpn-to-hotspot-usb/service.sh ") return 0 ;;
     esac
 
     if ls -l "/proc/$pid/fd" 2>/dev/null | grep -qE "vpn_tether.log|status"; then
@@ -555,6 +646,18 @@ ZAPRET_STATE="off"     # off | on | fail
 ZAPRET_SIG=""          # аргументы + исключения запущенного экземпляра
 ZAPRET_RETRY=0
 ZAPRET_TICK=0
+ZAPRET_NETID="$ZAPRET_DIR/netid.sh"
+NET_KEY=""             # текущая сеть (wifi:<SSID> / mobile:<MCC MNC>), пусто = не понять
+NET_LABEL=""
+NET_ID_WAN="-"         # для какого WAN считали NET_KEY ("-" = ещё не считали)
+NET_ID_TICK=0
+NET_ID_FORCE=0         # 1 = пересчитать сейчас (смена сети)
+ZAPRET_EFF_STRATEGY="" # что реально запущено: своя стратегия сети или общая
+ZAPRET_EFF_ARGS=""
+ZAPRET_NET_SRC=""      # net | default
+ZAPRET_NETS_STAMP=""   # stat файла стратегий сетей на прошлой проверке
+ZAPRET_NET_DIRTY=0     # 1 = пересобрать аргументы nfqws сейчас
+ZAPRET_NET_BAD=""      # ключ, про битую запись которого уже написали в лог
 CHAIN_DNSP="VPN_TETHER_DNSP"
 CHAIN_PHONE_DNS="VPN_PHONE_DNS"
 CHAIN_QUIC="VPN_QUIC_BLOCK"
@@ -716,6 +819,15 @@ update_status() {
         echo "quic_uids=$QUIC_UIDS"
         echo "zapret=$ZAPRET_STATE"
         echo "zapret_auto=$(grep -c '[a-z0-9]' "$ZAPRET_LIST_AUTO" 2>/dev/null || echo 0)"
+        echo "zapret_per_net=$ZAPRET_PER_NET"
+        echo "zapret_strategy=$ZAPRET_EFF_STRATEGY"
+        echo "zapret_eff_args=$ZAPRET_EFF_ARGS"
+        echo "zapret_src=$ZAPRET_NET_SRC"
+        echo "net_key=$NET_KEY"
+        echo "net_label=$NET_LABEL"
+        echo "meta_eu=$DNS_META_EU"
+        echo "meta_eu_on=$DNSPROXY_META_ON"
+        echo "meta_ecs=$DNS_META_ECS"
         echo "wan=$LAST_WAN_IFACE"
         echo "conf_note=$USER_CONF_NOTE"
         echo "updated=$(date '+%H:%M:%S')"
@@ -803,6 +915,20 @@ ip_rule_del_all() {
 
 normalize_tether_ifaces() {
     echo "$*" | tr -s '[:space:]' '\n' | sort -u | grep -v '^$' | tr '\n' ' ' | sed 's/ $//'
+}
+
+# Только настоящие имена интерфейсов. 2.11, 20.10: после ребута в файле
+# правил нашлось "iif netd|wlan2 lookup 1032" — строка discovery целиком
+# ("источник|ифейсы") попала в ip rule, и раздача осталась без своего
+# правила. Откуда — не поймали (лог до ребута затёрт); теперь мусор
+# отбрасывается с записью в лог, а прошлый лог сохраняется (.prev).
+clean_iface_list() {
+    local i out=""
+    for i in $(echo "$*" | tr '|' ' '); do
+        case "$i" in netd|heuristic|*[!A-Za-z0-9_.-]*) continue ;; esac
+        case " $out " in *" $i "*) ;; *) out="$out $i" ;; esac
+    done
+    echo "${out# }"
 }
 
 normalize_iface_name() {
@@ -991,15 +1117,20 @@ get_tether_discovery() {
 get_active_tether_ifaces() {
     local d
     d=$(get_tether_discovery)
-    echo "${d#*|}"
+    echo "${d#*"|"}"
 }
 
 # Вызывать НЕ через $(...): пишет глобальные TETHER_NOW и DISCOVERY_SRC
 refresh_tether_ifaces() {
     local d src
     d=$(get_tether_discovery)
-    src="${d%%|*}"
-    TETHER_NOW="${d#*|}"
+    src="${d%%"|"*}"
+    TETHER_NOW="${d#*"|"}"
+    case "$TETHER_NOW" in
+        *[!A-Za-z0-9_.\ -]*)
+            log "WARNING: discovery вернул странное: [$d] — оставляю только имена интерфейсов"
+            TETHER_NOW=$(clean_iface_list $TETHER_NOW) ;;
+    esac
     if [ -n "$TETHER_NOW" ] && [ "$src" != "$DISCOVERY_SRC" ]; then
         log "Tether discovery: $src [$TETHER_NOW]"
         DISCOVERY_SRC="$src"
@@ -1435,8 +1566,8 @@ cleanup_dns_redirect() {
 
 setup_dns_redirect() {
     local dns_servers=$1
-    local dns4="${dns_servers%%|*}"
-    local dns6="${dns_servers##*|}"
+    local dns4="${dns_servers%%"|"*}"
+    local dns6="${dns_servers##*"|"}"
     shift
     local tether_ifaces="$*"
     [ -z "$tether_ifaces" ] && return
@@ -1546,17 +1677,19 @@ dnsproxy_stop() {
     for pid in $(dnsproxy_pids); do kill -9 "$pid" 2>/dev/null; done
     rm -f "$DNSPROXY_PID_FILE"
     DNSPROXY_SIG=""
+    meta_eu_stop
     dnsproxy_exempt_down
 }
 
 # PID-ы процессов, чей argv[0] — наш dnsproxy (grep и обёртки su/sh не в счёт)
+# $1 — порт экземпляра (по умолчанию основной)
 dnsproxy_pids() {
-    local f
+    local f port="${1:-$DNSPROXY_PORT}"
     for f in $(grep -l "$MODULE_DIR/bin/dnsproxy" /proc/[0-9]*/cmdline 2>/dev/null); do
         # только наш экземпляр (наш порт): чужие dnsproxy с этим же бинарём
         # (тесты, второй модуль) не трогаем и не принимаем за свой pid
         case "$(tr '\0' ' ' 2>/dev/null < "$f")" in
-            "$MODULE_DIR/bin/dnsproxy"*" -p $DNSPROXY_PORT "*) f="${f#/proc/}"; echo "${f%/cmdline}" ;;
+            "$MODULE_DIR/bin/dnsproxy"*" -p $port "*) f="${f#/proc/}"; echo "${f%/cmdline}" ;;
         esac
     done
 }
@@ -1564,9 +1697,78 @@ dnsproxy_pids() {
 # Осиротевшие экземпляры от убитого демона (pid-файл мог потеряться)
 dnsproxy_kill_strays() {
     local pid
-    for pid in $(dnsproxy_pids); do
+    for pid in $(dnsproxy_pids) $(dnsproxy_pids "$META_EU_PORT"); do
         kill -9 "$pid" 2>/dev/null && log "Убит осиротевший dnsproxy $pid"
     done
+}
+
+# Запуск dnsproxy от root:DNSPROXY_GID (мимо перехвата AdGuard).
+# dnsproxy_spawn "<аргументы>" <лог>
+dnsproxy_spawn() {
+    # Статический Go не находит CA Android 14+ (лежат в APEX conscrypt) ->
+    # "x509: certificate signed by unknown authority". Только системные CA:
+    # пользовательские (cacerts-added, напр. AdGuard HTTPS-фильтр) не берём.
+    local certs="SSL_CERT_DIR=/apex/com.android.conscrypt/cacerts:/system/etc/security/cacerts"
+    if [ "$DNSPROXY_SU_G" = "1" ]; then
+        dnsproxy_exempt
+        su -g "$DNSPROXY_GID" -c "$certs exec $DNSPROXY_BIN $1 -o $2" >/dev/null 2>&1 < /dev/null &
+    else
+        env "$certs" $DNSPROXY_BIN $1 -o "$2" >/dev/null 2>&1 < /dev/null &
+    fi
+}
+
+# ----------------------------------------------------------------------------
+# DNS_META_EU: домены Meta основной dnsproxy отдаёт второму экземпляру
+# (127.0.0.1:META_EU_PORT), а тот спрашивает Google с EDNS Client Subnet
+# DNS_META_ECS — ответы "как для Европы". Второй живёт и умирает вместе с
+# основным (dnsproxy_start/stop). Упал — основной для этих доменов уходит на
+# фолбэки: Meta резолвится как обычно, без чёрной дыры.
+# Список апстримов — файлом: в аргументах "[/домены/]адрес" — скобки, а
+# строка аргументов разбивается шеллом (и ещё раз в su -c).
+# ----------------------------------------------------------------------------
+META_EU_PORT=5355
+META_EU_LOG="/data/local/tmp/vpn_tether_dnsproxy_meta.log"
+META_EU_UPS_FILE="/data/local/tmp/vpn_tether_meta_upstreams"
+META_DOMAINS="instagram.com cdninstagram.com instagr.am ig.me facebook.com fbcdn.net fbsbx.com facebook.net fb.com fb.me messenger.com threads.net threads.com meta.com"
+DNSPROXY_META_ON=0
+
+meta_eu_stop() {
+    local pid
+    for pid in $(dnsproxy_pids "$META_EU_PORT"); do kill -9 "$pid" 2>/dev/null; done
+    DNSPROXY_META_ON=0
+}
+
+meta_eu_start() {
+    local args u i
+    meta_eu_stop
+    args="-l 127.0.0.1 -p $META_EU_PORT --edns --edns-addr=$DNS_META_ECS --timeout=3s --refuse-any"
+    for u in $DNS_META_UPSTREAMS; do args="$args -u $u"; done
+    for u in $DNS_FALLBACKS; do args="$args -f $u"; done
+    for u in $DNS_BOOTSTRAP; do args="$args -b $u"; done
+    : > "$META_EU_LOG"
+    dnsproxy_spawn "$args" "$META_EU_LOG"
+    i=0
+    while [ $i -lt 25 ]; do
+        sleep 0.2
+        if [ -n "$(dnsproxy_pids "$META_EU_PORT")" ] && \
+           ss -lun 2>/dev/null | grep -qE "[:.]$META_EU_PORT[[:space:]]"; then
+            DNSPROXY_META_ON=1
+            return 0
+        fi
+        i=$((i + 1))
+    done
+    log "WARNING: dnsproxy для Meta (ECS) не поднялся: $(tail -n 2 "$META_EU_LOG" 2>/dev/null | tr '\n' ' ' | cut -c1-160) — Meta резолвится как обычно"
+    meta_eu_stop
+    return 1
+}
+
+# Из цикла, раз в ~30с: второй экземпляр умер при живом основном
+meta_eu_watchdog() {
+    [ "$DNSPROXY_META_ON" = "1" ] || return 0
+    dnsproxy_alive || return 0
+    [ -n "$(dnsproxy_pids "$META_EU_PORT")" ] && return 0
+    log "WATCHDOG: dnsproxy для Meta (ECS) умер, перезапускаю"
+    meta_eu_start && log "dnsproxy для Meta (ECS) снова поднят"
 }
 
 # Исключение dnsproxy из перехвата AdGuard: RETURN по GID первым в nat OUTPUT.
@@ -1695,10 +1897,6 @@ dnsproxy_start() {
     for u in $DNS_BOOTSTRAP; do args="$args -b $u"; done
 
     : > "$DNSPROXY_LOG"
-    # Статический Go не находит CA Android 14+ (лежат в APEX conscrypt) ->
-    # "x509: certificate signed by unknown authority". Только системные CA:
-    # пользовательские (cacerts-added, напр. AdGuard HTTPS-фильтр) не берём.
-    local certs="SSL_CERT_DIR=/apex/com.android.conscrypt/cacerts:/system/etc/security/cacerts"
 
     if [ -z "$DNSPROXY_SU_G" ]; then
         DNSPROXY_SU_G=0
@@ -1707,12 +1905,19 @@ dnsproxy_start() {
             log "WARNING: su -g не работает — dnsproxy без своего GID, HTTPS-фильтр AdGuard сломает DoH"
     fi
 
-    if [ "$DNSPROXY_SU_G" = "1" ]; then
-        dnsproxy_exempt
-        su -g "$DNSPROXY_GID" -c "$certs exec $DNSPROXY_BIN $args -o $DNSPROXY_LOG" >/dev/null 2>&1 < /dev/null &
-    else
-        env "$certs" $DNSPROXY_BIN $args -o "$DNSPROXY_LOG" >/dev/null 2>&1 < /dev/null &
+    # Meta "как из Европы" — только у экземпляра без VPN (direct-doh: раздача
+    # напрямую и DNS телефона). Через VPN Meta и так открывается, а ECS
+    # Амстердама с выходом VPN в другой стране только запутал бы CDN.
+    local meta=""
+    if [ "$DNS_META_EU" = "1" ] && [ "$tag" = "direct-doh" ]; then
+        if meta_eu_start; then
+            printf '[/%s/]127.0.0.1:%s\n' "$(echo $META_DOMAINS | tr ' ' '/')" "$META_EU_PORT" > "$META_EU_UPS_FILE"
+            args="$args -u $META_EU_UPS_FILE"
+            meta=" + Meta через ECS $DNS_META_ECS"
+        fi
     fi
+
+    dnsproxy_spawn "$args" "$DNSPROXY_LOG"
 
     # $! тут — su/env, а не сам dnsproxy: ищем по argv[0]
     i=0
@@ -1723,7 +1928,7 @@ dnsproxy_start() {
         if [ -n "$u" ] && ss -lun 2>/dev/null | grep -qE "[:.]$DNSPROXY_PORT[[:space:]]"; then
             DNSPROXY_SIG="$sig"
             DNSPROXY_STARTED_ROUTE="$route_now"
-            log "dnsproxy запущен (pid $u, gid ${DNSPROXY_GID:-0}, $tag): $ups"
+            log "dnsproxy запущен (pid $u, gid ${DNSPROXY_GID:-0}, $tag): $ups$meta"
             return 0
         fi
         i=$((i + 1))
@@ -1784,7 +1989,7 @@ apply_dns_mode() {
         DNS_STATE=""
         return 0
     fi
-    dns4="${servers%%|*}"
+    dns4="${servers%%"|"*}"
 
     if [ "$mode" = "direct" ]; then
         [ "$DNS_DIRECT" = "doh" ] && { want="doh"; ups="$DNS_UPSTREAMS"; }
@@ -1862,7 +2067,7 @@ dns_watchdog() {
             [ "$DNS_FAIL_RETRY" -ge 30 ] || return 0
             DNS_FAIL_RETRY=0
             [ -n "$DNS_FAIL_SIG" ] || return 0
-            if dnsproxy_start "${DNS_FAIL_SIG%%|*}" ${DNS_FAIL_SIG#*|}; then
+            if dnsproxy_start "${DNS_FAIL_SIG%%"|"*}" ${DNS_FAIL_SIG#*"|"}; then
                 dnsproxy_port_guard $DNS_STATE_IFACES
                 dns_redirect_to_proxy $DNS_STATE_IFACES
                 DNS_STATE="dnsproxy $DNS_FAIL_WANT"
@@ -1879,7 +2084,7 @@ dns_watchdog() {
     log "WATCHDOG: dnsproxy умер, перезапускаю"
     saved_sig="$DNSPROXY_SIG"
     DNSPROXY_SIG=""
-    dnsproxy_start "${saved_sig%%|*}" ${saved_sig#*|} && return 0
+    dnsproxy_start "${saved_sig%%"|"*}" ${saved_sig#*"|"} && return 0
 
     log "WATCHDOG: dnsproxy не поднялся, DNS клиентов -> DNAT (повтор раз в ~минуту)"
     if [ "$DNS_STATE_MODE" = "direct" ]; then
@@ -1914,7 +2119,7 @@ dnsproxy_restart() {
     # трафик: проверка сразу после перезапуска ложно решала "DoH недоступен"
     # (лог 2.6, 07:42:55 -> 07:43:03). Первая проверка — через интервал.
     DNS_HEALTH_LAST=$(date +%s)
-    if dnsproxy_start "${sig%%|*}" ${sig#*|}; then
+    if dnsproxy_start "${sig%%"|"*}" ${sig#*"|"}; then
         [ "$2" = "quiet" ] || log "dnsproxy перезапущен ($1)"
     else
         log "WARNING: dnsproxy не перезапустился ($1)"
@@ -2221,7 +2426,59 @@ zapret_args() {
         grep -q '[a-z0-9]' "$ZAPRET_LIST_USER" 2>/dev/null && a="$a --hostlist=$ZAPRET_LIST_USER"
         a="$a --hostlist-auto=$ZAPRET_LIST_AUTO"
     fi
-    echo "$a $(zapret_strategy_args "$ZAPRET_DIR")"
+    echo "$a $(zapret_strategy_args "$ZAPRET_DIR" "$ZAPRET_EFF_STRATEGY" "$ZAPRET_EFF_ARGS")"
+}
+
+# Какая стратегия для текущей сети: запомненная для неё или общая
+zapret_pick_strategy() {
+    local e rc
+    ZAPRET_EFF_STRATEGY="$ZAPRET_STRATEGY"
+    ZAPRET_EFF_ARGS="$ZAPRET_ARGS"
+    ZAPRET_NET_SRC="default"
+    [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] || return 0
+    e=$(zapret_net_entry "$NET_KEY"); rc=$?
+    if [ "$rc" = 2 ]; then
+        [ "$ZAPRET_NET_BAD" = "$NET_KEY" ] || log "WARNING: zapret: запись для сети «$NET_LABEL» в $ZAPRET_NETS_FILE не прошла проверку — общая стратегия"
+        ZAPRET_NET_BAD="$NET_KEY"
+        return 0
+    fi
+    [ -n "$e" ] || return 0
+    ZAPRET_EFF_STRATEGY="${e%%"|"*}"
+    ZAPRET_EFF_ARGS="${e#*"|"}"
+    ZAPRET_NET_SRC="net"
+}
+
+# Узнать сеть (zapret/netid.sh): при смене WAN / по сигналу смены сети, а на
+# Wi-Fi ещё и раз в ~30с — другая точка доступа может дать тот же wlan0 и
+# даже тот же адрес со шлюзом. Мобильную сеть периодически не опрашиваем:
+# content query дорогой, а смена SIM для данных и так меняет WAN.
+net_identity_reconcile() {
+    local d k l
+    if [ "$ZAPRET_PER_NET" != "1" ]; then
+        [ -n "$NET_KEY" ] && ZAPRET_NET_DIRTY=1
+        NET_KEY=""; NET_LABEL=""; NET_ID_WAN="-"
+        return 0
+    fi
+    NET_ID_TICK=$((NET_ID_TICK + 1))
+    if [ "$NET_ID_FORCE" != "1" ] && [ "$LAST_WAN_IFACE" = "$NET_ID_WAN" ]; then
+        case "$LAST_WAN_IFACE" in
+            wlan*|swlan*) [ "$NET_ID_TICK" -ge 15 ] || return 0 ;;
+            *) return 0 ;;
+        esac
+    fi
+    NET_ID_TICK=0
+    NET_ID_FORCE=0
+    NET_ID_WAN="$LAST_WAN_IFACE"
+    d=""
+    [ -n "$LAST_WAN_IFACE" ] && d=$(sh "$ZAPRET_NETID" "$LAST_WAN_IFACE" 2>/dev/null | head -1)
+    k="${d%%"|"*}"; l="${d#*"|"}"
+    [ -n "$k" ] || l=""
+    [ "$k" = "$NET_KEY" ] && return 0
+    NET_KEY="$k"
+    NET_LABEL="$l"
+    log "Сеть: ${NET_LABEL:-не определена}${NET_KEY:+ ($NET_KEY)}"
+    ZAPRET_NET_DIRTY=1
+    phone_status_refresh
 }
 
 zapret_start() {
@@ -2235,7 +2492,11 @@ zapret_start() {
     sleep 0.5
     if kill -0 "$pid" 2>/dev/null; then
         echo "$pid" > "$ZAPRET_PID_FILE"
-        log "zapret: nfqws запущен (pid $pid, стратегия $ZAPRET_STRATEGY, режим $ZAPRET_MODE)"
+        if [ "$ZAPRET_NET_SRC" = "net" ]; then
+            log "zapret: nfqws запущен (pid $pid, стратегия сети «$NET_LABEL»: $ZAPRET_EFF_STRATEGY${ZAPRET_EFF_ARGS:+ [$ZAPRET_EFF_ARGS]}, режим $ZAPRET_MODE)"
+        else
+            log "zapret: nfqws запущен (pid $pid, стратегия $ZAPRET_EFF_STRATEGY — общая${NET_LABEL:+, для «$NET_LABEL» своей нет}, режим $ZAPRET_MODE)"
+        fi
         return 0
     fi
     log "WARNING: zapret: nfqws не запустился: $(tail -n 2 "$ZAPRET_LOG" 2>/dev/null | tr '\n' ' ' | cut -c1-200)"
@@ -2324,6 +2585,7 @@ zapret_down() {
     ZAPRET_EXCL_RUN=""
     ZAPRET_RETRY=0
     ZAPRET_TICK=0
+    ZAPRET_NETS_STAMP=""
     phone_status_refresh
 }
 
@@ -2340,15 +2602,25 @@ zapret_reconcile() {
     fi
     args="$ZAPRET_ARGS_RUN"
     excl="$ZAPRET_EXCL_RUN"
+    net_identity_reconcile
+    # файл стратегий сетей поменяли (WebUI, подбор) — подхватываем сразу
+    local stamp=""
+    [ "$ZAPRET_PER_NET" = "1" ] && stamp=$(stat -c '%Y %s %i' "$ZAPRET_NETS_FILE" 2>/dev/null)
+    [ "$stamp" != "$ZAPRET_NETS_STAMP" ] && ZAPRET_NET_DIRTY=1
     ZAPRET_TICK=$((ZAPRET_TICK + 1))
-    if [ "$ZAPRET_TICK" -ge 15 ] || [ "$ZAPRET_STATE" != "on" ]; then
+    if [ "$ZAPRET_TICK" -ge 15 ] || [ "$ZAPRET_STATE" != "on" ] || [ "$ZAPRET_NET_DIRTY" = "1" ]; then
         ZAPRET_TICK=0
+        ZAPRET_NET_DIRTY=0
+        ZAPRET_NETS_STAMP="$stamp"
         vpn_up_now && zapret_learn_vpn_owner
+        zapret_pick_strategy
         args=$(zapret_args)
         excl=$(zapret_vpn_uids)
+        [ "$ZAPRET_STATE" = "on" ] && [ "$args" != "$ZAPRET_ARGS_RUN" ] && \
+            log "zapret: аргументы nfqws сменились (сеть «${NET_LABEL:-не определена}», стратегия $ZAPRET_EFF_STRATEGY — $([ "$ZAPRET_NET_SRC" = net ] && echo своя || echo общая)) — перезапускаю"
     fi
 
-    # nfqws: не запущен / умер / сменились аргументы (свой список появился)
+    # nfqws: не запущен / умер / сменились аргументы (свой список, другая сеть)
     if [ "$args" != "$ZAPRET_ARGS_RUN" ] || ! zapret_alive; then
         [ "$ZAPRET_STATE" = "on" ] && [ "$args" = "$ZAPRET_ARGS_RUN" ] && \
             log "WARNING: zapret: nfqws умер, перезапускаю"
@@ -2362,7 +2634,9 @@ zapret_reconcile() {
             return 0
         fi
         ZAPRET_ARGS_RUN="$args"
-        ZAPRET_STATE="starting"
+        # Был включён (смена стратегии, nfqws умер) — правила на месте, их
+        # не трогаем: пока nfqws перезапускался, --queue-bypass пропускал пакеты
+        if [ "$ZAPRET_STATE" = "on" ]; then phone_status_refresh; else ZAPRET_STATE="starting"; fi
     fi
 
     # правила: впервые / сменились исключения / хук снесли (netd пересобрал цепочки)
@@ -2970,6 +3244,12 @@ apply_state() {
     fi
 
     tether_ifaces=$(normalize_tether_ifaces $tether_ifaces)
+    local _clean
+    _clean=$(clean_iface_list $tether_ifaces)
+    if [ "$_clean" != "$tether_ifaces" ]; then
+        log "WARNING: странные имена раздачи [$tether_ifaces] -> [$_clean] (discovery: $DISCOVERY_SRC, last: [$LAST_TETHER_IFACES])"
+        tether_ifaces="$_clean"
+    fi
     LAST_TETHER_IFACES_STABLE="${LAST_TETHER_IFACES_STABLE:-$tether_ifaces}"
     
     local sorted_current=$(echo "$tether_ifaces" | tr -s '[:space:]' '\n' | sort | tr '\n' ' ' | sed 's/ $//')
@@ -3208,6 +3488,8 @@ handle_change() {
     # В VPN-режиме смена сети обходится без пересборки -> update_status не
     # звался, и в status оставался старый wan= (WebUI-проверки шли через
     # интерфейс без адреса). Обновляем статус на любой смене сети.
+    # Другая сеть -> zapret_reconcile пересчитает её имя и стратегию
+    $net_diff && NET_ID_FORCE=1
     $net_diff && phone_status_refresh
 
     local tun_idx=$(read_table_index "$TUN_NAME")
@@ -3292,7 +3574,7 @@ reload_config() {
     DNSPROXY_BIN="$DNSPROXY_BIN_FOUND"
     [ "$DNSPROXY_ENABLE" = "1" ] || DNSPROXY_BIN=""
     log "Настройки перечитаны:${USER_CONF_NOTE:- (всё по умолчанию)}"
-    log "Config: DNSPROXY=$DNSPROXY_ENABLE KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE UPSTREAMS=[$DNS_UPSTREAMS] QUIC_BLOCK=[$QUIC_BLOCK_APPS] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/phone=$ZAPRET_PHONE/quic=$ZAPRET_QUIC_BLOCK HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s"
+    log "Config: DNSPROXY=$DNSPROXY_ENABLE KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE UPSTREAMS=[$DNS_UPSTREAMS] QUIC_BLOCK=[$QUIC_BLOCK_APPS] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/phone=$ZAPRET_PHONE/quic=$ZAPRET_QUIC_BLOCK/per_net=$ZAPRET_PER_NET META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s"
 
     # DNS: всё с нуля — пересборка поставит заново под новые настройки
     if [ "$PHONE_DNS_ON" = "1" ]; then phone_dns_rules_off; fi
@@ -3319,6 +3601,8 @@ reload_config() {
 
     # zapret: снять всё, цикл поднимет заново под новые настройки (~2с)
     zapret_down
+    NET_ID_FORCE=1
+    ZAPRET_NET_BAD=""
 
     [ "$STATUS_IN_DESCRIPTION" = "1" ] || set_description "$MODULE_DESC_DEFAULT"
 }
@@ -3369,6 +3653,7 @@ monitor_loop() {
         phone_dns_reconcile
         dns_health
         [ $((_loop_count % 15)) -eq 0 ] && quic_block_apply
+        [ $((_loop_count % 15)) -eq 7 ] && meta_eu_watchdog
         zapret_reconcile
         _loop_count=$(( _loop_count + 1 ))
     done
@@ -3381,11 +3666,14 @@ monitor_loop() {
 trap 'handle_usr1' USR1
 trap 'cleanup_on_exit' TERM INT
 
-echo "=== VPN Tether v2.11 (3.10.0-hybrid.15) Started $(date) ===" > "$LOG_FILE"
+# Прошлый лог не затираем: после ребута он — единственный след того, что
+# случилось (20.10 так потеряли "iif netd|wlan2")
+[ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
+echo "=== VPN Tether v2.12 (3.10.0-hybrid.16) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
-log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
+log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/per_net=$ZAPRET_PER_NET META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
 
 disable_hw_offload
 
