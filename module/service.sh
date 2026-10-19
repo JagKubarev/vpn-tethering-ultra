@@ -230,6 +230,12 @@ DNS_HEALTH_IDLE_BYTES=20000
 # Ловим только "dnsproxy ушёл в таймаут (3с) и ждёт фолбэк" -> порог 3000.
 DNS_PROBE_SLOW_MS=3000
 DNS_PROBE_TIMEOUT=4    # сек: столько ждём ответ вообще
+# Закрыть QUIC (HTTP/3 = UDP 443) приложениям телефона (имена пакетов через
+# пробел, пусто = выкл). ТСПУ режет/душит QUIC: приложение (Cronet) сначала
+# ждёт ответа по UDP и только потом уходит на TCP — часть картинок не
+# успевает загрузиться. REJECT, а не DROP: приложение сразу видит закрытый
+# порт и идёт по обычному HTTPS без ожидания.
+QUIC_BLOCK_APPS="com.avito.android"
 # =====================================================================
 
 # ------------------------------------------------------------------------
@@ -253,6 +259,9 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
         DNS_UPSTREAMS|DNS_FALLBACKS|DNS_VPN_UPSTREAMS|DNS_BOOTSTRAP)
             # только адреса апстримов: буквы, цифры, : / . - _ [ ] и пробелы
             case "$val" in ''|*[!A-Za-z0-9:/._\ \[\]-]*) ok=0 ;; esac ;;
+        QUIC_BLOCK_APPS)
+            # имена пакетов; пусто — допустимо (выключить)
+            case "$val" in *[!A-Za-z0-9._\ ]*) ok=0 ;; esac ;;
         *) ok=0 ;;
     esac
     if [ "$ok" = "1" ]; then
@@ -274,7 +283,8 @@ load_user_conf() {
         val="${val#\"}"; val="${val%\"}"; val="${val#\'}"; val="${val%\'}"
         case "$key" in
             DNSPROXY_ENABLE|DNS_DIRECT|DNS_VPN|DNS_PHONE|DNS_UPSTREAMS|DNS_FALLBACKS|DNS_VPN_UPSTREAMS|DNS_BOOTSTRAP|\
-            DNS_HEALTH_INTERVAL|DNS_HEALTH_RECOVER|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION)
+            DNS_HEALTH_INTERVAL|DNS_HEALTH_RECOVER|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
+            QUIC_BLOCK_APPS)
                 _conf_set "$key" "$val" ;;
             '') ;;
             *) USER_CONF_NOTE="$USER_CONF_NOTE ?$key(неизвестный ключ)" ;;
@@ -439,6 +449,7 @@ DNSPROXY_PID_FILE="/data/local/tmp/vpn_tether_dnsproxy.pid"
 DNSPROXY_LOG="/data/local/tmp/vpn_tether_dnsproxy.log"
 CHAIN_DNSP="VPN_TETHER_DNSP"
 CHAIN_PHONE_DNS="VPN_PHONE_DNS"
+CHAIN_QUIC="VPN_QUIC_BLOCK"
 PHONE_DNS_ON=0         # 1 = DNS телефона сейчас перенаправлен в dnsproxy
 PHONE_DNS_RETRY=0      # пропустить N итераций после неудачного старта
 PHONE_VPN_SEEN=""      # сглаживание: последнее наблюдение "VPN поднят?"
@@ -1978,6 +1989,62 @@ phone_dns_rules_off() {
     done
 }
 
+# ============================================================================
+# QUIC_BLOCK_APPS: UDP 443 этих приложений -> REJECT (filter OUTPUT, v4+v6).
+# Не зависит от режима и VPN: через VPN приложение просто идёт по TCP.
+# uid берём по владельцу /data/data/<пакет>; переустановка меняет uid —
+# поэтому из цикла раз в ~30с, пересборка только при изменении.
+# ============================================================================
+QUIC_UIDS=""
+QUIC_LOGGED=0
+quic_block_uids() {
+    local p u out=""
+    for p in $QUIC_BLOCK_APPS; do
+        u=$(stat -c %u "/data/data/$p" 2>/dev/null)
+        case "$u" in ''|*[!0-9]*) continue ;; esac
+        [ "$u" -ge 10000 ] && out="$out $u"
+    done
+    echo "${out# }"
+}
+
+quic_block_apply() {
+    local uids t u rj
+    [ -n "$QUIC_BLOCK_APPS" ] || return 0
+    uids=$(quic_block_uids)
+    if [ "$uids" = "$QUIC_UIDS" ] && [ "$QUIC_LOGGED" = "1" ] && \
+       $iptables -C OUTPUT -j "$CHAIN_QUIC" 2>/dev/null; then
+        return 0
+    fi
+    for t in "$iptables" "$ip6tables"; do
+        rj="icmp-port-unreachable"
+        [ "$t" = "$ip6tables" ] && rj="icmp6-port-unreachable"
+        $t -N "$CHAIN_QUIC" 2>/dev/null
+        $t -F "$CHAIN_QUIC" 2>/dev/null
+        for u in $uids; do
+            $t -A "$CHAIN_QUIC" -p udp --dport 443 -m owner --uid-owner "$u" \
+                -j REJECT --reject-with "$rj" 2>/dev/null
+        done
+        $t -C OUTPUT -j "$CHAIN_QUIC" 2>/dev/null || $t -I OUTPUT 1 -j "$CHAIN_QUIC" 2>/dev/null
+    done
+    if [ "$uids" != "$QUIC_UIDS" ] || [ "$QUIC_LOGGED" != "1" ]; then
+        log "QUIC (UDP 443) закрыт для: $QUIC_BLOCK_APPS (uid: ${uids:-не установлены})"
+    fi
+    QUIC_UIDS="$uids"
+    QUIC_LOGGED=1
+}
+
+quic_block_down() {
+    local t _n
+    for t in "$iptables" "$ip6tables"; do
+        _n=0
+        while [ $_n -lt 8 ] && $t -D OUTPUT -j "$CHAIN_QUIC" 2>/dev/null; do _n=$((_n + 1)); done
+        $t -F "$CHAIN_QUIC" 2>/dev/null
+        $t -X "$CHAIN_QUIC" 2>/dev/null
+    done
+    QUIC_UIDS=""
+    QUIC_LOGGED=0
+}
+
 phone_status_refresh() {
     [ -n "$LAST_STATUS_MODE" ] && update_status "$LAST_STATUS_MODE" "$LAST_STATUS_IFACES" "$CURRENT_NET_PROFILE"
 }
@@ -2879,6 +2946,7 @@ cleanup_on_exit() {
     cleanup_all_rules
     phone_dns_rules_off
     PHONE_DNS_ON=0
+    quic_block_down
     dnsproxy_stop
     dnsproxy_port_guard_down
     guard_down
@@ -2909,6 +2977,7 @@ monitor_loop() {
         # отдельно от handle_change: тот рано выходит, когда хотспот выключен
         phone_dns_reconcile
         dns_health
+        [ $((_loop_count % 15)) -eq 0 ] && quic_block_apply
         _loop_count=$(( _loop_count + 1 ))
     done
 }
@@ -2920,11 +2989,11 @@ monitor_loop() {
 trap 'handle_usr1' USR1
 trap 'cleanup_on_exit' TERM INT
 
-echo "=== VPN Tether v2.7.1 (3.10.0-hybrid.10) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.7.2 (3.10.0-hybrid.11) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
-log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
+log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}] HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
 
 disable_hw_offload
 
@@ -2965,6 +3034,8 @@ DNS_ROUTE_CHANGED_TS=$(date +%s)
 
 cleanup_all_rules
 clear_rules_file
+quic_block_down            # хвосты от убитого демона
+quic_block_apply
 sleep 2
 
 tun_idx=$(read_table_index "$TUN_NAME")
