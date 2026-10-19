@@ -106,6 +106,39 @@
 #   - 3.9.8.1: dnsproxy перезапускается при каждой смене VPN up/down: старое
 #     keep-alive DoH-соединение на прежнем маршруте давало ~16с SERVFAIL.
 # ============================================================================
+# v3.9.9-hybrid.8 — что, если comss недоступен (белые списки, блокировка):
+#   - Замер: при "молчащем" comss dnsproxy ждал его ~15с и до фолбэков
+#     (Google/Cloudflare) не доходил (context deadline) — клиенты без DNS,
+#     а модуль видел только "процесс жив".
+#   - dns_health: каждые 10с запрос через dnsproxy со случайным именем (кэш
+#     не маскирует). 2 подряд без ответа -> DNS обычный: телефон — родной
+#     DNS Android, раздача direct — DNS раздачи (оператор), VPN — DNS VPN.
+#     dnsproxy живёт дальше, раз в 30с проверка, ответил -> обратно на DoH.
+#   - --timeout 3с вместо 5с; проверка при настройке больше не гасит dnsproxy.
+#   - Медленный ответ (> DNS_PROBE_SLOW_MS) = отказ: при живом фолбэке
+#     dnsproxy отвечал за ~9с, проверка считала это успехом.
+#   - Новые "exchange failed" в логе dnsproxy -> проверка сразу, без интервала.
+#   - dnsproxy_pids — только экземпляр с нашим портом.
+#   - Проверка меряет время до прихода ответа (nc в фоне + /proc/uptime),
+#     а не до выхода nc: тот сам добавлял ровно 2с. Порог 2000мс — честный.
+#   - Профили: STABLE больше не меняет BBR на cubic (замер: при 1-3% потерь
+#     cubic в 3-20 раз медленнее на отдаче). Адаптация по RTT по умолчанию
+#     выключена (NET_PROFILE_ADAPTIVE=0): не пингуем 1.1.1.1 мимо VPN.
+#     Если включить — потеря пакета теперь считается плохой связью.
+#   - Ревью перед установкой:
+#     * trap USR1/TERM ставится в начале старта: Action в первые ~минуту
+#       после загрузки убивал демон (у USR1 действие по умолчанию — kill),
+#       без cleanup — правила и dnsproxy оставались висеть.
+#     * TCP-профиль (BBR) применяется на старте: раньше сравнение с
+#       CURRENT_NET_PROFILE="FAST" пропускало его до первого тоггла.
+#     * Ротация лога dnsproxy — и когда dnsproxy нужен только телефону.
+#     * DNS_VPN=dnat больше не затирает сигнатуру dnsproxy телефона
+#       (из-за этого не срабатывал перезапуск при смене маршрута VPN).
+#     * dnsproxy упал и не поднялся -> раздача на DNAT, но раз в ~минуту
+#       попытка вернуть dnsproxy (раньше — только при пересборке правил).
+#     * На старте снимается исключение AdGuard от убитого демона.
+# ============================================================================
+# ============================================================================
 # ============================================================================
 
 umask 022
@@ -152,11 +185,24 @@ DNSPROXY_GID=3999
 # трогаем, DNS идёт как настроено в VPN-клиенте. Только IPv4, если в ядре
 # нет ip6 nat. Не включать вместе с DNS-защитой AdGuard (будут драться).
 DNS_PHONE=1
+# Проверка DoH-апстрима (сек). Нет ответа 2 раза подряд -> DNS временно
+# обычный (оператор/VPN), в этом режиме проверка раз в DNS_HEALTH_RECOVER.
+DNS_HEALTH_INTERVAL=10
+DNS_HEALTH_RECOVER=30
+# Ответ на проверочный запрос дольше этого (мс) = апстрим непригоден.
+# Замер (netem): норма ~200мс, RTT+300 -> 520, +1000 -> 1200, +2000 -> 2200.
+# Просто медленная связь — не повод: DNS оператора идёт по тому же каналу.
+# Ловим только "dnsproxy ушёл в таймаут (3с) и ждёт фолбэк" -> порог 3000.
+DNS_PROBE_SLOW_MS=3000
+DNS_PROBE_TIMEOUT=4    # сек: столько ждём ответ вообще
 # =====================================================================
 
 FORCE_PUBLIC_DNS=0
 
-# Адаптивные профили сети
+# Адаптивные профили сети. 0 = всегда FAST (BBR), без пингов по WAN.
+# 1 = пинг 1.1.1.1 через WAN раз в ~20с, RTT > порога (или потеря) 2 раза
+#     подряд -> STABLE (те же BBR, больше SYN-ретраев).
+NET_PROFILE_ADAPTIVE=0
 RTT_THRESHOLD_STABLE=250
 
 TIMEOUT_CMD="timeout 3"
@@ -303,6 +349,9 @@ PHONE_DNS_RETRY=0      # пропустить N итераций после не
 PHONE_VPN_SEEN=""      # сглаживание: последнее наблюдение "VPN поднят?"
 PHONE_VPN_STABLE=""    # подтверждённое двумя итерациями подряд
 PHONE_DNS_V6=0
+DNS_DEGRADED=0         # 1 = DoH-апстрим не отвечает, DNS временно обычный
+DNS_HEALTH_LAST=0
+DNS_LOG_SEEN=0         # размер лога dnsproxy на прошлой проверке
 LAST_STATUS_MODE=""
 LAST_STATUS_IFACES=""
 DNSPROXY_SIG=""        # "<режим>|<апстримы>" запущенного экземпляра
@@ -331,6 +380,7 @@ TETHER_STABLE_TIME=0
 
 # Состояние качества сети
 CURRENT_NET_PROFILE="FAST"
+NET_PROFILE_APPLIED=""     # что реально записано в sysctl (пусто = ещё ничего)
 QUALITY_CHECK_COUNTER=0
 STABLE_COUNT=0
 FAST_COUNT=0
@@ -416,7 +466,11 @@ update_status() {
     [ -n "$tun0_mtu" ] && status_line="$status_line | tun0 MTU: $tun0_mtu"
     [ $CURRENT_MSS -gt 0 ] && status_line="$status_line | MSS: $CURRENT_MSS ($MSS_METHOD)"
     [ "$mode" != "blocked" ] && [ -n "$DNS_STATE" ] && status_line="$status_line | DNS: $DNS_STATE"
-    [ "$PHONE_DNS_ON" = "1" ] && status_line="$status_line | DNS телефона: dnsproxy"
+    if [ "$DNS_DEGRADED" = "1" ]; then
+        status_line="$status_line | ⚠️ DoH недоступен — DNS обычный"
+    elif [ "$PHONE_DNS_ON" = "1" ]; then
+        status_line="$status_line | DNS телефона: dnsproxy"
+    fi
     LAST_STATUS_MODE="$mode"
     LAST_STATUS_IFACES="$ifaces"
     
@@ -855,20 +909,32 @@ read_table_index() {
 
 apply_network_profile() {
     local profile=$1
-    
-    if [ "$profile" = "$CURRENT_NET_PROFILE" ] && [ "$FORCE_UPDATE" -eq 0 ]; then
+
+    # Сравниваем с тем, что РЕАЛЬНО применено. Раньше — с CURRENT_NET_PROFILE,
+    # который изначально "FAST": на загрузке (без FORCE) профиль не применялся
+    # вовсе, и до первого тоггла оставался системный cc (обычно cubic).
+    if [ "$profile" = "$NET_PROFILE_APPLIED" ] && [ "$FORCE_UPDATE" -eq 0 ]; then
         return
     fi
     
     log "Switching to $profile profile..."
     
     if [ "$profile" = "STABLE" ]; then
-        echo cubic > /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || true
-        echo 2 > /proc/sys/net/ipv4/tcp_ecn 2>/dev/null || true
+        # Было: cubic + ECN=2 + slow_start_after_idle=1 — "стабильнее" на
+        # плохой связи. Замер на телефоне (veth, RTT 300мс, 10 Мбит, отдача
+        # с телефона — так ходит TCP-туннель VPN): без потерь cubic 8.7 vs bbr
+        # 8.1 Мбит, но при 1% потерь 1.8-2.5 vs 7.2-7.4, при 3% 0.3-1.3 vs
+        # 6.7-7.8. Плохая мобильная связь = потери, то есть "STABLE" резал
+        # скорость в разы ровно тогда, когда включался. Оставляем BBR, на
+        # плохой связи меняем только число SYN-ретраев.
+        if grep -q bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
+            echo bbr > /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || true
+        fi
+        echo 1 > /proc/sys/net/ipv4/tcp_ecn 2>/dev/null || true
         echo 1 > /proc/sys/net/ipv4/tcp_ecn_fallback 2>/dev/null || true
-        set_sysctl net.ipv4.tcp_syn_retries 4
-        set_sysctl net.ipv4.tcp_slow_start_after_idle 1
-        log "STABLE profile: Cubic + Safe-ECN + High Retries"
+        set_sysctl net.ipv4.tcp_syn_retries 5
+        set_sysctl net.ipv4.tcp_slow_start_after_idle 0
+        log "STABLE profile: BBR + больше SYN-ретраев"
     else
         if grep -q bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
             echo bbr > /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || true
@@ -883,10 +949,15 @@ apply_network_profile() {
     fi
     
     CURRENT_NET_PROFILE=$profile
+    NET_PROFILE_APPLIED=$profile
     # Не вызываем update_status здесь — правильный статус ставится в конце setup
 }
 
 check_network_quality() {
+    # По умолчанию выключено: профили теперь отличаются только SYN-ретраями,
+    # а ради этого пинговать 1.1.1.1 мимо VPN каждые ~20с (оператор это
+    # видит; 6000+ строк в логе) смысла нет.
+    [ "$NET_PROFILE_ADAPTIVE" = "1" ] || return 0
     [ -z "$LAST_TETHER_IFACES" ] && return 0
 
     # На FORCE_UPDATE (тоггл, смена сети) не пингуем: ping -W 3 блокировал
@@ -917,17 +988,12 @@ check_network_quality() {
     fi
     
     if [ -z "$rtt_min" ]; then
-        log "Network quality check: no response from $ping_target via $wan, keeping $CURRENT_NET_PROFILE"
-        STABLE_COUNT=0
-        FAST_COUNT=0
-        return
-    fi
-    
-    log "Network RTT to $ping_target via $wan: ${rtt_min}ms (threshold: ${RTT_THRESHOLD_STABLE}ms)"
-    
-    if [ "$FORCE_UPDATE" -eq 1 ]; then
-        STABLE_COUNT=0
-        FAST_COUNT=0
+        # Потеря = плохая связь. Раньше счётчики сбрасывались, и на самой
+        # плохой связи (потери) профиль не менялся никогда.
+        log "Network quality check: no response from $ping_target via $wan (считаю как плохую связь)"
+        rtt_min=$((RTT_THRESHOLD_STABLE + 1))
+    else
+        log "Network RTT to $ping_target via $wan: ${rtt_min}ms (threshold: ${RTT_THRESHOLD_STABLE}ms)"
     fi
 
     if [ "$rtt_min" -gt "$RTT_THRESHOLD_STABLE" ]; then
@@ -988,7 +1054,7 @@ apply_sysctl_optimizations() {
 
     apply_network_profile "$CURRENT_NET_PROFILE"
     
-    log "Network engine: v3.9.8"
+    log "Network engine: v3.9.9"
 }
 
 apply_advanced_speed_tweaks() {
@@ -1186,8 +1252,10 @@ dnsproxy_stop() {
 dnsproxy_pids() {
     local f
     for f in $(grep -l "$MODULE_DIR/bin/dnsproxy" /proc/[0-9]*/cmdline 2>/dev/null); do
+        # только наш экземпляр (наш порт): чужие dnsproxy с этим же бинарём
+        # (тесты, второй модуль) не трогаем и не принимаем за свой pid
         case "$(tr '\0' ' ' 2>/dev/null < "$f")" in
-            "$MODULE_DIR/bin/dnsproxy"*) f="${f#/proc/}"; echo "${f%/cmdline}" ;;
+            "$MODULE_DIR/bin/dnsproxy"*" -p $DNSPROXY_PORT "*) f="${f#/proc/}"; echo "${f%/cmdline}" ;;
         esac
     done
 }
@@ -1224,24 +1292,75 @@ dnsproxy_exempt_down() {
     done
 }
 
-# Настоящий DNS-запрос (example.com A) к dnsproxy. 0 = NOERROR и есть ответы.
+# Настоящий DNS-запрос к dnsproxy, ~5с максимум. 0 = апстрим ответил.
+# Имя случайное (p<9 цифр>.example.com): cache-optimistic отдаёт из кэша даже
+# протухшее, и запрос example.com "проходил" при мёртвом апстриме.
+# NOERROR и NXDOMAIN = апстрим живой; SERVFAIL/тишина = нет.
+#
+# Медленный ответ = отказ. Замер (comss режется, Google жив): dnsproxy отвечал
+# через фолбэк за ~9с — "успех" для проверки, но клиенты (Android ~5с) к тому
+# времени уже сдаются. Порог DNS_PROBE_SLOW_MS включает ~1с, которую nc
+# ждёт после ответа.
+#
+# Время меряется до ПРИХОДА ответа, а не до выхода nc: busybox nc сам по себе
+# добавляет ~2с (ждёт -w и при подключении, и после ответа) — замер на
+# кэшированном имени = ровно 2000мс. nc пишет в файл в фоне, мы раз в 50мс
+# смотрим, появился ли ответ. Часы — /proc/uptime (сотые доли секунды):
+# маленькие числа, считаются и в 32-битной арифметике (mksh), в отличие
+# от date +%s%N.
+DNS_PROBE_LAST_MS=""
+uptime_ms() {
+    local u
+    read -r u _ < /proc/uptime
+    u="${u%.*}${u#*.}"
+    u="${u#${u%%[!0]*}}"
+    echo $(( ${u:-0} * 10 ))
+}
+
 dnsproxy_probe() {
-    local out i
+    local lbl f nc_pid t0 now out
     [ -n "$BUSYBOX" ] || return 0   # нечем проверить — не блокируем запуск
-    # busybox nc после ответа ещё ждёт -w секунд тишины, поэтому -w 1 и
-    # несколько попыток: холодный старт (bootstrap + TLS) ~1.5с промахнётся
-    # в первую попытку, вторая уже ответит из готового соединения/кэша.
-    for i in 1 2 3 4 5; do
-        out=$(printf '\022\064\001\000\000\001\000\000\000\000\000\000\007example\003com\000\000\001\000\001' | \
-              $BUSYBOX nc -u -w 1 127.0.0.1 "$DNSPROXY_PORT" 2>/dev/null | \
-              $BUSYBOX od -An -tx1 -N8 2>/dev/null)
-        # " 12 34 81 80 00 01 00 01": id, флаги (rcode = младшие 4 бита 4-го), qd, an
-        set -- $out
-        if [ "$1$2" = "1234" ] && [ $(( 0x${4:-ff} & 15 )) -eq 0 ] && [ "$7$8" != "0000" ]; then
-            return 0
-        fi
+    lbl=$(printf 'p%09d' $(( ($(date +%s) % 100000) * 10000 + RANDOM % 10000 )))
+    f="/data/local/tmp/vpn_tether_probe.$$"
+    : > "$f"
+    printf '\022\064\001\000\000\001\000\000\000\000\000\000\012%s\007example\003com\000\000\001\000\001' "$lbl" | \
+        $BUSYBOX nc -u -w "$DNS_PROBE_TIMEOUT" 127.0.0.1 "$DNSPROXY_PORT" > "$f" 2>/dev/null &
+    nc_pid=$!
+    t0=$(uptime_ms)
+    while :; do
+        [ -s "$f" ] && break
+        now=$(uptime_ms)
+        [ $((now - t0)) -ge $((DNS_PROBE_TIMEOUT * 1000)) ] && break
+        sleep 0.05
     done
-    return 1
+    now=$(uptime_ms)
+    kill "$nc_pid" 2>/dev/null
+    out=$($BUSYBOX od -An -tx1 -N4 "$f" 2>/dev/null)
+    rm -f "$f"
+    # " 12 34 81 83": id, флаги (rcode = младшие 4 бита 4-го байта)
+    set -- $out
+    if [ "$1$2" != "1234" ]; then
+        DNS_PROBE_LAST_MS="нет ответа за ${DNS_PROBE_TIMEOUT}с"
+        return 1
+    fi
+    case $(( 0x${4:-ff} & 15 )) in
+        0|3) ;;                                   # NOERROR / NXDOMAIN — апстрим жив
+        *) DNS_PROBE_LAST_MS="rcode $(( 0x$4 & 15 ))"; return 1 ;;
+    esac
+    DNS_PROBE_LAST_MS=$((now - t0))
+    [ "$DNS_PROBE_LAST_MS" -le "$DNS_PROBE_SLOW_MS" ] && return 0
+    return 2
+}
+
+# Первое соединение холодное (bootstrap + TLS) — "медленно" ещё не приговор:
+# повторяем один раз по уже прогретому. Нет ответа вовсе — без повтора.
+dnsproxy_probe_cold() {
+    dnsproxy_probe
+    case $? in
+        0) return 0 ;;
+        2) dnsproxy_probe; return $? ;;
+        *) return 1 ;;
+    esac
 }
 
 # dnsproxy_start <тег режима> <апстримы...>
@@ -1257,7 +1376,8 @@ dnsproxy_start() {
     fi
     dnsproxy_stop
 
-    args="-l 0.0.0.0 -p $DNSPROXY_PORT --cache --cache-optimistic --timeout=5s --refuse-any"
+    # timeout 3с: при "молчащем" апстриме (белые списки) запрос висел ~15с
+    args="-l 0.0.0.0 -p $DNSPROXY_PORT --cache --cache-optimistic --timeout=3s --refuse-any"
     for u in $ups; do args="$args -u $u"; done
     for u in $DNS_FALLBACKS; do args="$args -f $u"; done
     for u in $DNS_BOOTSTRAP; do args="$args -b $u"; done
@@ -1348,13 +1468,15 @@ apply_dns_mode() {
             cache) want="cache"; ups="$dns4:53" ;;
             doh)   want="doh";   ups="$DNS_VPN_UPSTREAMS" ;;
         esac
-        # Каждая пересборка VPN = новый экземпляр: keep-alive DoH-соединение
-        # могло открыться через WAN, пока tun пропадал, и так бы и осталось.
-        DNSPROXY_SIG=""
         if [ -n "$want" ] && ! root_routed_via_tun; then
             log "WARNING: трафик root идёт мимо $TUN_NAME (per-app VPN?) — DNS_VPN=$DNS_VPN выключен, DNAT в DNS VPN"
             want=""
         fi
+        # Каждая пересборка VPN = новый экземпляр: keep-alive DoH-соединение
+        # могло открыться через WAN, пока tun пропадал, и так бы и осталось.
+        # Только если dnsproxy нужен раздаче: иначе (dnat) затёртая сигнатура
+        # ломала dnsproxy_restart для экземпляра телефона.
+        [ -n "$want" ] && DNSPROXY_SIG=""
     fi
 
     if [ -n "$want" ] && [ -n "$ups" ]; then
@@ -1364,16 +1486,19 @@ apply_dns_mode() {
         # (= DNS оператора). Не прошла — setup_dns_redirect ниже его заменит.
         if dnsproxy_start "$mode-$want" $ups; then
             dns_redirect_to_proxy $ifaces
-            if dnsproxy_probe; then
-                DNS_STATE="dnsproxy $want"
-                DNS_STATE_MODE="$mode"
-                DNS_STATE_IFACES="$ifaces"
-                return 0
+            DNS_STATE="dnsproxy $want"
+            DNS_STATE_MODE="$mode"
+            DNS_STATE_IFACES="$ifaces"
+            # Апстрим недоступен (белые списки, блокировка) — dnsproxy НЕ гасим:
+            # DNS временно на обычный, dns_health вернёт DoH, когда оживёт.
+            if dnsproxy_probe_cold; then
+                DNS_DEGRADED=0
+            else
+                dns_degrade "проверка при настройке"
             fi
+            return 0
         fi
-        log "WARNING: dnsproxy не отвечает ($(grep ERROR "$DNSPROXY_LOG" 2>/dev/null | tail -1 | cut -c1-160)), откат на обычный DNAT"
-        # Сломан — гасим и для телефона: phone_dns_reconcile снимет его
-        # редирект (dnsproxy мёртв) и попробует позже сам.
+        log "WARNING: dnsproxy не запустился ($(tail -n 2 "$DNSPROXY_LOG" 2>/dev/null | tr '\n' ' ' | cut -c1-160)), откат на обычный DNAT"
         dnsproxy_stop
         dnsproxy_port_guard_down
     else
@@ -1387,33 +1512,60 @@ apply_dns_mode() {
     return 0
 }
 
-# Из цикла: dnsproxy умер -> поднять; не поднялся -> DNAT, клиенты не без DNS.
+# dnsproxy пишет в лог только старт и ошибки, но за недели набегает.
+# Зовётся из dns_health — то есть и когда dnsproxy нужен только телефону.
+dnsproxy_log_rotate() {
+    if [ "$(wc -c < "$DNSPROXY_LOG" 2>/dev/null || echo 0)" -gt 1048576 ]; then
+        tail -c 262144 "$DNSPROXY_LOG" > "$DNSPROXY_LOG.tmp" 2>/dev/null && \
+            cat "$DNSPROXY_LOG.tmp" > "$DNSPROXY_LOG"
+        rm -f "$DNSPROXY_LOG.tmp"
+        DNS_LOG_SEEN=0
+    fi
+}
+
+# Из цикла: dnsproxy умер -> поднять; не поднялся -> DNAT, клиенты не без DNS,
+# и раз в ~минуту пробуем вернуть dnsproxy (раньше DNAT оставался до
+# следующей пересборки правил, то есть часто до перезагрузки).
+DNS_FAIL_SIG=""
+DNS_FAIL_WANT=""
+DNS_FAIL_RETRY=0
 dns_watchdog() {
     local saved_sig
-    case "$DNS_STATE" in dnsproxy*) ;; *) return 0 ;; esac
+    case "$DNS_STATE" in
+        "DNAT (dnsproxy упал)")
+            DNS_FAIL_RETRY=$((DNS_FAIL_RETRY + 1))
+            [ "$DNS_FAIL_RETRY" -ge 30 ] || return 0
+            DNS_FAIL_RETRY=0
+            [ -n "$DNS_FAIL_SIG" ] || return 0
+            if dnsproxy_start "${DNS_FAIL_SIG%%|*}" ${DNS_FAIL_SIG#*|}; then
+                dnsproxy_port_guard $DNS_STATE_IFACES
+                dns_redirect_to_proxy $DNS_STATE_IFACES
+                DNS_STATE="dnsproxy $DNS_FAIL_WANT"
+                DNS_HEALTH_LAST=0       # dns_health проверит апстрим сразу
+                log "WATCHDOG: dnsproxy снова поднят, DNS клиентов -> dnsproxy"
+            fi
+            return 0 ;;
+        dnsproxy*) ;;
+        *) return 0 ;;
+    esac
     dnsproxy_exempt
-    if dnsproxy_alive; then
-        # dnsproxy пишет в лог только старт и ошибки, но за недели набегает
-        if [ "$(wc -c < "$DNSPROXY_LOG" 2>/dev/null || echo 0)" -gt 1048576 ]; then
-            tail -c 262144 "$DNSPROXY_LOG" > "$DNSPROXY_LOG.tmp" 2>/dev/null && \
-                cat "$DNSPROXY_LOG.tmp" > "$DNSPROXY_LOG"
-            rm -f "$DNSPROXY_LOG.tmp"
-        fi
-        return 0
-    fi
+    dnsproxy_alive && return 0
 
     log "WATCHDOG: dnsproxy умер, перезапускаю"
     saved_sig="$DNSPROXY_SIG"
     DNSPROXY_SIG=""
     dnsproxy_start "${saved_sig%%|*}" ${saved_sig#*|} && return 0
 
-    log "WATCHDOG: dnsproxy не поднялся, DNS клиентов -> DNAT"
+    log "WATCHDOG: dnsproxy не поднялся, DNS клиентов -> DNAT (повтор раз в ~минуту)"
     if [ "$DNS_STATE_MODE" = "direct" ]; then
         setup_dns_redirect "$(direct_dns_servers)" $DNS_STATE_IFACES
     else
         setup_dns_redirect "$(get_vpn_dns)" $DNS_STATE_IFACES
     fi
     dnsproxy_port_guard_down
+    DNS_FAIL_SIG="$saved_sig"
+    DNS_FAIL_WANT="${DNS_STATE#dnsproxy }"
+    DNS_FAIL_RETRY=0
     DNS_STATE="DNAT (dnsproxy упал)"
 }
 
@@ -1437,6 +1589,72 @@ dnsproxy_restart() {
     else
         log "WARNING: dnsproxy не перезапустился ($1)"
     fi
+}
+
+# ============================================================================
+# Здоровье DoH: апстрим недоступен -> обычный DNS, ожил -> обратно на DoH.
+# Без этого при "молчащем" comss (белые списки) клиенты сидели без DNS:
+# dnsproxy ждал апстрим ~15с, до фолбэков не доходил (context deadline).
+# ============================================================================
+# Идемпотентно: правила применяются всегда (пересборка могла заново поставить
+# редирект на dnsproxy), в лог — только на переходе.
+dns_degrade() {
+    [ "$DNS_DEGRADED" = "1" ] || \
+        log "WARNING: DoH-апстрим не отвечает ($1) — DNS временно обычный (оператор/VPN), проверяю раз в ${DNS_HEALTH_RECOVER}с"
+    DNS_DEGRADED=1
+    case "$DNS_STATE" in
+        dnsproxy*)
+            if [ "$DNS_STATE_MODE" = "vpn" ]; then
+                setup_dns_redirect "$(get_vpn_dns)" $DNS_STATE_IFACES
+            else
+                # Без перехвата клиенты спрашивают DNS раздачи (dnsmasq ->
+                # DNS оператора), а он в белых списках как раз работает.
+                cleanup_dns_redirect
+            fi ;;
+    esac
+    [ "$PHONE_DNS_ON" = "1" ] && phone_dns_rules_off
+    phone_status_refresh
+}
+
+dns_restore() {
+    [ "$DNS_DEGRADED" = "1" ] || return 0
+    DNS_DEGRADED=0
+    log "DoH-апстрим снова отвечает — DNS обратно через dnsproxy"
+    case "$DNS_STATE" in dnsproxy*) dns_redirect_to_proxy $DNS_STATE_IFACES ;; esac
+    [ "$PHONE_DNS_ON" = "1" ] && phone_dns_rules_on
+    phone_status_refresh
+}
+
+# Из цикла. Пока DoH работает — проверка раз в DNS_HEALTH_INTERVAL, при
+# неудаче сразу вторая (одна медленная секунда в автобусе — не повод).
+# В деградации — раз в DNS_HEALTH_RECOVER.
+dns_health() {
+    local now period sz
+    case "$DNS_STATE" in dnsproxy*) ;; *) [ "$PHONE_DNS_ON" = "1" ] || { DNS_DEGRADED=0; return 0; } ;; esac
+    dnsproxy_alive || return 0
+    dnsproxy_log_rotate
+    now=$(date +%s)
+
+    # Пассивный сигнал: в логе dnsproxy появились "exchange failed" — у
+    # клиентов уже сыпятся ошибки, проверяем сейчас, не ждём интервал.
+    sz=$(wc -c < "$DNSPROXY_LOG" 2>/dev/null || echo 0)
+    if [ "$DNS_DEGRADED" = "0" ] && [ "$sz" -gt "$DNS_LOG_SEEN" ] 2>/dev/null; then
+        tail -c $((sz - DNS_LOG_SEEN)) "$DNSPROXY_LOG" 2>/dev/null | grep -q "exchange failed" && DNS_HEALTH_LAST=0
+    fi
+    DNS_LOG_SEEN="$sz"
+
+    period="$DNS_HEALTH_INTERVAL"
+    [ "$DNS_DEGRADED" = "1" ] && period="$DNS_HEALTH_RECOVER"
+    [ $((now - DNS_HEALTH_LAST)) -lt "$period" ] && return 0
+    DNS_HEALTH_LAST=$now
+
+    if dnsproxy_probe_cold; then
+        dns_restore
+    elif [ "$DNS_DEGRADED" = "0" ]; then
+        # одна неудача — не повод (одна плохая секунда в автобусе), сразу вторая
+        dnsproxy_probe || dns_degrade "2 проверки подряд: $DNS_PROBE_LAST_MS$(case "$DNS_PROBE_LAST_MS" in [0-9]*) echo 'мс, медленно' ;; esac)"
+    fi
+    DNS_HEALTH_LAST=$(date +%s)
 }
 
 # ============================================================================
@@ -1516,8 +1734,11 @@ phone_dns_reconcile() {
 
     if [ "$PHONE_DNS_ON" = "1" ]; then
         if dnsproxy_alive; then
-            # держим хук и исключение на месте (AdGuard/netd могли перетряхнуть)
-            $iptables -t nat -C OUTPUT -j "$CHAIN_PHONE_DNS" 2>/dev/null || phone_dns_rules_on
+            # держим хук и исключение на месте (AdGuard/netd могли перетряхнуть);
+            # в деградации хука как раз быть не должно
+            if [ "$DNS_DEGRADED" = "0" ]; then
+                $iptables -t nat -C OUTPUT -j "$CHAIN_PHONE_DNS" 2>/dev/null || phone_dns_rules_on
+            fi
             dnsproxy_exempt
             return 0
         fi
@@ -1535,13 +1756,19 @@ phone_dns_reconcile() {
 
     # Экземпляр с DNS_UPSTREAMS и тегом direct-doh — общий с раздачей в direct
     case "$DNS_STATE" in dnsproxy*) ;; *) dnsproxy_port_guard ;; esac
-    if dnsproxy_start "direct-doh" $DNS_UPSTREAMS && dnsproxy_probe; then
-        phone_dns_rules_on
+    if dnsproxy_start "direct-doh" $DNS_UPSTREAMS; then
         PHONE_DNS_ON=1
-        log "DNS телефона -> dnsproxy :$DNSPROXY_PORT (VPN не поднят; IPv6: $([ "$PHONE_DNS_V6" = 1 ] && echo да || echo 'нет ip6 nat'))"
-        phone_status_refresh
+        if [ "$DNS_DEGRADED" = "0" ] && dnsproxy_probe_cold; then
+            phone_dns_rules_on
+            log "DNS телефона -> dnsproxy :$DNSPROXY_PORT (VPN не поднят; IPv6: $([ "$PHONE_DNS_V6" = 1 ] && echo да || echo 'нет ip6 nat'))"
+            phone_status_refresh
+        else
+            # апстрим молчит: правила не ставим, dns_health включит их сам
+            dns_degrade "DNS телефона, проверка при включении"
+            DNS_HEALTH_LAST=$(date +%s)
+        fi
     else
-        log "WARNING: dnsproxy не отвечает, DNS телефона оставляю обычным (повтор через ~1 мин)"
+        log "WARNING: dnsproxy не запустился, DNS телефона оставляю обычным (повтор через ~1 мин)"
         PHONE_DNS_RETRY=30
         case "$DNS_STATE" in dnsproxy*) ;; *) dnsproxy_stop; dnsproxy_port_guard_down ;; esac
     fi
@@ -2375,14 +2602,22 @@ monitor_loop() {
         handle_change || log "ERROR: handle_change failed, continuing anyway"
         # отдельно от handle_change: тот рано выходит, когда хотспот выключен
         phone_dns_reconcile
+        dns_health
         _loop_count=$(( _loop_count + 1 ))
     done
 }
 
-echo "=== VPN Tether v3.9.8-hybrid.7 Started $(date) ===" > "$LOG_FILE"
+# Сигналы — СРАЗУ, до долгого старта (ожидание rt_tables, sleep, первая
+# настройка — до минуты). Раньше trap ставился только в monitor_loop: нажатие
+# Action в это время слало USR1 без обработчика, а его действие по умолчанию —
+# убить процесс. Демон умирал без cleanup, правила и dnsproxy оставались.
+trap 'handle_usr1' USR1
+trap 'cleanup_on_exit' TERM INT
+
+echo "=== VPN Tether v3.9.9-hybrid.8 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
-log "Config: HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
+log "Config: HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
 
 disable_hw_offload
 
@@ -2410,8 +2645,12 @@ log "TUN: $TUN_NAME"
 
 dnsproxy_kill_strays
 phone_dns_rules_off
-rm -f "$DNSPROXY_PID_FILE"
+rm -f "$DNSPROXY_PID_FILE" /data/local/tmp/vpn_tether_probe.*
 dnsproxy_port_guard_down
+dnsproxy_exempt_down       # исключение AdGuard от убитого демона
+
+# Профиль TCP — сразу, а не при первом появлении раздачи
+apply_network_profile "$CURRENT_NET_PROFILE"
 
 cleanup_all_rules
 clear_rules_file
