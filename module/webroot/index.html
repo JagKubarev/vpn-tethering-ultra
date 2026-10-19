@@ -200,6 +200,11 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
       <div class="s">Устройства на раздаче без VPN тоже получают DNS через DoH-сервер.</div></div>
     <label class="sw"><input type="checkbox" id="directDoh"><span></span></label>
   </div>
+  <div class="row" data-dep="DNSPROXY_ENABLE">
+    <div class="txt"><div class="t">Instagram и Facebook «как из Европы»</div>
+      <div class="s">Адреса Meta (Instagram, Facebook, Threads, Messenger) DNS спрашивает у Google так, будто ты в Амстердаме. Приходят европейские серверы, и с обходом DPI они открываются без VPN. Работает там, где DNS идёт через DoH без VPN: раздача напрямую и сам телефон. Проверка — в «Диагностике».</div></div>
+    <label class="sw"><input type="checkbox" data-key="DNS_META_EU"><span></span></label>
+  </div>
   <div class="row col" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">DNS раздачи через VPN</div></div>
     <select data-key="DNS_VPN">
@@ -243,9 +248,21 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
       <div class="s">Браузеры на раздаче сразу идут по обычному HTTPS, где обход работает.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_BLOCK"><span></span></label>
   </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Своя стратегия для каждой сети</div>
+      <div class="s">Модуль запоминает стратегию для Wi-Fi (по названию) и мобильной сети (по оператору) и сам переключает её при смене сети. Подбор ниже запоминает лучшую для текущей сети.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_PER_NET"><span></span></label>
+  </div>
+  <div class="row col" id="znetBox">
+    <div class="txt"><div class="t">Эта сеть: <span id="znetCur">—</span></div>
+      <div class="s" id="znetInfo"></div></div>
+    <select id="znetSel"></select>
+    <div class="s muted" id="znetListHead" style="font-size:13px;margin-top:12px"></div>
+    <div id="znetList"></div>
+  </div>
   <div class="row col" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">Стратегия</div>
-      <div class="s">Если сайт перестал открываться, попробуй другую и проверь ниже.</div></div>
+    <div class="txt"><div class="t" id="zStratTitle">Стратегия</div>
+      <div class="s" id="zStratSub">Если сайт перестал открываться, попробуй другую и проверь ниже.</div></div>
     <select data-key="ZAPRET_STRATEGY">
       <option value="fakeddisorder">1 · fakeddisorder — лучшая в среднем</option>
       <option value="md5sig">2 · md5sig, разрез midsld</option>
@@ -337,6 +354,16 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
         <div class="s">Как часто проверять, ожил ли сервер после сбоя (2–600).</div></div>
       <input type="number" min="2" max="600" data-key="DNS_HEALTH_RECOVER">
     </div>
+    <div class="row col">
+      <div class="txt"><div class="t">Meta: адрес «откуда спрашиваем»</div>
+        <div class="s">IPv4 для EDNS Client Subnet (берётся /24). По умолчанию — Амстердам.</div></div>
+      <input type="text" data-key="DNS_META_ECS" inputmode="decimal" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="row col">
+      <div class="txt"><div class="t">Meta: DoH-сервер</div>
+        <div class="s">Должен учитывать ECS (Google — да, Cloudflare — нет).</div></div>
+      <input type="text" data-key="DNS_META_UPSTREAMS" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
     <div class="row">
       <div class="txt"><div class="t">Адаптивный профиль сети</div>
         <div class="s">Пинг 1.1.1.1 мимо VPN раз в ~20 с, на плохой связи больше повторов TCP.</div></div>
@@ -353,11 +380,19 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
     <div class="txt"><div class="t">Проверка DoH</div><div class="s" id="dohRes">Запрос через запущенный dnsproxy.</div></div>
     <button class="btn small" id="dohBtn">Проверить</button>
   </div>
+  <div class="row col">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div class="txt"><div class="t">Адреса Meta</div><div class="s">Что DNS отвечает для Instagram и Facebook «как из Европы» и по твоему IP. В прошлых замерах рабочими были 57.144.x.x.</div></div>
+      <button class="btn small" id="metaBtn">Проверить</button>
+    </div>
+    <div id="metaRes" style="font-size:14px"></div>
+  </div>
   <details id="logBox">
     <summary>Журнал</summary>
     <div class="row btn-row" style="border-top:0;padding-top:0">
       <button class="btn small" id="logRefresh">Обновить</button>
       <button class="btn small" id="logCopy">Скопировать</button>
+      <button class="btn small" id="logPrev">Прошлый запуск</button>
     </div>
     <pre class="log" id="log"></pre>
   </details>
@@ -492,8 +527,20 @@ function renderStatus(s) {
     h += kvRow('Kill-switch', s.kill_switch === '1' ? 'включён' : 'выключен', s.kill_switch === '1' ? 'green' : 'amber');
     if (s.mtu && +s.mss > 0) h += kvRow('MTU / MSS', esc(s.mtu + ' / ' + s.mss));
   }
-  if (s.zapret === 'on') h += kvRow('Обход DPI', 'включён' + (+s.zapret_auto > 0 ? ', найдено сайтов: ' + esc(s.zapret_auto) : ''), 'green');
+  if (s.zapret === 'on') {
+    let zt = 'включён';
+    if (s.zapret_strategy) zt += ' · ' + esc(stratName(s.zapret_strategy, s.zapret_eff_args)) +
+      (s.zapret_src === 'net' ? ' (своя для «' + esc(s.net_label) + '»)' : ' (общая)');
+    if (+s.zapret_auto > 0) zt += ' · найдено сайтов: ' + esc(s.zapret_auto);
+    h += kvRow('Обход DPI', zt, 'green');
+  }
   else if (s.zapret === 'fail') h += kvRow('Обход DPI', 'nfqws не запустился, повтор через минуту', 'red');
+  if (s.dnsproxy_enable === '1' && s.meta_eu === '1') {
+    if (s.meta_eu_on === '1') h += kvRow('DNS Meta', 'как из Европы (ECS ' + esc(s.meta_ecs) + ')', 'green');
+    else if (s.vpn_up === '1') h += kvRow('DNS Meta', 'через VPN, Европа не нужна', '');
+    else h += kvRow('DNS Meta', 'обычный: DoH без VPN сейчас не используется', '');
+  }
+  if (s.zapret_per_net === '1' && s.net_key && s.net_key !== ZN.cur && !znetLoading) loadZnet();
   if (s.quic_uids) h += kvRow('Без QUIC', esc(String(s.quic_uids.split(' ').length)) + ' прил.');
   const bad = (s.conf_note || '').split(' ').filter((x) => x[0] === '!' || x[0] === '?');
   if (bad.length) h += kvRow('Конфиг', 'пропущено: ' + esc(bad.join(', ')), 'amber');
@@ -510,7 +557,8 @@ async function loadStatus() {
 let DEF = {}, USR = {}, CUR = {};   // умолчания, из файла, текущие в форме
 const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAMS','DNS_FALLBACKS','DNS_VPN_UPSTREAMS',
   'DNS_BOOTSTRAP','DNS_HEALTH_INTERVAL','DNS_HEALTH_RECOVER','KILL_SWITCH','KILL_SWITCH_STRICT','NET_PROFILE_ADAPTIVE',
-  'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK'];
+  'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK',
+  'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS'];
 const saved = (k) => (k in USR ? USR[k] : (DEF[k] || ''));
 
 async function loadConf() {
@@ -540,11 +588,18 @@ function renderForm() {
   renderChips();
   renderDeps();
   renderBar();
+  renderZnet();
 }
 
 function renderDeps() {
   $$('[data-dep]').forEach((row) => { row.classList.toggle('off', CUR[row.dataset.dep] !== '1'); });
   $('#zArgsBox').style.display = CUR.ZAPRET_STRATEGY === 'custom' ? '' : 'none';
+  const pn = CUR.ZAPRET_PER_NET === '1';
+  $('#znetBox').style.display = pn ? '' : 'none';
+  $('#znetBox').classList.toggle('off', CUR.ZAPRET_ENABLE !== '1');
+  $('#zStratTitle').textContent = pn ? 'Стратегия по умолчанию' : 'Стратегия';
+  $('#zStratSub').textContent = pn ? 'Для сетей, у которых нет своей. Если сайт перестал открываться, попробуй другую и проверь ниже.'
+    : 'Если сайт перестал открываться, попробуй другую и проверь ниже.';
 }
 
 function changedKeys() { return KEYS.filter((k) => (CUR[k] || '') !== (saved(k) || '')); }
@@ -653,6 +708,10 @@ function validate() {
   const bad = CUR.DNSPROXY_ENABLE === '1' && (!u || !/^(https|tls|quic|h3|sdns|udp|tcp):\/\/\S+(\s+\S+)*$/.test(u));
   $('#upErr').style.display = bad ? '' : 'none';
   $('#upErr').textContent = bad ? 'Нужен адрес вида https://сервер/dns-query' : '';
+  const ecs = CUR.DNS_META_ECS || '';
+  if (!/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(ecs) || ecs.split('.').some((o) => +o > 255)) {
+    toast('Meta: адрес «откуда спрашиваем» — нужен IPv4, например 185.15.56.0'); return false;
+  }
   return !bad;
 }
 
@@ -727,6 +786,11 @@ async function loadLog() {
 }
 $('#logBox').addEventListener('toggle', () => { if ($('#logBox').open) loadLog(); });
 $('#logRefresh').addEventListener('click', loadLog);
+$('#logPrev').addEventListener('click', async () => {
+  const r = await ctl('log-prev');
+  const pre = $('#log'); pre.textContent = r.out ? '— прошлый запуск (до перезагрузки/перезапуска) —\n' + r.out : 'Лога прошлого запуска нет';
+  pre.scrollTop = pre.scrollHeight;
+});
 $('#logCopy').addEventListener('click', async () => {
   const text = $('#log').textContent;
   try { await navigator.clipboard.writeText(text); toast('Скопировано'); }
@@ -788,7 +852,7 @@ $('#stBtn').addEventListener('click', async () => {
 // ---------------------------------------------------------------- подбор стратегии
 const SC_DEFAULT = 'www.youtube.com i.ytimg.com discord.com gateway.discord.gg x.com www.facebook.com rutracker.org www.linkedin.com ya.ru www.google.com';
 $('#scSites').value = SC_DEFAULT;
-let scTimer = null;
+let scTimer = null, scWasRunning = false;
 
 function stratLabel(a) {
   const g = (re) => { const m = re.exec(a); return m ? m[1] : ''; };
@@ -852,6 +916,8 @@ async function scRefresh() {
 
   clearTimeout(scTimer);
   if (running) scTimer = setTimeout(scRefresh, 3000);
+  else if (scWasRunning) loadZnet();   // подбор закончился — мог запомнить стратегию сети
+  scWasRunning = running;
 }
 
 async function scStart(mode) {
@@ -862,16 +928,114 @@ async function scStart(mode) {
 $('#scQuick').addEventListener('click', () => scStart('quick'));
 $('#scFull').addEventListener('click', () => scStart('full'));
 $('#scStop').addEventListener('click', async () => { await ctl('zscan-stop'); setTimeout(scRefresh, 800); });
-$('#scRes').addEventListener('click', (e) => {
+$('#scRes').addEventListener('click', async (e) => {
   const a = e.target.dataset && e.target.dataset.apply; if (!a) return;
+  if (saved('ZAPRET_PER_NET') === '1') {
+    // своя стратегия сети: запоминаем для текущей сети, общую не трогаем
+    await loadZnet();
+    if (ZN.cur) {
+      const r = await ctl('znet-set custom ' + q(a) + ' ' + q('выбрана из подбора'));
+      if (!/^OK/.test(r.out.trim())) { toast(r.out.trim().replace(/^ERR /, '') || 'Не получилось'); return; }
+      toast('Запомнено для сети «' + ZN.curLabel + '»');
+      await loadZnet();
+      if (saved('ZAPRET_ENABLE') !== '1') { CUR.ZAPRET_ENABLE = '1'; renderForm(); $('#applyBtn').click(); }
+      return;
+    }
+  }
   CUR.ZAPRET_STRATEGY = 'custom'; CUR.ZAPRET_ARGS = a; CUR.ZAPRET_ENABLE = '1';
   renderForm();
   $('#applyBtn').click();
 });
 
+// ---------------------------------------------------------------- стратегия для каждой сети
+let ZN = { cur: '', curLabel: '', list: [] };
+let znetLoading = false;
+const netKind = (k) => /^wifi:/.test(k) ? 'Wi-Fi' : /^mobile:/.test(k) ? 'мобильная' : '';
+function presetName(v) {
+  const o = Array.from($('[data-key=ZAPRET_STRATEGY]').options).find((x) => x.value === v);
+  return o ? o.textContent.replace(/^\d+ · /, '').replace(/ — .*$/, '') : v;
+}
+function stratName(st, a) { return st === 'custom' ? (a ? stratLabel(a) : 'своя') : presetName(st); }
+
+async function loadZnet() {
+  znetLoading = true;
+  try {
+    const r = await ctl('znet');
+    const z = { cur: '', curLabel: '', list: [] };
+    r.out.split('\n').forEach((l) => {
+      const f = l.slice(2).split('|');
+      if (l.indexOf('C ') === 0) { z.cur = f[0] || ''; z.curLabel = z.cur ? (f[1] || z.cur) : ''; }
+      else if (l.indexOf('N ') === 0 && f[0]) z.list.push({ key: f[0], st: f[1] || '', args: f[2] || '', label: f[3] || f[0], note: f[4] || '', date: f[5] || '' });
+    });
+    ZN = z;
+    renderZnet();
+  } finally { znetLoading = false; }
+}
+
+function renderZnet() {
+  const e = ZN.list.find((x) => x.key === ZN.cur);
+  const def = stratName(saved('ZAPRET_STRATEGY'), saved('ZAPRET_ARGS'));
+  $('#znetCur').textContent = ZN.cur ? ZN.curLabel + ' · ' + netKind(ZN.cur) : 'не определена';
+  $('#znetInfo').textContent = !ZN.cur
+    ? 'Нет Wi-Fi или мобильной сети, или модуль её ещё не видел. Работает стратегия по умолчанию.'
+    : e ? 'Своя: ' + stratName(e.st, e.args) + (e.note ? ' · ' + e.note : '') + (e.date ? ' · ' + e.date : '')
+    : 'Своей нет, работает стратегия по умолчанию. Запусти подбор ниже или выбери вручную.';
+  const presets = Array.from($('[data-key=ZAPRET_STRATEGY]').options).filter((o) => o.value !== 'custom');
+  const sel = $('#znetSel');
+  sel.innerHTML = '<option value="">По умолчанию — ' + esc(def) + '</option>' +
+    presets.map((o) => '<option value="' + esc(o.value) + '">' + esc(o.textContent) + '</option>').join('') +
+    (e && e.st === 'custom' ? '<option value="custom">Из подбора: ' + esc(stratLabel(e.args)) + '</option>' : '');
+  sel.value = e ? e.st : '';
+  sel.disabled = !ZN.cur;
+  $('#znetListHead').textContent = ZN.list.length ? 'Запомненные сети: ' + ZN.list.length : 'Запомненных сетей пока нет.';
+  $('#znetList').innerHTML = ZN.list.map((x) =>
+    '<div class="row" style="padding:10px 0;border-top:1px solid var(--line)">' +
+    '<span class="dot' + (x.key === ZN.cur ? ' green' : '') + '"></span><div class="txt"><div class="t" style="font-size:14px">' +
+    esc(x.label) + ' <span class="muted" style="font-weight:400">· ' + esc(netKind(x.key)) + '</span></div>' +
+    '<div class="s">' + esc(stratName(x.st, x.args)) + (x.note ? ' · ' + esc(x.note) : '') + (x.date ? ' · ' + esc(x.date) : '') + '</div></div>' +
+    '<button class="btn small" data-del="' + esc(x.key) + '" aria-label="Забыть">Забыть</button></div>').join('');
+}
+
+$('#znetSel').addEventListener('change', async () => {
+  const v = $('#znetSel').value;
+  if (v === 'custom') return;
+  const r = v ? await ctl('znet-set ' + q(v) + " '' " + q('выбрана вручную')) : await ctl('znet-del ' + q(ZN.cur));
+  if (!/^OK/.test(r.out.trim())) toast(r.out.trim().replace(/^ERR /, '') || 'Не получилось');
+  else toast(v ? 'Запомнено для сети «' + ZN.curLabel + '»' : 'Сеть «' + ZN.curLabel + '» — по умолчанию');
+  await loadZnet();
+});
+$('#znetList').addEventListener('click', async (e) => {
+  const k = e.target.dataset && e.target.dataset.del; if (!k) return;
+  const x = ZN.list.find((n) => n.key === k);
+  if (!confirm('Забыть стратегию для «' + (x ? x.label : k) + '»?')) return;
+  await ctl('znet-del ' + q(k));
+  toast('Забыто'); await loadZnet();
+});
+
+// ---------------------------------------------------------------- адреса Meta
+$('#metaBtn').addEventListener('click', async () => {
+  const btn = $('#metaBtn'), res = $('#metaRes');
+  btn.disabled = true; res.innerHTML = '<div class="muted mt8">Спрашиваю Google, до 30 секунд…</div>';
+  try {
+    const out = (await ctl('metatest')).out.trim();
+    if (/^ERR/m.test(out)) { res.innerHTML = '<div class="st-line"><span class="dot red"></span>' + esc(out.replace(/^[\s\S]*?ERR /, '')) + '</div>'; return; }
+    let ecs = '', h = '';
+    out.split('\n').forEach((l) => {
+      const f = l.trim().split(/\s+/);
+      if (f[0] === 'ecs') ecs = f[1] || '';
+      if (f[0] === 'host') {
+        const eu = f[2] || '-', ru = f[3] || '-', good = /^57\.144\./.test(eu);
+        h += '<div class="st-line"><span class="dot ' + (eu === '-' ? 'red' : good ? 'green' : 'amber') + '"></span><span>' +
+          esc(f[1].replace(/^www\./, '')) + ': <b>' + esc(eu) + '</b> <span class="muted">· по твоему IP ' + esc(ru) + '</span></span></div>';
+      }
+    });
+    res.innerHTML = '<div class="muted mt8" style="font-size:13px">«Как из Европы» (ECS ' + esc(ecs) + ') — жирным:</div>' + h;
+  } finally { btn.disabled = false; }
+});
+
 // ---------------------------------------------------------------- старт
 (async () => {
-  await Promise.all([loadStatus(), loadConf(), loadZ()]);
+  await Promise.all([loadStatus(), loadConf(), loadZ(), loadZnet()]);
   scRefresh();
   loadApps().then(renderChips);
   setInterval(() => { if (!document.hidden && !busy) loadStatus(); }, 3000);
@@ -885,8 +1049,13 @@ function mockExec(cmd) {
   });
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=v2.8 (предпросмотр)\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
-    '\nzapret=on\nzapret_auto=2\ndns_degraded=0\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.comss.one/dns-query\nD DNS_FALLBACKS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=1\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=0\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\n' + M.conf };
+    '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.comss.one/dns-query\nD DNS_FALLBACKS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=1\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=0\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=0\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\n' + M.conf };
+  if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
+    'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +
+    'mobile:25002|md5sig||MegaFon|выбрана вручную|2026-10-19 18:40\n')).split('\n').filter(Boolean).map((l) => 'N ' + l).join('\n') };
+  if (/^znet-(set|del) /.test(a)) return { errno: 0, out: 'OK Дом_5G' };
+  if (a === 'metatest') return { errno: 0, out: 'ecs 185.15.56.0\nhost www.instagram.com 57.144.244.34 31.13.72.174\nhost scontent.cdninstagram.com 57.144.244.192 157.240.205.63\nhost www.facebook.com 57.144.244.1 31.13.72.36\nhost static.xx.fbcdn.net 57.144.244.13 31.13.72.12\n' };
   if (a === 'toggle') { M.target = M.target === 'vpn' ? 'direct' : 'vpn'; M.ack = 't' + Date.now(); return { errno: 0, out: 'OK ' + M.ack }; }
   if (a === 'apply') { M.ack = 'a' + Date.now(); return { errno: 0, out: 'OK ' + M.ack }; }
   if (a === 'ack') return { errno: 0, out: M.ack };
