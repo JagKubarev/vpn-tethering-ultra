@@ -240,6 +240,15 @@ QUIC_BLOCK_APPS=""   # пример: "com.avito.android"
 # 1 = пинг 1.1.1.1 через WAN раз в ~20с, RTT > порога (или потеря) 2 раза
 #     подряд -> STABLE (те же BBR, больше SYN-ретраев).
 NET_PROFILE_ADAPTIVE=0
+# Обход DPI (zapret / nfqws) для трафика МИМО VPN: раздача напрямую и
+# приложения телефона, которые не идут в VPN. В туннель (tun*) и в сами
+# VPN-клиенты не вмешивается. Помогает против блокировок по имени сайта
+# (YouTube, Discord, X...), не помогает против блокировок по IP.
+ZAPRET_ENABLE=0
+ZAPRET_MODE=list        # list = встроенный + свой + автосписок, all = все HTTPS
+ZAPRET_PHONE=1          # 1 = и приложения телефона (кроме VPN-клиентов)
+ZAPRET_STRATEGY=md5sig  # md5sig | badseq | disorder | seqovl
+ZAPRET_QUIC_BLOCK=1     # закрыть QUIC раздаче, пока zapret включён: браузер сразу идёт по TCP
 # =====================================================================
 
 # ------------------------------------------------------------------------
@@ -254,8 +263,11 @@ USER_CONF_NOTE=""
 _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списка)
     local key="$1" val="$2" ok=1
     case "$key" in
-        DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION)
+        DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
+        ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
+        ZAPRET_MODE)     case "$val" in list|all) ;; *) ok=0 ;; esac ;;
+        ZAPRET_STRATEGY) case "$val" in md5sig|badseq|disorder|seqovl) ;; *) ok=0 ;; esac ;;
         DNS_DIRECT) case "$val" in doh|plain) ;; *) ok=0 ;; esac ;;
         DNS_VPN)    case "$val" in dnat|cache|doh) ;; *) ok=0 ;; esac ;;
         DNS_HEALTH_INTERVAL|DNS_HEALTH_RECOVER)
@@ -294,7 +306,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_QUIC_BLOCK"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -328,6 +340,25 @@ conf_apply_overrides() {
     fi
 }
 conf_apply_overrides
+
+# Аргументы стратегии nfqws. $1 — папка с fake-файлами (module/zapret).
+# Стратегии подобраны вживую на мобильном операторе (лог 2.8, 20:4x):
+# md5sig — 12/12 (YouTube, Discord, X, facebook, rutracker...), badseq и
+# seqovl — 7/12 (без facebook/rutracker...), disorder (без подделок) — 7/12.
+zapret_strategy_args() {
+    local g="$1/tls_clienthello_www_google_com.bin"
+    case "$ZAPRET_STRATEGY" in
+        badseq)   echo "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=badseq --dpi-desync-fake-tls=@$g" ;;
+        disorder) echo "--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld" ;;
+        seqovl)   echo "--dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=@$g --dpi-desync-fake-tls=@$g" ;;
+        *)        echo "--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@$g" ;;
+    esac
+}
+# Для WebUI ("проверить сайт"): стратегия с учётом vpn_tether.conf
+if [ "$1" = "--zapret-strategy" ]; then
+    zapret_strategy_args "${0%/*}/zapret"
+    exit 0
+fi
 
 FORCE_PUBLIC_DNS=0
 
@@ -476,6 +507,36 @@ DNSPROXY_BIN_FOUND="$DNSPROXY_BIN"
 [ "$DNSPROXY_ENABLE" = "1" ] || DNSPROXY_BIN=""
 DNSPROXY_PID_FILE="/data/local/tmp/vpn_tether_dnsproxy.pid"
 DNSPROXY_LOG="/data/local/tmp/vpn_tether_dnsproxy.log"
+
+# --- zapret / nfqws ---
+case "$(uname -m 2>/dev/null)" in
+    aarch64|arm64) _NQ_CANDIDATES="$MODULE_DIR/bin/nfqws-arm64" ;;
+    armv*|arm)     _NQ_CANDIDATES="$MODULE_DIR/bin/nfqws-arm" ;;
+    *)             _NQ_CANDIDATES="$MODULE_DIR/bin/nfqws-arm64 $MODULE_DIR/bin/nfqws-arm" ;;
+esac
+NFQWS_BIN=""
+for _c in $_NQ_CANDIDATES; do
+    [ -x "$_c" ] && NFQWS_BIN="$_c" && break
+done
+ZAPRET_DIR="$MODULE_DIR/zapret"
+ZAPRET_LIST_DEFAULT="$ZAPRET_DIR/list-default.txt"
+ZAPRET_LIST_USER="/data/adb/vpn_tether_zapret.txt"        # свой список (WebUI)
+ZAPRET_LIST_AUTO="/data/adb/vpn_tether_zapret_auto.txt"   # nfqws пополняет сам
+ZAPRET_VPN_UIDS_FILE="/data/adb/vpn_tether_vpn_uids"      # uid VPN-клиентов, замеченных владельцами VPN
+ZAPRET_PID_FILE="/data/local/tmp/vpn_tether_nfqws.pid"
+ZAPRET_LOG="/data/local/tmp/vpn_tether_nfqws.log"
+ZAPRET_QNUM=200
+ZAPRET_MARK=0x40000000     # метка поддельных пакетов nfqws (по умолчанию у nfqws)
+CHAIN_ZAPRET="VPN_ZAPRET"          # mangle POSTROUTING: исходящие -> nfqws
+CHAIN_ZAPRET_IN="VPN_ZAPRET_IN"    # mangle PREROUTING: ответы -> nfqws (автосписок)
+CHAIN_ZAPRET_QUIC="VPN_ZAPRET_QUIC" # filter FORWARD: QUIC раздачи
+# VPN-клиенты: их собственное соединение с сервером (часто TLS на 443) zapret
+# трогать не должен — иначе можно сломать переподключение VPN.
+VPN_CLIENT_PKGS="llc.itdev.incy com.happproxy org.amnezia.vpn org.amnezia.awg com.wireguard.android com.zaneschepke.wireguardautotunnel com.zaneschepke.wireguardautotunnel.nightly com.v2ray.ang app.hiddify.com moe.nb4a io.nekohasekai.sfa com.github.dyhkwong.sagernet io.github.saeeddev94.xray com.github.kr328.clash com.github.metacubex.clash.meta de.blinkt.openvpn net.openvpn.openvpn org.outline.android.client com.cloudflare.onedotonedotonedotone com.v2raytun.android dev.hexasoftware.v2box com.exclave.exclave"
+ZAPRET_STATE="off"     # off | on | fail
+ZAPRET_SIG=""          # аргументы + исключения запущенного экземпляра
+ZAPRET_RETRY=0
+ZAPRET_TICK=0
 CHAIN_DNSP="VPN_TETHER_DNSP"
 CHAIN_PHONE_DNS="VPN_PHONE_DNS"
 CHAIN_QUIC="VPN_QUIC_BLOCK"
@@ -635,6 +696,9 @@ update_status() {
         echo "mtu=$tun0_mtu"
         echo "mss=$CURRENT_MSS"
         echo "quic_uids=$QUIC_UIDS"
+        echo "zapret=$ZAPRET_STATE"
+        echo "zapret_auto=$(grep -c '[a-z0-9]' "$ZAPRET_LIST_AUTO" 2>/dev/null || echo 0)"
+        echo "wan=$LAST_WAN_IFACE"
         echo "conf_note=$USER_CONF_NOTE"
         echo "updated=$(date '+%H:%M:%S')"
     } > "$STATUS_FILE.tmp" 2>/dev/null && mv -f "$STATUS_FILE.tmp" "$STATUS_FILE"
@@ -661,7 +725,7 @@ friendly_ifaces() {
 
 # Текущее состояние — в описание модуля (список модулей KernelSU/Magisk).
 # Пишем только при изменении; на выходе демона возвращаем обычное описание.
-MODULE_DESC_DEFAULT="Раздача Wi-Fi/USB через VPN с kill-switch и своим DNS (DoH). ▶ Action — переключить VPN/напрямую."
+MODULE_DESC_DEFAULT="Раздача Wi-Fi/USB через VPN с kill-switch, своим DNS (DoH) и обходом DPI. ▶ Action — переключить VPN/напрямую."
 update_description() {
     [ "$STATUS_IN_DESCRIPTION" = "1" ] || return 0
     local mode="$1" ifaces="$2" f="$MODULE_DIR/module.prop" names d up_host
@@ -683,6 +747,7 @@ update_description() {
     elif [ "$mode" = "direct" ] && [ -n "$names" ]; then
         case "$DNS_STATE" in dnsproxy*) d="$d · DNS: $up_host" ;; esac
     fi
+    [ "$mode" = "direct" ] && [ -n "$names" ] && [ "$ZAPRET_STATE" = "on" ] && d="$d · обход DPI"
     d="$d · ▶ Action — переключить"
     set_description "$d"
 }
@@ -2076,6 +2141,230 @@ quic_block_down() {
     QUIC_LOGGED=0
 }
 
+# ============================================================================
+# zapret (nfqws): обход DPI для трафика мимо VPN.
+#  - mangle POSTROUTING -> VPN_ZAPRET: первые пакеты HTTPS-соединений уходят
+#    в nfqws (очередь ZAPRET_QNUM). Пропускаем: tun* (VPN), lo, локальные
+#    сети, поддельные пакеты самого nfqws (метка), VPN-клиентов, dnsproxy.
+#    Раздача (пакеты без сокета) обрабатывается всегда, телефон — если
+#    ZAPRET_PHONE=1.
+#  - mangle PREROUTING -> VPN_ZAPRET_IN: первые ответы — nfqws по ним видит
+#    обрывы/заглушки и пополняет автосписок (режим list).
+#  - filter FORWARD -> VPN_ZAPRET_QUIC: QUIC раздачи мимо VPN -> REJECT.
+# Хуки ставятся В КОНЕЦ цепочек: вердикт NFQUEUE завершает обход таблицы,
+# а системные цепочки (учёт трафика, idletimer) должны отработать раньше.
+# ============================================================================
+ZAPRET_ARGS_RUN=""
+ZAPRET_EXCL_RUN=""
+
+zapret_alive() {
+    local pid
+    pid=$(cat "$ZAPRET_PID_FILE" 2>/dev/null)
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && grep -q nfqws "/proc/$pid/cmdline" 2>/dev/null
+}
+
+# Все nfqws на нашей очереди, в т.ч. оставшиеся от убитого демона
+zapret_kill_all() {
+    local p
+    for p in $(pgrep -f "nfqws.*--qnum=$ZAPRET_QNUM " 2>/dev/null); do kill "$p" 2>/dev/null; done
+    sleep 0.3
+    for p in $(pgrep -f "nfqws.*--qnum=$ZAPRET_QNUM " 2>/dev/null); do kill -9 "$p" 2>/dev/null; done
+    rm -f "$ZAPRET_PID_FILE"
+}
+
+# uid VPN-клиентов: известные пакеты + владельцы VPN, замеченные раньше
+zapret_vpn_uids() {
+    local p u out=""
+    for p in $VPN_CLIENT_PKGS; do
+        u=$(stat -c %u "/data/data/$p" 2>/dev/null)
+        case "$u" in ''|*[!0-9]*) continue ;; esac
+        out="$out $u"
+    done
+    [ -f "$ZAPRET_VPN_UIDS_FILE" ] && out="$out $(tr -c '0-9' ' ' < "$ZAPRET_VPN_UIDS_FILE")"
+    echo $out | tr ' ' '\n' | awk '$1 ~ /^[0-9]+$/ && $1 >= 10000' | sort -un | tr '\n' ' '
+}
+
+# Владелец поднятого VPN (любой клиент, даже не из списка) — запоминаем
+zapret_learn_vpn_owner() {
+    local u
+    u=$(dumpsys connectivity 2>/dev/null | grep -A3 'VPN CONNECTED' | grep -oE 'OwnerUid: [0-9]+' | head -1 | grep -oE '[0-9]+$')
+    case "$u" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$u" -ge 10000 ] || return 0
+    grep -qx "$u" "$ZAPRET_VPN_UIDS_FILE" 2>/dev/null && return 0
+    echo "$u" >> "$ZAPRET_VPN_UIDS_FILE"
+    log "zapret: uid $u (владелец VPN) — в исключения"
+}
+
+zapret_args() {
+    local a="--qnum=$ZAPRET_QNUM --uid=0:0 --bind-fix4 --bind-fix6 --filter-tcp=443"
+    if [ "$ZAPRET_MODE" = "list" ]; then
+        a="$a --hostlist=$ZAPRET_LIST_DEFAULT"
+        # пустой список не передаём: не полагаемся на то, как nfqws его трактует
+        grep -q '[a-z0-9]' "$ZAPRET_LIST_USER" 2>/dev/null && a="$a --hostlist=$ZAPRET_LIST_USER"
+        a="$a --hostlist-auto=$ZAPRET_LIST_AUTO"
+    fi
+    echo "$a $(zapret_strategy_args "$ZAPRET_DIR")"
+}
+
+zapret_start() {
+    local pid
+    zapret_kill_all
+    [ -f "$ZAPRET_LIST_AUTO" ] || { : > "$ZAPRET_LIST_AUTO"; chmod 600 "$ZAPRET_LIST_AUTO"; }
+    : > "$ZAPRET_LOG"
+    # $1 без кавычек: это список аргументов, собранный zapret_args
+    "$NFQWS_BIN" $1 >> "$ZAPRET_LOG" 2>&1 &
+    pid=$!
+    sleep 0.5
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "$pid" > "$ZAPRET_PID_FILE"
+        log "zapret: nfqws запущен (pid $pid, стратегия $ZAPRET_STRATEGY, режим $ZAPRET_MODE)"
+        return 0
+    fi
+    log "WARNING: zapret: nfqws не запустился: $(tail -n 2 "$ZAPRET_LOG" 2>/dev/null | tr '\n' ' ' | cut -c1-200)"
+    return 1
+}
+
+zapret_rules_on() {
+    local excl="$1" t u lan rj
+    for t in "$iptables" "$ip6tables"; do
+        if [ "$t" = "$iptables" ]; then
+            lan="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,127.0.0.0/8,169.254.0.0/16"
+            rj="icmp-port-unreachable"
+        else
+            lan="fc00::/7,fe80::/10,::1/128"
+            rj="icmp6-port-unreachable"
+        fi
+        # исходящие
+        $t -t mangle -N "$CHAIN_ZAPRET" 2>/dev/null
+        $t -t mangle -F "$CHAIN_ZAPRET" 2>/dev/null
+        $t -t mangle -A "$CHAIN_ZAPRET" -o tun+ -j RETURN 2>/dev/null
+        $t -t mangle -A "$CHAIN_ZAPRET" -o lo -j RETURN 2>/dev/null
+        $t -t mangle -A "$CHAIN_ZAPRET" -d "$lan" -j RETURN 2>/dev/null
+        $t -t mangle -A "$CHAIN_ZAPRET" -m mark --mark "$ZAPRET_MARK/$ZAPRET_MARK" -j RETURN 2>/dev/null
+        if [ "$ZAPRET_PHONE" = "1" ]; then
+            for u in $excl; do
+                $t -t mangle -A "$CHAIN_ZAPRET" -m owner --uid-owner "$u" -j RETURN 2>/dev/null
+            done
+            [ -n "$DNSPROXY_GID" ] && \
+                $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$DNSPROXY_GID" -j RETURN 2>/dev/null
+        else
+            # только раздача: у её пакетов нет локального сокета
+            $t -t mangle -A "$CHAIN_ZAPRET" -m owner --socket-exists -j RETURN 2>/dev/null
+        fi
+        $t -t mangle -A "$CHAIN_ZAPRET" -p tcp --dport 443 \
+            -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 \
+            -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
+        $t -t mangle -C POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null || \
+            $t -t mangle -A POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null
+
+        # ответы (для автосписка)
+        $t -t mangle -N "$CHAIN_ZAPRET_IN" 2>/dev/null
+        $t -t mangle -F "$CHAIN_ZAPRET_IN" 2>/dev/null
+        if [ "$ZAPRET_MODE" = "list" ]; then
+            $t -t mangle -A "$CHAIN_ZAPRET_IN" -i tun+ -j RETURN 2>/dev/null
+            $t -t mangle -A "$CHAIN_ZAPRET_IN" -i lo -j RETURN 2>/dev/null
+            $t -t mangle -A "$CHAIN_ZAPRET_IN" -s "$lan" -j RETURN 2>/dev/null
+            $t -t mangle -A "$CHAIN_ZAPRET_IN" -p tcp --sport 443 \
+                -m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3 \
+                -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
+        fi
+        $t -t mangle -C PREROUTING -j "$CHAIN_ZAPRET_IN" 2>/dev/null || \
+            $t -t mangle -A PREROUTING -j "$CHAIN_ZAPRET_IN" 2>/dev/null
+
+        # QUIC раздачи мимо VPN
+        $t -N "$CHAIN_ZAPRET_QUIC" 2>/dev/null
+        $t -F "$CHAIN_ZAPRET_QUIC" 2>/dev/null
+        if [ "$ZAPRET_QUIC_BLOCK" = "1" ]; then
+            $t -A "$CHAIN_ZAPRET_QUIC" -o tun+ -j RETURN 2>/dev/null
+            $t -A "$CHAIN_ZAPRET_QUIC" -p udp --dport 443 -j REJECT --reject-with "$rj" 2>/dev/null
+            $t -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null || \
+                $t -I FORWARD 1 -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null
+        else
+            while $t -D FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; do :; done
+        fi
+    done
+}
+
+zapret_rules_off() {
+    local t _n
+    for t in "$iptables" "$ip6tables"; do
+        _n=0; while [ $_n -lt 8 ] && $t -t mangle -D POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null; do _n=$((_n + 1)); done
+        _n=0; while [ $_n -lt 8 ] && $t -t mangle -D PREROUTING -j "$CHAIN_ZAPRET_IN" 2>/dev/null; do _n=$((_n + 1)); done
+        _n=0; while [ $_n -lt 8 ] && $t -D FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; do _n=$((_n + 1)); done
+        $t -t mangle -F "$CHAIN_ZAPRET" 2>/dev/null;    $t -t mangle -X "$CHAIN_ZAPRET" 2>/dev/null
+        $t -t mangle -F "$CHAIN_ZAPRET_IN" 2>/dev/null; $t -t mangle -X "$CHAIN_ZAPRET_IN" 2>/dev/null
+        $t -F "$CHAIN_ZAPRET_QUIC" 2>/dev/null;         $t -X "$CHAIN_ZAPRET_QUIC" 2>/dev/null
+    done
+}
+
+zapret_down() {
+    zapret_rules_off
+    zapret_kill_all
+    [ "$ZAPRET_STATE" = "on" ] && log "zapret: выключен"
+    ZAPRET_STATE="off"
+    ZAPRET_ARGS_RUN=""
+    ZAPRET_EXCL_RUN=""
+    ZAPRET_RETRY=0
+    ZAPRET_TICK=0
+    phone_status_refresh
+}
+
+# Каждая итерация цикла. Дорогое (dumpsys, stat пакетов) — раз в ~30с.
+zapret_reconcile() {
+    local args excl
+    if [ "$ZAPRET_ENABLE" != "1" ] || [ -z "$NFQWS_BIN" ]; then
+        [ "$ZAPRET_STATE" != "off" ] && zapret_down
+        return 0
+    fi
+    if [ "$ZAPRET_RETRY" -gt 0 ]; then
+        ZAPRET_RETRY=$((ZAPRET_RETRY - 1))
+        return 0
+    fi
+    args="$ZAPRET_ARGS_RUN"
+    excl="$ZAPRET_EXCL_RUN"
+    ZAPRET_TICK=$((ZAPRET_TICK + 1))
+    if [ "$ZAPRET_TICK" -ge 15 ] || [ "$ZAPRET_STATE" != "on" ]; then
+        ZAPRET_TICK=0
+        vpn_up_now && zapret_learn_vpn_owner
+        args=$(zapret_args)
+        excl=$(zapret_vpn_uids)
+    fi
+
+    # nfqws: не запущен / умер / сменились аргументы (свой список появился)
+    if [ "$args" != "$ZAPRET_ARGS_RUN" ] || ! zapret_alive; then
+        [ "$ZAPRET_STATE" = "on" ] && [ "$args" = "$ZAPRET_ARGS_RUN" ] && \
+            log "WARNING: zapret: nfqws умер, перезапускаю"
+        if ! zapret_start "$args"; then
+            zapret_rules_off
+            ZAPRET_STATE="fail"
+            ZAPRET_ARGS_RUN=""
+            ZAPRET_EXCL_RUN=""
+            ZAPRET_RETRY=30          # повтор через ~минуту
+            phone_status_refresh
+            return 0
+        fi
+        ZAPRET_ARGS_RUN="$args"
+        ZAPRET_STATE="starting"
+    fi
+
+    # правила: впервые / сменились исключения / хук снесли (netd пересобрал цепочки)
+    if [ "$ZAPRET_STATE" != "on" ] || [ "$excl" != "$ZAPRET_EXCL_RUN" ] || \
+       ! $iptables -t mangle -C POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null || \
+       { [ "$ZAPRET_QUIC_BLOCK" = "1" ] && ! $iptables -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; }; then
+        zapret_rules_on "$excl"
+        if [ "$ZAPRET_STATE" != "on" ]; then
+            log "zapret: включён (режим $ZAPRET_MODE, телефон: $ZAPRET_PHONE, QUIC раздачи: $([ "$ZAPRET_QUIC_BLOCK" = 1 ] && echo закрыт || echo открыт); VPN-клиенты в исключениях: ${excl:-нет})"
+        elif [ "$excl" != "$ZAPRET_EXCL_RUN" ]; then
+            log "zapret: исключения VPN-клиентов: ${excl:-нет}"
+        else
+            log "WATCHDOG: zapret: правила пропали, ставлю заново"
+        fi
+        ZAPRET_EXCL_RUN="$excl"
+        ZAPRET_STATE="on"
+        phone_status_refresh
+    fi
+}
+
 phone_status_refresh() {
     [ -n "$LAST_STATUS_MODE" ] && update_status "$LAST_STATUS_MODE" "$LAST_STATUS_IFACES" "$CURRENT_NET_PROFILE"
 }
@@ -2981,7 +3270,7 @@ reload_config() {
     DNSPROXY_BIN="$DNSPROXY_BIN_FOUND"
     [ "$DNSPROXY_ENABLE" = "1" ] || DNSPROXY_BIN=""
     log "Настройки перечитаны:${USER_CONF_NOTE:- (всё по умолчанию)}"
-    log "Config: DNSPROXY=$DNSPROXY_ENABLE KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE UPSTREAMS=[$DNS_UPSTREAMS] QUIC_BLOCK=[$QUIC_BLOCK_APPS] HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s"
+    log "Config: DNSPROXY=$DNSPROXY_ENABLE KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE UPSTREAMS=[$DNS_UPSTREAMS] QUIC_BLOCK=[$QUIC_BLOCK_APPS] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/phone=$ZAPRET_PHONE/quic=$ZAPRET_QUIC_BLOCK HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s"
 
     # DNS: всё с нуля — пересборка поставит заново под новые настройки
     if [ "$PHONE_DNS_ON" = "1" ]; then phone_dns_rules_off; fi
@@ -3006,6 +3295,9 @@ reload_config() {
     quic_block_down
     quic_block_apply
 
+    # zapret: снять всё, цикл поднимет заново под новые настройки (~2с)
+    zapret_down
+
     [ "$STATUS_IN_DESCRIPTION" = "1" ] || set_description "$MODULE_DESC_DEFAULT"
 }
 
@@ -3013,7 +3305,7 @@ reload_config() {
 handle_usr1() {
     USR1_PENDING=1
     LAST_HANDLE_TS=0
-    log "Toggle signal received"
+    if [ -f "$RELOAD_FILE" ]; then log "Сигнал: применить настройки (WebUI)"; else log "Toggle signal received"; fi
 }
 
 cleanup_on_exit() {
@@ -3023,6 +3315,7 @@ cleanup_on_exit() {
     phone_dns_rules_off
     PHONE_DNS_ON=0
     quic_block_down
+    zapret_down
     dnsproxy_stop
     dnsproxy_port_guard_down
     guard_down
@@ -3054,6 +3347,7 @@ monitor_loop() {
         phone_dns_reconcile
         dns_health
         [ $((_loop_count % 15)) -eq 0 ] && quic_block_apply
+        zapret_reconcile
         _loop_count=$(( _loop_count + 1 ))
     done
 }
@@ -3065,11 +3359,11 @@ monitor_loop() {
 trap 'handle_usr1' USR1
 trap 'cleanup_on_exit' TERM INT
 
-echo "=== VPN Tether v2.8 (3.10.0-hybrid.12) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.9 (3.10.0-hybrid.13) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
-log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}] HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
+log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
 
 disable_hw_offload
 
@@ -3111,6 +3405,8 @@ DNS_ROUTE_CHANGED_TS=$(date +%s)
 cleanup_all_rules
 clear_rules_file
 quic_block_down            # хвосты от убитого демона
+zapret_rules_off
+zapret_kill_all
 quic_block_apply
 sleep 2
 

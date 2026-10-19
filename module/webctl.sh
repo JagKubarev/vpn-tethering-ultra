@@ -14,6 +14,10 @@
 #   webctl.sh log [N]          хвост лога
 #   webctl.sh apps             пакеты пользователя (если нет API менеджера)
 #   webctl.sh doh              проверка DoH через запущенный dnsproxy
+#   webctl.sh zlist|zdefault|zauto    списки zapret: свой / встроенный / авто
+#   webctl.sh zlist-set 'д1 д2'       записать свой список (с проверкой)
+#   webctl.sh zauto-clear             очистить автосписок
+#   webctl.sh sitetest ДОМЕН          открывается ли сайт мимо VPN без/с обходом
 # ============================================================================
 
 MODDIR="${0%/*}"
@@ -29,6 +33,8 @@ PID_FILE=/data/local/tmp/vpn_tether.pid
 LOG_FILE=/data/local/tmp/vpn_tether.log
 DNSPROXY_PID_FILE=/data/local/tmp/vpn_tether_dnsproxy.pid
 DNSPROXY_PORT=5354
+ZLIST_USER=/data/adb/vpn_tether_zapret.txt
+ZLIST_AUTO=/data/adb/vpn_tether_zapret_auto.txt
 BB=/data/adb/ksu/bin/busybox
 [ -x "$BB" ] || BB=/data/adb/magisk/busybox
 [ -x "$BB" ] || BB=/data/adb/ap/bin/busybox
@@ -176,6 +182,71 @@ case "$1" in
                 *)   echo "fail ошибка сервера (rcode $(( 0x$4 & 15 )))" ;;
             esac
         fi
+        ;;
+
+    # --- zapret ------------------------------------------------------------
+    zlist)      cat "$ZLIST_USER" 2>/dev/null ;;
+    zdefault)   cat "$MODDIR/zapret/list-default.txt" 2>/dev/null ;;
+    zauto)      cat "$ZLIST_AUTO" 2>/dev/null ;;
+    zauto-clear)
+        [ -f "$ZLIST_AUTO" ] && : > "$ZLIST_AUTO"
+        echo "OK" ;;
+    zlist-set)
+        # $2 — домены через пробел/перевод строки. Каждый проверяем.
+        out=""
+        for d in $(printf '%s' "$2" | tr 'A-Z' 'a-z' | tr ',;' '  '); do
+            d=${d#http://}; d=${d#https://}; d=${d%%/*}; d=${d#.}
+            case "$d" in
+                ''|*[!a-z0-9.-]*|*..*|.*|*.|-*) echo "ERR неверный домен: $d"; exit 1 ;;
+                *.*) ;;
+                *) echo "ERR неверный домен: $d"; exit 1 ;;
+            esac
+            case " $out " in *" $d "*) ;; *) out="$out $d" ;; esac
+        done
+        printf '%s\n' $out > "$ZLIST_USER.tmp" && mv -f "$ZLIST_USER.tmp" "$ZLIST_USER"
+        chmod 600 "$ZLIST_USER"
+        echo "OK $(echo $out | wc -w)" ;;
+
+    sitetest)
+        # Открывается ли сайт мимо VPN: без обхода и с текущей стратегией.
+        h=$(printf '%s' "$2" | tr 'A-Z' 'a-z')
+        h=${h#http://}; h=${h#https://}; h=${h%%/*}
+        case "$h" in ''|*[!a-z0-9.-]*|*..*|.*) echo "ERR адрес"; exit 1 ;; esac
+        wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
+        [ -n "$wan" ] || { echo "ERR не знаю интерфейс оператора — модуль ещё не видел сеть"; exit 1; }
+        case "$(uname -m)" in aarch64|arm64) nq="$MODDIR/bin/nfqws-arm64" ;; *) nq="$MODDIR/bin/nfqws-arm" ;; esac
+        [ -x "$nq" ] || { echo "ERR нет nfqws"; exit 1; }
+        CA=/apex/com.android.conscrypt/cacerts
+        [ -d "$CA" ] || CA=/system/etc/security/cacerts
+        Q=202
+        RULE_NFQ="-o $wan -m owner --uid-owner 0 -p tcp --dport 443 -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
+        st_cleanup() {
+            [ -n "$nqpid" ] && kill "$nqpid" 2>/dev/null
+            iptables -w 2 -t mangle -D POSTROUTING $RULE_NFQ 2>/dev/null
+            iptables -w 2 -t mangle -D VPN_ZAPRET -m owner --uid-owner 0 -j RETURN 2>/dev/null
+            iptables -w 2 -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
+        }
+        trap st_cleanup EXIT INT TERM
+        # мимо AdGuard (его прокси подменяет сертификаты) и мимо основного zapret
+        iptables -w 2 -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
+        iptables -w 2 -t mangle -I VPN_ZAPRET 1 -m owner --uid-owner 0 -j RETURN 2>/dev/null
+        # адрес — через DoH (обычный DNS мимо VPN оператор может подменить)
+        ip=$(curl -s -m 6 --capath "$CA" -H 'accept: application/dns-json' \
+            "https://1.1.1.1/dns-query?name=$h&type=A" 2>/dev/null | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')
+        [ -n "$ip" ] || ip=$("$BB" nslookup "$h" 1.1.1.1 2>/dev/null | sed -n '/^Name/,$p' | grep -oE 'Address 1: [0-9.]+' | awk '{print $3}')
+        [ -n "$ip" ] || { echo "ERR не удалось узнать адрес $h"; exit 1; }
+        one() {
+            curl -s -o /dev/null -m 8 --interface "$wan" --capath "$CA" --resolve "$h:443:$ip" \
+                -w '%{http_code} %{time_total}' "https://$h/" 2>/dev/null
+            echo " $?"
+        }
+        echo "ip $ip"
+        echo "direct $(one)"
+        iptables -w 2 -t mangle -I POSTROUTING 1 $RULE_NFQ
+        "$nq" --qnum=$Q --uid=0:0 --bind-fix4 $(sh "$MODDIR/service.sh" --zapret-strategy) >/dev/null 2>&1 &
+        nqpid=$!
+        sleep 0.7
+        if kill -0 "$nqpid" 2>/dev/null; then echo "zapret $(one)"; else echo "zapret 000 0 nfqws"; fi
         ;;
 
     *)
