@@ -141,6 +141,11 @@ show_status() {
         fi
     fi
 
+    case "$(st zapret)" in
+        on)   echo "🧩 Обход DPI (zapret): включён" ;;
+        fail) echo "🧩 Обход DPI: nfqws не запустился" ;;
+    esac
+
     if [ "$mode" = "vpn" ] && [ "$ks" = "1" ]; then
         echo "🧱 Kill-switch: если VPN упадёт,"
         echo "   раздача встанет, но IP не утечёт."

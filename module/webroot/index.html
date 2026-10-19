@@ -89,11 +89,14 @@ h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacin
 .sw input:checked + span { background: var(--accent); }
 .sw input:checked + span::after { transform: translateX(18px); }
 
-select, input[type=text], input[type=number], input[type=search] {
+select, textarea, input[type=text], input[type=number], input[type=search] {
   width: 100%; font: inherit; color: var(--text); background: var(--input);
   border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; margin-top: 8px;
 }
 select { appearance: auto; }
+textarea { resize: vertical; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.st-line { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+details.off { opacity: .45; pointer-events: none; }
 input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .err { color: var(--red); font-size: 13px; margin-top: 6px; }
 
@@ -213,6 +216,71 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
   <div class="muted" style="font-size:13px">У этих приложений закрыт HTTP/3 (UDP 443), и они идут по обычному HTTPS. Помогает, когда оператор режет QUIC и часть картинок или видео не грузится.</div>
   <div class="chips" id="quicChips"></div>
   <div class="mt8"><button class="btn small" id="quicAdd">Добавить приложение</button></div>
+</div>
+
+<!-- ============ zapret ============ -->
+<h2>Обход блокировок</h2>
+<div class="card">
+  <div class="row">
+    <div class="txt"><div class="t">Обход DPI (zapret)</div>
+      <div class="s">Для трафика без VPN: раздача напрямую и приложения телефона мимо VPN. Помогает с YouTube, Discord, X и сайтами, которые режут по имени. Не помогает, если сайт заблокирован по IP.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_ENABLE"><span></span></label>
+  </div>
+  <div class="row col" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Какие сайты</div></div>
+    <select data-key="ZAPRET_MODE">
+      <option value="list">Из списка и найденные сами</option>
+      <option value="all">Все сайты</option>
+    </select>
+  </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Приложения телефона</div>
+      <div class="s">Обходить и для приложений, которые идут мимо VPN. Соединения VPN-клиентов не трогаются.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_PHONE"><span></span></label>
+  </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Закрыть QUIC для раздачи</div>
+      <div class="s">Браузеры на раздаче сразу идут по обычному HTTPS, где обход работает.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_BLOCK"><span></span></label>
+  </div>
+  <div class="row col" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Стратегия</div>
+      <div class="s">Если сайт перестал открываться, попробуй другую и проверь ниже.</div></div>
+    <select data-key="ZAPRET_STRATEGY">
+      <option value="md5sig">1 · md5sig — подобрана у тебя</option>
+      <option value="badseq">2 · badseq</option>
+      <option value="seqovl">3 · seqovl</option>
+      <option value="disorder">4 · disorder, без подделок</option>
+    </select>
+  </div>
+  <div class="row col" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Свой список сайтов</div>
+      <div class="s">По одному домену в строке, поддомены включаются сами. Используется в режиме «из списка».</div></div>
+    <textarea id="zlist" rows="4" placeholder="example.com" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+    <div class="err" id="zlistErr" style="display:none"></div>
+  </div>
+  <details data-dep="ZAPRET_ENABLE">
+    <summary>Списки: встроенный и найденные автоматически</summary>
+    <div class="row col">
+      <div class="txt"><div class="t">Найдено автоматически: <span id="zautoN">0</span></div>
+        <div class="s">nfqws сам добавляет сайты, где соединение зависает или рвётся.</div></div>
+      <pre class="log" id="zauto" style="max-height:160px;border:1px solid var(--line);border-radius:10px;margin-top:8px"></pre>
+      <div class="mt8"><button class="btn small" id="zautoClear">Очистить автосписок</button></div>
+    </div>
+    <div class="row col">
+      <div class="txt"><div class="t">Встроенный список: <span id="zdefN">0</span></div></div>
+      <pre class="log" id="zdef" style="max-height:160px;border:1px solid var(--line);border-radius:10px;margin-top:8px"></pre>
+    </div>
+  </details>
+</div>
+<div class="card pad" style="margin-top:10px">
+  <div class="t" style="font-weight:500">Проверить сайт</div>
+  <div class="s muted" style="font-size:13px;margin-top:2px">Открывается ли сайт через оператора, мимо VPN: без обхода и с выбранной стратегией.</div>
+  <div style="display:flex;gap:8px;align-items:flex-start">
+    <input type="text" id="stHost" placeholder="youtube.com" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <button class="btn" id="stBtn" style="margin-top:8px;white-space:nowrap">Проверить</button>
+  </div>
+  <div id="stRes" class="mt8" style="font-size:14px"></div>
 </div>
 
 <!-- ============ Прочее ============ -->
@@ -405,6 +473,8 @@ function renderStatus(s) {
     h += kvRow('Kill-switch', s.kill_switch === '1' ? 'включён' : 'выключен', s.kill_switch === '1' ? 'green' : 'amber');
     if (s.mtu && +s.mss > 0) h += kvRow('MTU / MSS', esc(s.mtu + ' / ' + s.mss));
   }
+  if (s.zapret === 'on') h += kvRow('Обход DPI', 'включён' + (+s.zapret_auto > 0 ? ', найдено сайтов: ' + esc(s.zapret_auto) : ''), 'green');
+  else if (s.zapret === 'fail') h += kvRow('Обход DPI', 'nfqws не запустился, повтор через минуту', 'red');
   if (s.quic_uids) h += kvRow('Без QUIC', esc(String(s.quic_uids.split(' ').length)) + ' прил.');
   const bad = (s.conf_note || '').split(' ').filter((x) => x[0] === '!' || x[0] === '?');
   if (bad.length) h += kvRow('Конфиг', 'пропущено: ' + esc(bad.join(', ')), 'amber');
@@ -421,7 +491,7 @@ async function loadStatus() {
 let DEF = {}, USR = {}, CUR = {};   // умолчания, из файла, текущие в форме
 const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAMS','DNS_FALLBACKS','DNS_VPN_UPSTREAMS',
   'DNS_BOOTSTRAP','DNS_HEALTH_INTERVAL','DNS_HEALTH_RECOVER','KILL_SWITCH','KILL_SWITCH_STRICT','NET_PROFILE_ADAPTIVE',
-  'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS'];
+  'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_QUIC_BLOCK'];
 const saved = (k) => (k in USR ? USR[k] : (DEF[k] || ''));
 
 async function loadConf() {
@@ -458,8 +528,11 @@ function renderDeps() {
 }
 
 function changedKeys() { return KEYS.filter((k) => (CUR[k] || '') !== (saved(k) || '')); }
+const normList = (t) => t.toLowerCase().split(/[\s,;]+/).filter(Boolean).join('\n');
+let ZL_SAVED = '';
+const zlistDirty = () => normList($('#zlist').value) !== ZL_SAVED;
 function renderBar() {
-  const n = changedKeys().length;
+  const n = changedKeys().length + (zlistDirty() ? 1 : 0);
   $('#applybar').classList.toggle('show', n > 0);
   $('#applyMsg').textContent = n ? 'Изменений: ' + n : '';
 }
@@ -472,6 +545,7 @@ $$('[data-key]').forEach((el) => {
     setCur(k, el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value.trim());
   });
 });
+$('#zlist').addEventListener('input', () => { $('#zlistErr').style.display = 'none'; renderBar(); });
 $('#directDoh').addEventListener('change', (e) => setCur('DNS_DIRECT', e.target.checked ? 'doh' : 'plain'));
 
 function upValue() {
@@ -576,6 +650,13 @@ $('#applyBtn').addEventListener('click', async () => {
   if (busy || !validate()) return;
   busy = true; $('#applyBtn').disabled = true; $('#applyMsg').textContent = 'Сохраняю…';
   try {
+    if (zlistDirty()) {
+      const r = await ctl('zlist-set ' + q(normList($('#zlist').value)));
+      if (!/^OK/.test(r.out.trim())) {
+        const e = $('#zlistErr'); e.textContent = r.out.trim().replace(/^ERR /, '') || 'ошибка'; e.style.display = '';
+        toast('Список сайтов: ' + e.textContent); return;
+      }
+    }
     for (const k of changedKeys()) {
       const v = CUR[k] || '';
       const r = v === (DEF[k] || '') ? await ctl('unset ' + k) : await ctl('set ' + k + ' ' + q(v));
@@ -587,12 +668,12 @@ $('#applyBtn').addEventListener('click', async () => {
     if (!m) { toast('Сохранено. Применится после перезагрузки (' + (r.out.trim().replace(/^ERR /, '') || 'демон не ответил') + ')'); }
     else if (await waitAck(m[1], 25)) toast('Настройки применены');
     else toast('Сохранено, но модуль не ответил за 25 с');
-    await loadConf(); await loadStatus();
+    await loadConf(); await loadZ(); await loadStatus();
   } finally {
     busy = false; $('#applyBtn').disabled = false; renderBar();
   }
 });
-$('#revertBtn').addEventListener('click', () => { KEYS.forEach((k) => { CUR[k] = saved(k); }); renderForm(); });
+$('#revertBtn').addEventListener('click', () => { KEYS.forEach((k) => { CUR[k] = saved(k); }); $('#zlist').value = ZL_SAVED; renderForm(); });
 $('#resetAll').addEventListener('click', () => {
   if (!confirm('Вернуть все настройки к значениям по умолчанию?')) return;
   KEYS.forEach((k) => { CUR[k] = DEF[k] || ''; }); renderForm();
@@ -636,9 +717,56 @@ $('#logCopy').addEventListener('click', async () => {
   }
 });
 
+// ---------------------------------------------------------------- zapret: списки и проверка
+async function loadZ() {
+  const [u, d, a] = await Promise.all([ctl('zlist'), ctl('zdefault'), ctl('zauto')]);
+  ZL_SAVED = normList(u.out);
+  $('#zlist').value = ZL_SAVED;
+  const dl = d.out.split('\n').filter(Boolean), al = a.out.split('\n').filter(Boolean);
+  $('#zdef').textContent = dl.join('\n'); $('#zdefN').textContent = dl.length;
+  $('#zauto').textContent = al.join('\n') || 'пока пусто'; $('#zautoN').textContent = al.length;
+  renderBar();
+}
+$('#zautoClear').addEventListener('click', async () => {
+  if (!confirm('Очистить список сайтов, найденных автоматически?')) return;
+  await ctl('zauto-clear'); await loadZ(); toast('Автосписок очищен');
+});
+
+const ST_RC = { '28': 'нет ответа (молча режут)', '35': 'обрыв при установке HTTPS', '7': 'не подключается (блок по IP?)',
+  '6': 'адрес не найден', '60': 'чужой сертификат (подмена)', '56': 'соединение сброшено', '52': 'пустой ответ' };
+const stOk = (v) => { const m = /^(\d{3}) ([\d.]+) (\d+)/.exec(v || ''); return !!m && m[3] === '0' && m[1] !== '000'; };
+function stLine(label, v) {
+  const m = /^(\d{3}) ([\d.]+) (\d+)/.exec(v || '');
+  if (!m) return '<div class="st-line"><span class="dot"></span>' + label + ': нет данных</div>';
+  const ok = stOk(v);
+  const t = ok ? 'открывается, ' + (+m[2]).toFixed(1) + ' с' : (ST_RC[m[3]] || 'ошибка ' + esc(m[3]));
+  return '<div class="st-line"><span class="dot ' + (ok ? 'green' : 'red') + '"></span>' + label + ': ' + t + '</div>';
+}
+$('#stBtn').addEventListener('click', async () => {
+  const host = $('#stHost').value.trim();
+  if (!host) return;
+  const btn = $('#stBtn'), res = $('#stRes');
+  btn.disabled = true; res.innerHTML = '<span class="muted">Проверяю, до 20 секунд…</span>';
+  try {
+    const r = await ctl('sitetest ' + q(host));
+    const out = r.out.trim();
+    if (/^ERR/m.test(out)) {
+      res.innerHTML = '<div class="st-line"><span class="dot red"></span>' + esc(out.replace(/^[\s\S]*?ERR /, '')) + '</div>';
+      return;
+    }
+    const o = {};
+    out.split('\n').forEach((l) => { const i = l.indexOf(' '); if (i > 0) o[l.slice(0, i)] = l.slice(i + 1); });
+    const dOk = stOk(o.direct), zOk = stOk(o.zapret);
+    res.innerHTML = stLine('Без обхода', o.direct) + stLine('С обходом', o.zapret) +
+      '<div class="muted mt8" style="font-size:13px">' + (dOk ? 'Сайт и так открывается, обход не нужен.'
+        : zOk ? 'Обход помогает. В режиме «из списка» добавь сайт в свой список, если его нет во встроенном.'
+        : 'С этой стратегией не помогло. Попробуй другую; если ни одна не поможет — скорее всего, блок по IP, тут нужен VPN.') + '</div>';
+  } finally { btn.disabled = false; }
+});
+
 // ---------------------------------------------------------------- старт
 (async () => {
-  await Promise.all([loadStatus(), loadConf()]);
+  await Promise.all([loadStatus(), loadConf(), loadZ()]);
   loadApps().then(renderChips);
   setInterval(() => { if (!document.hidden && !busy) loadStatus(); }, 3000);
 })();
@@ -651,14 +779,20 @@ function mockExec(cmd) {
   });
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=v2.8 (предпросмотр)\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
-    '\ndns_degraded=0\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.comss.one/dns-query\nD DNS_FALLBACKS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=1\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=com.avito.android\n' + M.conf };
+    '\nzapret=on\nzapret_auto=2\ndns_degraded=0\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.comss.one/dns-query\nD DNS_FALLBACKS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=1\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=0\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=md5sig\nD ZAPRET_QUIC_BLOCK=1\n' + M.conf };
   if (a === 'toggle') { M.target = M.target === 'vpn' ? 'direct' : 'vpn'; M.ack = 't' + Date.now(); return { errno: 0, out: 'OK ' + M.ack }; }
   if (a === 'apply') { M.ack = 'a' + Date.now(); return { errno: 0, out: 'OK ' + M.ack }; }
   if (a === 'ack') return { errno: 0, out: M.ack };
   if (/^(set|unset) /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'apps') return { errno: 0, out: 'com.avito.android\nru.ozon.app.android\norg.telegram.messenger\ncom.google.android.youtube\n' };
   if (a === 'doh') return { errno: 0, out: 'ok 184' };
+  if (a === 'zlist') return { errno: 0, out: '' };
+  if (a === 'zdefault') return { errno: 0, out: 'youtube.com\ngooglevideo.com\ndiscord.com\nx.com\n' };
+  if (a === 'zauto') return { errno: 0, out: 'example.org\nfoo.net\n' };
+  if (/^zlist-set /.test(a)) return { errno: 0, out: 'OK 1' };
+  if (a === 'zauto-clear') return { errno: 0, out: 'OK' };
+  if (/^sitetest /.test(a)) return { errno: 0, out: 'ip 142.251.155.4\ndirect 000 8.001 28\nzapret 200 1.02 0\n' };
   if (/^log/.test(a)) return { errno: 0, out: '[20:15:01] Toggle signal received\n[20:15:02] VPN setup complete\n' };
   return { errno: 1, out: 'ERR' };
 }
