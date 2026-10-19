@@ -149,6 +149,13 @@
 #     comss короче. DNS телефона через comss — сразу при пропаже VPN (без
 #     второго замера): в эти 2-4с Android успевал закэшировать ответы
 #     оператора на TTL (до ~47 мин) мимо comss.
+#   - 2.6.3: dnsproxy помнит маршрут, на котором запущен (vpn / wan:<ifc>),
+#     и перезапускается при его смене, кто бы к нему ни обратился. Раньше
+#     apply_state проверял его через старое соединение до перезапуска ->
+#     ложный откат на 30с (лог 2.6.2, 09:24). Добавлена смена WAN без VPN
+#     (Wi-Fi <-> мобилка) — там соединение тоже зависало.
+#     Неудачная проверка в первые 15с после смены маршрута/старта демона —
+#     откат с перепроверкой через 5с, а не через 30.
 # ============================================================================
 # ============================================================================
 # ============================================================================
@@ -371,6 +378,9 @@ DNS_HEALTH_LAST=0
 DNS_LOG_SEEN=0         # размер лога dnsproxy на прошлой проверке
 DNS_ACT_LAST=""        # счётчик DNS-редиректов на прошлой проверке
 DNS_WAN_LAST=0         # байты WAN на прошлой проверке (для отката)
+DNSPROXY_STARTED_ROUTE=""  # route_id() на момент запуска dnsproxy
+DNS_ROUTE_CHANGED_TS=0    # когда последний раз сменился маршрут / старт демона
+DNS_FAST_RECHECK=0        # 1 = откат сразу после смены маршрута: перепроверка через INTERVAL
 LAST_STATUS_MODE=""
 LAST_STATUS_IFACES=""
 DNSPROXY_SIG=""        # "<режим>|<апстримы>" запущенного экземпляра
@@ -1390,8 +1400,17 @@ dnsproxy_start() {
 
     [ -n "$DNSPROXY_BIN" ] || { log "WARNING: нет bin/dnsproxy, DNS по-старому"; return 1; }
     sig="$tag|$ups"
+    local route_now
+    route_now=$(route_id)
     if [ "$sig" = "$DNSPROXY_SIG" ] && dnsproxy_alive; then
-        return 0
+        [ "$DNSPROXY_STARTED_ROUTE" = "$route_now" ] && return 0
+        # Тот же режим, но у root другой маршрут (VPN поднялся/пропал, или без
+        # VPN сменился WAN), а DoH-соединение dnsproxy осталось на прежнем.
+        # Раньше перезапуск делал только phone_dns_reconcile — уже ПОСЛЕ
+        # apply_state, и проверка в apply_dns_mode шла через старое
+        # соединение -> ложный откат на 30с (лог 2.6.2, 09:24:30-09:25:06).
+        log "dnsproxy: маршрут сменился ($DNSPROXY_STARTED_ROUTE -> $route_now) — перезапуск"
+        DNS_ROUTE_CHANGED_TS=$(date +%s)
     fi
     dnsproxy_stop
 
@@ -1429,6 +1448,7 @@ dnsproxy_start() {
         [ -n "$u" ] && echo "$u" > "$DNSPROXY_PID_FILE"
         if [ -n "$u" ] && ss -lun 2>/dev/null | grep -qE "[:.]$DNSPROXY_PORT[[:space:]]"; then
             DNSPROXY_SIG="$sig"
+            DNSPROXY_STARTED_ROUTE="$route_now"
             log "dnsproxy запущен (pid $u, gid ${DNSPROXY_GID:-0}, $tag): $ups"
             return 0
         fi
@@ -1437,6 +1457,18 @@ dnsproxy_start() {
     log "ERROR: dnsproxy не поднялся: $(tail -n 3 "$DNSPROXY_LOG" 2>/dev/null | tr '\n' ' ')"
     dnsproxy_stop
     return 1
+}
+
+# VPN сейчас поднят (у tun есть адрес)
+vpn_up_now() {
+    $ip addr show "$TUN_NAME" 2>/dev/null | grep -q "inet "
+}
+
+# Каким путём сейчас ходит трафик root (а значит, DoH-соединение dnsproxy):
+# "vpn" — через tun; "wan:<ифейс>" — напрямую. При VPN смена WAN dnsproxy не
+# касается (это забота VPN-клиента), без VPN — касается (Wi-Fi <-> мобилка).
+route_id() {
+    if vpn_up_now; then echo vpn; else echo "wan:$LAST_WAN_IFACE"; fi
 }
 
 # Трафик root (dnsproxy) идёт в tun? Если VPN-приложение в per-app режиме
@@ -1623,8 +1655,18 @@ dnsproxy_restart() {
 # Идемпотентно: правила применяются всегда (пересборка могла заново поставить
 # редирект на dnsproxy), в лог — только на переходе.
 dns_degrade() {
-    [ "$DNS_DEGRADED" = "1" ] || \
-        log "WARNING: DoH-апстрим не отвечает ($1) — DNS временно обычный (оператор/VPN), проверяю раз в ${DNS_HEALTH_RECOVER}с"
+    if [ "$DNS_DEGRADED" != "1" ]; then
+        # Только что сменился маршрут (VPN поднялся/пропал) или стартовал демон:
+        # новый путь может заработать не сразу. На обычный DNS всё равно
+        # уходим (это безопасно), но перепроверяем через INTERVAL, а не через
+        # RECOVER и без условия "нужна активность" — иначе 30с без DoH зря.
+        if [ $(( $(date +%s) - DNS_ROUTE_CHANGED_TS )) -lt 15 ]; then
+            DNS_FAST_RECHECK=1
+            log "WARNING: DoH не ответил сразу после смены маршрута ($1) — DNS временно обычный, перепроверю через ${DNS_HEALTH_INTERVAL}с"
+        else
+            log "WARNING: DoH-апстрим не отвечает ($1) — DNS временно обычный (оператор/VPN), проверяю раз в ${DNS_HEALTH_RECOVER}с"
+        fi
+    fi
     DNS_DEGRADED=1
     case "$DNS_STATE" in
         dnsproxy*)
@@ -1690,7 +1732,7 @@ dns_health() {
     DNS_LOG_SEEN="$sz"
 
     period="$DNS_HEALTH_INTERVAL"
-    [ "$DNS_DEGRADED" = "1" ] && period="$DNS_HEALTH_RECOVER"
+    [ "$DNS_DEGRADED" = "1" ] && [ "$DNS_FAST_RECHECK" != "1" ] && period="$DNS_HEALTH_RECOVER"
     [ $((now - DNS_HEALTH_LAST)) -lt "$period" ] && return 0
 
     # Проверяем только при реальном использовании: иначе DoH-запрос раз в
@@ -1706,6 +1748,9 @@ dns_health() {
         act=$(dns_activity)
         [ "$act" = "$DNS_ACT_LAST" ] && return 0
         DNS_ACT_LAST="$act"
+    elif [ "$DNS_FAST_RECHECK" = "1" ]; then
+        # быстрая перепроверка после смены маршрута — без условия активности
+        DNS_FAST_RECHECK=0
     else
         local wb
         wb=$(wan_bytes)
@@ -1787,8 +1832,14 @@ phone_dns_reconcile() {
     # dnsproxy остаётся на старом пути и висит до таймаута — в логе 2.5 это
     # ~16с SERVFAIL у клиентов на переключении Incy. Перезапуск сразу, без
     # сглаживания (сглаживание — только для включения/снятия правил ниже).
-    if [ -n "$PHONE_VPN_SEEN" ] && [ "$up" != "$PHONE_VPN_SEEN" ] && dnsproxy_alive; then
-        dnsproxy_restart "VPN $([ "$up" = 1 ] && echo поднялся || echo пропал)"
+    # По состоянию, при котором dnsproxy запущен, а не по "переходу между
+    # двумя замерами": если apply_state уже перезапустил его под новый
+    # маршрут, второй раз не перезапускаем.
+    local route
+    route=$(route_id)
+    if dnsproxy_alive && [ -n "$DNSPROXY_STARTED_ROUTE" ] &&        [ "$route" != "$DNSPROXY_STARTED_ROUTE" ] && [ "$route" != "wan:" ]; then
+        DNS_ROUTE_CHANGED_TS=$(date +%s)
+        dnsproxy_restart "маршрут: $DNSPROXY_STARTED_ROUTE -> $route"
     fi
     # "VPN пропал" — принимаем сразу, "VPN появился" — только 2 раза подряд.
     # Пока ждали второго замера (~2-4с), DNS телефона шёл к оператору, и
@@ -2736,6 +2787,10 @@ dnsproxy_exempt_down       # исключение AdGuard от убитого д
 
 # Профиль TCP — сразу, а не при первом появлении раздачи
 apply_network_profile "$CURRENT_NET_PROFILE"
+
+# Старт = "маршрут только что появился": первая неудачная проверка DoH
+# (сеть ещё поднимается) — с быстрой перепроверкой, а не на 30с
+DNS_ROUTE_CHANGED_TS=$(date +%s)
 
 cleanup_all_rules
 clear_rules_file
