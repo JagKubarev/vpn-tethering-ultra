@@ -247,7 +247,7 @@ NET_PROFILE_ADAPTIVE=0
 ZAPRET_ENABLE=0
 ZAPRET_MODE=list        # list = встроенный + свой + автосписок, all = все HTTPS
 ZAPRET_PHONE=1          # 1 = и приложения телефона (кроме VPN-клиентов)
-ZAPRET_STRATEGY=md5sig  # md5sig | badseq | disorder | seqovl | custom (ZAPRET_ARGS)
+ZAPRET_STRATEGY=fakeddisorder  # fakeddisorder | md5sig | md5sig2 | badseq | disorder | seqovl | custom (ZAPRET_ARGS)
 ZAPRET_ARGS=""          # для custom: аргументы --dpi-desync*, файлы подделок только @G/@Q (подбирает сканер в WebUI)
 ZAPRET_QUIC_BLOCK=1     # закрыть QUIC раздаче, пока zapret включён: браузер сразу идёт по TCP
 # =====================================================================
@@ -268,7 +268,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
         ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_MODE)     case "$val" in list|all) ;; *) ok=0 ;; esac ;;
-        ZAPRET_STRATEGY) case "$val" in md5sig|badseq|disorder|seqovl|custom) ;; *) ok=0 ;; esac ;;
+        ZAPRET_STRATEGY) case "$val" in fakeddisorder|md5sig|md5sig2|badseq|disorder|seqovl|custom) ;; *) ok=0 ;; esac ;;
         ZAPRET_ARGS)
             # только --dpi-desync*; @ — лишь встроенные подделки (=@G / =@Q),
             # никаких путей: строка уходит в nfqws, запущенный от root
@@ -351,12 +351,15 @@ conf_apply_overrides() {
 conf_apply_overrides
 
 # Аргументы стратегии nfqws. $1 — папка с fake-файлами (module/zapret).
-# Стратегии подобраны вживую на мобильном операторе (лог 2.8, 20:4x):
-# md5sig — 12/12 (YouTube, Discord, X, facebook, rutracker...), badseq и
-# seqovl — 7/12 (без facebook/rutracker...), disorder (без подделок) — 7/12.
+# Стратегии проверены сканером в 10 сетях (МегаФон, Дом.ру x2, Сибирский
+# телеком x3, Сибирские сети x3): fakeddisorder — полная или почти полная
+# везде; md5sig (midsld) теряет facebook у "Сибирских сетей"; md5sig2
+# (1,midsld) там идеальна, но у "Сибирского телекома" иногда рвёт TLS.
 zapret_strategy_args() {
     local g="$1/tls_clienthello_www_google_com.bin"
     case "$ZAPRET_STRATEGY" in
+        md5sig)   echo "--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@$g" ;;
+        md5sig2)  echo "--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@$g" ;;
         badseq)   echo "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=badseq --dpi-desync-fake-tls=@$g" ;;
         disorder) echo "--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld" ;;
         seqovl)   echo "--dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=@$g --dpi-desync-fake-tls=@$g" ;;
@@ -364,9 +367,9 @@ zapret_strategy_args() {
             if [ -n "$ZAPRET_ARGS" ]; then
                 echo "$ZAPRET_ARGS" | sed "s#=@G#=@$g#g; s#=@Q#=@$1/quic_initial_www_google_com.bin#g"
             else
-                echo "--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@$g"
+                echo "--dpi-desync=fake,fakeddisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@$g"
             fi ;;
-        *)        echo "--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@$g" ;;
+        *)        echo "--dpi-desync=fake,fakeddisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@$g" ;;
     esac
 }
 # Для WebUI ("проверить сайт"): стратегия с учётом vpn_tether.conf
@@ -3202,6 +3205,10 @@ handle_change() {
     [ -n "$current_wan_ip" ] && LAST_WAN_IP="$current_wan_ip"
     [ -n "$current_gw" ] && LAST_WAN_GW="$current_gw"
     [ -z "$LAST_WAN_IFACE" ] && LAST_WAN_IFACE="$current_wan"
+    # В VPN-режиме смена сети обходится без пересборки -> update_status не
+    # звался, и в status оставался старый wan= (WebUI-проверки шли через
+    # интерфейс без адреса). Обновляем статус на любой смене сети.
+    $net_diff && phone_status_refresh
 
     local tun_idx=$(read_table_index "$TUN_NAME")
     refresh_tether_ifaces
@@ -3374,7 +3381,7 @@ monitor_loop() {
 trap 'handle_usr1' USR1
 trap 'cleanup_on_exit' TERM INT
 
-echo "=== VPN Tether v2.10 (3.10.0-hybrid.14) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.11 (3.10.0-hybrid.15) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"

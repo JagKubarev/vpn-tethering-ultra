@@ -66,7 +66,7 @@ DNSPROXY_ENABLE=1
 # Для трафика мимо VPN. Удобнее настраивать в WebUI модуля.
 #ZAPRET_ENABLE=0
 #ZAPRET_MODE=list
-#ZAPRET_STRATEGY=md5sig
+#ZAPRET_STRATEGY=fakeddisorder
 
 # --- Защита -------------------------------------------------
 # Выбран режим VPN, а VPN не подключён:
