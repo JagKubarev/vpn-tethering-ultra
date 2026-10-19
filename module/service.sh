@@ -156,6 +156,11 @@
 #     (Wi-Fi <-> мобилка) — там соединение тоже зависало.
 #     Неудачная проверка в первые 15с после смены маршрута/старта демона —
 #     откат с перепроверкой через 5с, а не через 30.
+#   - 2.7: понятный вывод Action и текущее состояние в описании модуля
+#     (STATUS_IN_DESCRIPTION); status — строки 1-2 как раньше + КЛЮЧ=значение.
+#     DNSPROXY_ENABLE=0 — полностью без dnsproxy (DNS как до 2.3).
+#     Настройки в /data/adb/vpn_tether.conf — переживают обновление модуля;
+#     файл не исполняется, только известные ключи с проверкой значений.
 # ============================================================================
 # ============================================================================
 # ============================================================================
@@ -176,7 +181,13 @@ KILL_SWITCH_STRICT=1   # 1 = выбран режим VPN, а VPN не подня
 RULE_WATCHDOG=1        # 1 = каждые ~6с проверять, что ip rule/цепочки живы,
                        #     и пересобирать их, если netd их снёс.
 
+STATUS_IN_DESCRIPTION=1  # 1 = писать текущее состояние в описание модуля
+                         #     (видно в списке модулей KernelSU/Magisk)
+
 # ---------------------------- DNS (dnsproxy) ----------------------------
+DNSPROXY_ENABLE=1      # 0 = dnsproxy не используется ВООБЩЕ: DNS как в версиях
+                       #     до 2.3 (VPN -> DNS VPN, напрямую -> обычный), без
+                       #     comss, без DNS телефона, без проверок DoH.
 DNS_DIRECT="doh"       # direct-режим: doh   = DNS_UPSTREAMS через dnsproxy
                        #               plain = как раньше, DNAT на 1.1.1.1
 DNS_VPN="dnat"         # VPN-режим:    dnat  = DNAT в DNS из VPN (как раньше; нужен,
@@ -220,6 +231,64 @@ DNS_HEALTH_IDLE_BYTES=20000
 DNS_PROBE_SLOW_MS=3000
 DNS_PROBE_TIMEOUT=4    # сек: столько ждём ответ вообще
 # =====================================================================
+
+# ------------------------------------------------------------------------
+# Пользовательские настройки: /data/adb/vpn_tether.conf
+# Лежит ВНЕ папки модуля, поэтому переживает обновления (правки в самом
+# service.sh при обновлении затираются). Формат: КЛЮЧ=значение, # — коммент.
+# Файл НЕ исполняется: читаются только известные ключи, значения — как
+# данные, с проверкой допустимых значений.
+# ------------------------------------------------------------------------
+USER_CONF="/data/adb/vpn_tether.conf"
+USER_CONF_NOTE=""
+_conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списка)
+    local key="$1" val="$2" ok=1
+    case "$key" in
+        DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION)
+            case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
+        DNS_DIRECT) case "$val" in doh|plain) ;; *) ok=0 ;; esac ;;
+        DNS_VPN)    case "$val" in dnat|cache|doh) ;; *) ok=0 ;; esac ;;
+        DNS_HEALTH_INTERVAL|DNS_HEALTH_RECOVER)
+            case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 2 ] && [ "$val" -le 600 ] || ok=0 ;; esac ;;
+        DNS_UPSTREAMS|DNS_FALLBACKS|DNS_VPN_UPSTREAMS|DNS_BOOTSTRAP)
+            # только адреса апстримов: буквы, цифры, : / . - _ [ ] и пробелы
+            case "$val" in ''|*[!A-Za-z0-9:/._\ \[\]-]*) ok=0 ;; esac ;;
+        *) ok=0 ;;
+    esac
+    if [ "$ok" = "1" ]; then
+        eval "$key=\"\$val\""
+        USER_CONF_NOTE="$USER_CONF_NOTE $key"
+    else
+        USER_CONF_NOTE="$USER_CONF_NOTE !$key(неверное значение)"
+    fi
+}
+load_user_conf() {
+    local line key val
+    [ -f "$USER_CONF" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        line=$(printf '%s' "$line" | tr -d '\r')
+        line="${line%%#*}"
+        case "$line" in *=*) ;; *) continue ;; esac
+        key=$(printf '%s' "${line%%=*}" | tr -d ' \t')
+        val=$(printf '%s' "${line#*=}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        val="${val#\"}"; val="${val%\"}"; val="${val#\'}"; val="${val%\'}"
+        case "$key" in
+            DNSPROXY_ENABLE|DNS_DIRECT|DNS_VPN|DNS_PHONE|DNS_UPSTREAMS|DNS_FALLBACKS|DNS_VPN_UPSTREAMS|DNS_BOOTSTRAP|\
+            DNS_HEALTH_INTERVAL|DNS_HEALTH_RECOVER|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION)
+                _conf_set "$key" "$val" ;;
+            '') ;;
+            *) USER_CONF_NOTE="$USER_CONF_NOTE ?$key(неизвестный ключ)" ;;
+        esac
+    done < "$USER_CONF"
+}
+load_user_conf
+
+# Главный выключатель dnsproxy: всё, что на нём держится, — в старое поведение
+if [ "$DNSPROXY_ENABLE" != "1" ]; then
+    DNS_DIRECT="plain"
+    DNS_VPN="dnat"
+    DNS_PHONE=0
+fi
 
 FORCE_PUBLIC_DNS=0
 
@@ -364,6 +433,8 @@ DNSPROXY_BIN=""
 for _c in $_DP_CANDIDATES; do
     [ -x "$_c" ] && DNSPROXY_BIN="$_c" && break
 done
+# DNSPROXY_ENABLE=0 -> бинарь "не найден": dnsproxy не стартует ни при каком раскладе
+[ "$DNSPROXY_ENABLE" = "1" ] || DNSPROXY_BIN=""
 DNSPROXY_PID_FILE="/data/local/tmp/vpn_tether_dnsproxy.pid"
 DNSPROXY_LOG="/data/local/tmp/vpn_tether_dnsproxy.log"
 CHAIN_DNSP="VPN_TETHER_DNSP"
@@ -502,8 +573,84 @@ update_status() {
     fi
     LAST_STATUS_MODE="$mode"
     LAST_STATUS_IFACES="$ifaces"
-    
-    printf '%s\n%s' "$status_line" "$ifaces" > "$STATUS_FILE"
+
+    # Строки 1-2 — как раньше (совместимость), дальше КЛЮЧ=значение для
+    # action.sh: он собирает из них понятный человеку текст.
+    local vpn_up=0 up_host
+    vpn_up_now && vpn_up=1
+    up_host=$(echo "$DNS_UPSTREAMS" | awk '{print $1}' | sed -E 's#^[a-z0-9]+://##; s#[/:].*##')
+    {
+        printf '%s\n%s\n' "$status_line" "$ifaces"
+        echo "mode=$mode"
+        echo "target=$(is_vpn_tether_enabled && echo vpn || echo direct)"
+        echo "ifaces=$(echo "$ifaces" | tr '/' ' ' | sed 's/no-tether//')"
+        echo "vpn_up=$vpn_up"
+        echo "dns_state=$DNS_STATE"
+        echo "dns_degraded=$DNS_DEGRADED"
+        echo "phone_dns=$PHONE_DNS_ON"
+        echo "dns_phone_enabled=$DNS_PHONE"
+        echo "dnsproxy_enable=$DNSPROXY_ENABLE"
+        echo "dns_upstream=$up_host"
+        echo "kill_switch=$KILL_SWITCH"
+        echo "mtu=$tun0_mtu"
+        echo "mss=$CURRENT_MSS"
+        echo "updated=$(date '+%H:%M:%S')"
+    } > "$STATUS_FILE.tmp" 2>/dev/null && mv -f "$STATUS_FILE.tmp" "$STATUS_FILE"
+
+    update_description "$mode" "$ifaces"
+}
+
+# wlan2/rndis0 -> "Wi-Fi, USB"
+friendly_ifaces() {
+    local out="" i n
+    for i in $(echo "$*" | tr '/' ' '); do
+        case "$i" in
+            wlan*|ap*|swlan*|softap*|hotspot*) n="Wi-Fi" ;;
+            rndis*|ncm*|usb*)                 n="USB" ;;
+            bt-pan|bnep*)                     n="Bluetooth" ;;
+            eth*)                             n="Ethernet" ;;
+            no-tether|"")                     continue ;;
+            *)                                n="$i" ;;
+        esac
+        case ", $out, " in *", $n, "*) ;; *) out="${out:+$out, }$n" ;; esac
+    done
+    echo "$out"
+}
+
+# Текущее состояние — в описание модуля (список модулей KernelSU/Magisk).
+# Пишем только при изменении; на выходе демона возвращаем обычное описание.
+MODULE_DESC_DEFAULT="Раздача Wi-Fi/USB через VPN с kill-switch и своим DNS (DoH). ▶ Action — переключить VPN/напрямую."
+update_description() {
+    [ "$STATUS_IN_DESCRIPTION" = "1" ] || return 0
+    local mode="$1" ifaces="$2" f="$MODULE_DIR/module.prop" names d up_host
+    [ -f "$f" ] || return 0
+    names=$(friendly_ifaces "$ifaces")
+    up_host=$(echo "$DNS_UPSTREAMS" | awk '{print $1}' | sed -E 's#^[a-z0-9]+://##; s#[/:].*##')
+    case "$mode" in
+        vpn)     d="✅ Раздача через VPN${names:+ · $names}" ;;
+        blocked) d="⛔ VPN не подключён — раздача на паузе (kill-switch)" ;;
+        *)
+            if [ -z "$names" ]; then
+                d="💤 Раздача выключена · режим: $(is_vpn_tether_enabled && echo VPN || echo напрямую)"
+            else
+                d="🌍 Раздача напрямую · $names"
+            fi ;;
+    esac
+    if [ "$DNS_DEGRADED" = "1" ]; then
+        d="$d · ⚠️ DoH недоступен, DNS обычный"
+    elif [ "$mode" = "direct" ] && [ -n "$names" ]; then
+        case "$DNS_STATE" in dnsproxy*) d="$d · DNS: $up_host" ;; esac
+    fi
+    d="$d · ▶ Action — переключить"
+    set_description "$d"
+}
+set_description() {
+    local f="$MODULE_DIR/module.prop"
+    [ -f "$f" ] || return 0
+    [ "$(sed -n 's/^description=//p' "$f")" = "$1" ] && return 0
+    awk -v d="$1" '/^description=/ {print "description=" d; next} {print}' "$f" > "$f.tmp" 2>/dev/null && \
+        grep -q '^id=' "$f.tmp" && cat "$f.tmp" > "$f"
+    rm -f "$f.tmp"
 }
 
 save_rule() { printf '%s\n' "$*" >> "$RULES_FILE"; }
@@ -2706,6 +2853,7 @@ handle_usr1() {
 
 cleanup_on_exit() {
     log "Exiting, cleaning up..."
+    [ "$STATUS_IN_DESCRIPTION" = "1" ] && set_description "$MODULE_DESC_DEFAULT"
     cleanup_all_rules
     phone_dns_rules_off
     PHONE_DNS_ON=0
@@ -2750,10 +2898,11 @@ monitor_loop() {
 trap 'handle_usr1' USR1
 trap 'cleanup_on_exit' TERM INT
 
-echo "=== VPN Tether v3.9.9-hybrid.8 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.7 (3.10.0-hybrid.9) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
-log "Config: HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
+[ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
+log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
 
 disable_hw_offload
 
