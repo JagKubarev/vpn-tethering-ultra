@@ -174,6 +174,15 @@
 #   - В ip rule попадают только настоящие имена интерфейсов (в 2.11 после
 #     ребута нашлось "iif netd|wlan2"); прошлый лог -> vpn_tether.log.prev.
 # ============================================================================
+# v2.13 — утечка мимо VPN через BPF tethering offload (Android 13+):
+#   - tc-программы Tethering форвардят потоки раздачи мимо netfilter. После
+#     direct -> VPN старые соединения клиента шли напрямую через аплинк с
+#     реальным IP (20.10: ~1 МБ/мин, 10+ мин), kill-switch их не видел.
+#     override_bpf_offload на A13+ не работает — теперь модуль снимает сами
+#     tc-фильтры (bpf_offload_detach): при каждой пересборке и каждый цикл
+#     (Tethering вешает их заново при смене аплинка). Закрывает и IPv6.
+#   - Лог при старте больше не пишет ложное "offload disabled (HAL + BPF)".
+# ============================================================================
 # ============================================================================
 
 umask 022
@@ -2807,14 +2816,52 @@ disable_hw_offload() {
     settings put global tether_offload_disabled 1 2>/dev/null
     command -v device_config >/dev/null 2>&1 && \
         device_config put tethering override_bpf_offload false 2>/dev/null
-    # На A13+ BPF offload этим не выключается (проверено на A15: в dumpsys
-    # остаётся mIsBpfEnabled: true). Это не утечка: BpfCoordinator офлоадит
-    # только потоки, NAT-нутые на адрес аплинка, а VPN-потоки NAT-ятся в tun.
-    # Direct-потоки, пережившие переключение, убирает conntrack flush.
-    if dumpsys tethering 2>/dev/null | grep -q "mIsBpfEnabled: true"; then
-        log "HW offload disabled; BPF offload остаётся включённым (A13+), VPN-потоки он не трогает"
-    else
-        log "HW tethering offload disabled (HAL + BPF)"
+    # На A13+ BPF offload этим не выключается (A15: mIsBpfEnabled: true) —
+    # его снимает bpf_offload_detach. Раньше здесь был dumpsys-чек, но при
+    # загрузке раздача ещё не поднята, и в логе было ложное "HAL + BPF".
+    log "HW tethering offload disabled (HAL); BPF offload: снимаю tc-фильтры Tethering"
+    bpf_offload_detach
+    return 0
+}
+
+# --- BPF tethering offload (Android 13+) ---
+# tc-программы Tethering (schedcls_tether_*) на ingress раздачи и аплинка
+# форвардят потоки МИМО netfilter: их не видят ни kill-switch, ни ip rule,
+# ни conntrack flush. Правила в BPF-картах переживают удаление conntrack:
+# 20.10 после переключения direct -> VPN ноут ещё 10+ минут гнал старые
+# соединения напрямую через rmnet_data1 (~1 МБ/мин с реальным IP), хотя в
+# conntrack их уже не было, а guard не дропнул ни пакета. То же для IPv6:
+# ip6tables FORWARD DROP BPF-форвард не видит.
+# Снимаем сами фильтры — так же, как это делает Tethering (protocol + pref).
+# Без них форвард идёт обычным путём ядра, как при выключенном HAL offload.
+# Tethering вешает их заново при смене аплинка, поэтому проверка — каждый
+# цикл. Обратно не вешаем: offload вернётся после перезапуска точки доступа.
+TC_BIN="/system/bin/tc"
+BPF_DETACH_WARNED=0
+
+bpf_offload_detach() {   # [iface...]; без аргументов — все интерфейсы
+    [ "$DISABLE_HW_OFFLOAD" = "1" ] || return 0
+    [ -x "$TC_BIN" ] || return 0
+    local ifaces="$*" d out spec detached="" failed=""
+    [ -z "$ifaces" ] && ifaces=$(ls /sys/class/net 2>/dev/null)
+    for d in $ifaces; do
+        out=$($TC_BIN filter show dev "$d" ingress 2>/dev/null)
+        case "$out" in *schedcls_tether_*) ;; *) continue ;; esac
+        for spec in $(printf '%s\n' "$out" | awk '/schedcls_tether_/ {
+                p = ""; r = ""
+                for (i = 1; i < NF; i++) { if ($i == "protocol") p = $(i+1); if ($i == "pref") r = $(i+1) }
+                if (p != "" && r != "") print p ":" r }' | sort -u); do
+            if $TC_BIN filter del dev "$d" ingress protocol "${spec%%:*}" pref "${spec#*:}" 2>/dev/null; then
+                detached="$detached $d/${spec%%:*}"
+            else
+                failed="$failed $d/${spec%%:*}"
+            fi
+        done
+    done
+    [ -n "$detached" ] && log "BPF offload: сняты tc-фильтры Tethering [$detached ] — форвард раздачи только через netfilter"
+    if [ -n "$failed" ] && [ "$BPF_DETACH_WARNED" -eq 0 ]; then
+        log "WARNING: BPF offload: не снялись tc-фильтры [$failed ] — старые потоки могут идти мимо VPN"
+        BPF_DETACH_WARNED=1
     fi
     return 0
 }
@@ -3046,6 +3093,8 @@ setup_direct_rules() {
 
     # Direct — осознанный режим, kill-switch снимаем
     guard_down
+    # и здесь: BPF-правила direct-потоков иначе переживут переход в VPN
+    bpf_offload_detach
 
     # Базовые FORWARD-правила для direct mode (на случай DROP-политики)
     $iptables -C FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
@@ -3080,6 +3129,7 @@ setup_blocked_rules() {
     log "Setup BLOCKED (VPN выбран, но не поднят) for: [$tether_ifaces]"
 
     guard_apply hard $tether_ifaces
+    bpf_offload_detach
     cleanup_all_rules
     clear_rules_file
 
@@ -3111,6 +3161,9 @@ setup_vpn_rules() {
     # цепочки, а дальше идут sysctl/MTU/conntrack — это ~1-2 секунды, в
     # которые форвард с wlan2 спокойно уходил в main table (= напрямую).
     guard_apply hard $tether_ifaces
+    # BPF-форвард guard не видит — снимаем до пересборки (все интерфейсы:
+    # программы висят и на аплинке, который мог смениться)
+    bpf_offload_detach
 
     cleanup_all_rules
     clear_rules_file
@@ -3654,6 +3707,13 @@ monitor_loop() {
         dns_health
         [ $((_loop_count % 15)) -eq 0 ] && quic_block_apply
         [ $((_loop_count % 15)) -eq 7 ] && meta_eu_watchdog
+        # Tethering перевешивает BPF-фильтры при смене аплинка: раздача и WAN —
+        # каждый цикл (1-2 вызова tc), все интерфейсы — раз в ~30с
+        if [ $((_loop_count % 15)) -eq 11 ]; then
+            bpf_offload_detach
+        elif [ -n "$LAST_TETHER_IFACES$LAST_WAN_IFACE" ]; then
+            bpf_offload_detach $LAST_TETHER_IFACES $LAST_WAN_IFACE
+        fi
         zapret_reconcile
         _loop_count=$(( _loop_count + 1 ))
     done
@@ -3669,7 +3729,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.12 (3.10.0-hybrid.16) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.13 (3.10.0-hybrid.17) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
