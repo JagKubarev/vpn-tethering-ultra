@@ -183,6 +183,13 @@
 #     (Tethering вешает их заново при смене аплинка). Закрывает и IPv6.
 #   - Лог при старте больше не пишет ложное "offload disabled (HAL + BPF)".
 # ============================================================================
+# v2.14 — список zapret (list-default.txt) 47 -> 131 домен: новости (Медуза,
+#   Новая, Дождь, The Insider, Moscow Times, Свобода и сети RFE/RL, BBC, DW,
+#   Euronews, VOA...), украинские СМИ, сайты VPN, WhatsApp/Viber/Snapchat и
+#   др. Все проверены tools/blockscan.sh 20.10 (MTS Wi-Fi; часть и на YOTA):
+#   напрямую TLS глохнет, со стратегией fakeddisorder — ответ сервера.
+#   Telegram не добавлен: его адреса закрыты по IP, zapret не поможет.
+# ============================================================================
 # ============================================================================
 
 umask 022
@@ -3729,7 +3736,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.13 (3.10.0-hybrid.17) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.14 (3.10.0-hybrid.18) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
