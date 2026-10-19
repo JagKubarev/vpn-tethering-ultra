@@ -247,10 +247,12 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
     <div class="txt"><div class="t">Стратегия</div>
       <div class="s">Если сайт перестал открываться, попробуй другую и проверь ниже.</div></div>
     <select data-key="ZAPRET_STRATEGY">
-      <option value="md5sig">1 · md5sig — подобрана у тебя</option>
-      <option value="badseq">2 · badseq</option>
-      <option value="seqovl">3 · seqovl</option>
-      <option value="disorder">4 · disorder, без подделок</option>
+      <option value="fakeddisorder">1 · fakeddisorder — лучшая в среднем</option>
+      <option value="md5sig">2 · md5sig, разрез midsld</option>
+      <option value="md5sig2">3 · md5sig, разрез 1,midsld</option>
+      <option value="badseq">4 · badseq</option>
+      <option value="seqovl">5 · seqovl</option>
+      <option value="disorder">6 · disorder, без подделок</option>
       <option value="custom">Своя (из подбора)</option>
     </select>
     <div id="zArgsBox" style="display:none">
@@ -752,7 +754,8 @@ $('#zautoClear').addEventListener('click', async () => {
 
 const ST_RC = { '28': 'нет ответа (молча режут)', '35': 'обрыв при установке HTTPS', '7': 'не подключается (блок по IP?)',
   '6': 'адрес не найден', '60': 'чужой сертификат (подмена)', '56': 'соединение сброшено', '52': 'пустой ответ' };
-const stOk = (v) => { const m = /^(\d{3}) ([\d.]+) (\d+)/.exec(v || ''); return !!m && m[3] === '0' && m[1] !== '000'; };
+// успех = пришёл HTTP-ответ (тело могло не докачаться на медленном канале)
+const stOk = (v) => { const m = /^(\d{3}) ([\d.]+) (\d+)/.exec(v || ''); return !!m && m[1] !== '000'; };
 function stLine(label, v) {
   const m = /^(\d{3}) ([\d.]+) (\d+)/.exec(v || '');
   if (!m) return '<div class="st-line"><span class="dot"></span>' + label + ': нет данных</div>';
@@ -883,7 +886,7 @@ function mockExec(cmd) {
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=v2.8 (предпросмотр)\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
     '\nzapret=on\nzapret_auto=2\ndns_degraded=0\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.comss.one/dns-query\nD DNS_FALLBACKS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=1\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=0\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=md5sig\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\n' + M.conf };
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.comss.one/dns-query\nD DNS_FALLBACKS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=1\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=0\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\n' + M.conf };
   if (a === 'toggle') { M.target = M.target === 'vpn' ? 'direct' : 'vpn'; M.ack = 't' + Date.now(); return { errno: 0, out: 'OK ' + M.ack }; }
   if (a === 'apply') { M.ack = 'a' + Date.now(); return { errno: 0, out: 'OK ' + M.ack }; }
   if (a === 'ack') return { errno: 0, out: M.ack };

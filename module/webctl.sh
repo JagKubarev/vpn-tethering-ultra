@@ -222,6 +222,10 @@ case "$1" in
         rm -f "$ZSCAN.status" "$ZSCAN.results"
         # отдельная сессия: страница может закрыться, подбор продолжится
         setsid sh "$MODDIR/zapret/scan.sh" "$mode" "${sites# }" </dev/null >/dev/null 2>&1 &
+        # ждём, пока сканер реально стартует (pid + статус), иначе первый
+        # опрос страницы видел "не запущен" и переставал обновляться
+        i=0
+        while [ $i -lt 30 ] && ! { [ -s "$ZSCAN.pid" ] && [ -s "$ZSCAN.status" ]; }; do sleep 0.1; i=$((i + 1)); done
         echo "OK" ;;
     zscan-stop)
         pid=$(cat "$ZSCAN.pid" 2>/dev/null)
@@ -241,6 +245,7 @@ case "$1" in
         case "$h" in ''|*[!a-z0-9.-]*|*..*|.*) echo "ERR адрес"; exit 1 ;; esac
         wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
         [ -n "$wan" ] || { echo "ERR не знаю интерфейс оператора — модуль ещё не видел сеть"; exit 1; }
+        ip -4 addr show "$wan" 2>/dev/null | grep -q "inet " || { echo "ERR у $wan нет адреса — сеть только что сменилась? Повтори через полминуты"; exit 1; }
         case "$(uname -m)" in aarch64|arm64) nq="$MODDIR/bin/nfqws-arm64" ;; *) nq="$MODDIR/bin/nfqws-arm" ;; esac
         [ -x "$nq" ] || { echo "ERR нет nfqws"; exit 1; }
         CA=/apex/com.android.conscrypt/cacerts

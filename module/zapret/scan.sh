@@ -21,6 +21,8 @@ Q=203
 MODE="${1:-quick}"
 SITES="$2"
 [ -n "$SITES" ] || SITES="www.youtube.com i.ytimg.com discord.com gateway.discord.gg x.com www.facebook.com rutracker.org www.linkedin.com ya.ru www.google.com"
+# контрольные сайты без блокировок: по ним отличаем "заблокировано" от "нет связи"
+for _c in ya.ru www.google.com; do case " $SITES " in *" $_c "*) ;; *) SITES="$SITES $_c" ;; esac; done
 CA=/apex/com.android.conscrypt/cacerts
 [ -d "$CA" ] || CA=/system/etc/security/cacerts
 case "$(uname -m)" in aarch64|arm64) NQ="$MODDIR/bin/nfqws-arm64" ;; *) NQ="$MODDIR/bin/nfqws-arm" ;; esac
@@ -60,6 +62,7 @@ S_done=0; S_total=0; S_blocked=""; S_started=$(date +%H:%M:%S)
 st state=running stage="подготовка" msg=""
 
 [ -n "$WAN" ] || { st state=error msg="модуль ещё не видел сеть оператора"; exit 1; }
+ip -4 addr show "$WAN" 2>/dev/null | grep -q "inet " || { st state=error msg="у $WAN нет адреса — сеть только что сменилась? Повтори через полминуты"; exit 1; }
 [ -x "$NQ" ] || { st state=error msg="нет nfqws"; exit 1; }
 mkdir -p "$TMP"
 
@@ -88,7 +91,10 @@ test_sites() {
                 -w '%{http_code} %{time_total}' "https://$h/" 2>/dev/null)
             rc=$?
             set -- $r
-            if [ $rc = 0 ] && [ "$1" != "000" ]; then echo "ok $2" > "$TMP/r.$h"; else echo "x$rc 0" > "$TMP/r.$h"; fi
+            # успех = пришёл HTTP-ответ. ТСПУ режет на рукопожатии; если ответ
+            # пришёл, а тело не успело докачаться (медленный канал, rc=28) —
+            # блокировку обошли, это не провал стратегии
+            if [ -n "$1" ] && [ "$1" != "000" ]; then echo "ok $2" > "$TMP/r.$h"; else echo "x$rc 0" > "$TMP/r.$h"; fi
         ) &
         pids="$pids $!"
     done < "$TMP/ips"
@@ -105,6 +111,7 @@ while read -r h ip; do
     if [ "$v" = ok ]; then BASE_OK="$BASE_OK $h"; else BLOCKED="$BLOCKED $h"; fi
 done < "$TMP/ips"
 st blocked="$(echo $BLOCKED)"
+[ -n "$BASE_OK" ] || { st state=error msg="через $WAN не открылся ни один сайт, даже без блокировок — нет интернета или сеть сменилась"; exit 1; }
 [ -n "$BLOCKED" ] || { st state=done stage="готово" msg="ни один сайт из набора не заблокирован — подбирать нечего"; exit 0; }
 
 # основной zapret на запросы сканера не влияет и с ним: правило сканера стоит
@@ -158,8 +165,8 @@ fool_arg() {
 FAKE="--dpi-desync-fake-tls=@G"
 
 if [ "$MODE" = "quick" ]; then
-    # проверенные шаблоны (~15)
-    S_total=15
+    # проверенные шаблоны (autottl убран: ломал обычные сайты во всех 6 проверенных сетях)
+    S_total=14
     st stage="быстрый подбор"
     while IFS= read -r a; do
         [ -n "$a" ] && run_strat "$a" "быстрый"
@@ -174,7 +181,6 @@ if [ "$MODE" = "quick" ]; then
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=badsum --dpi-desync-split-pos=midsld $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=ts --dpi-desync-split-pos=midsld $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=datanoack --dpi-desync-split-pos=midsld $FAKE
---dpi-desync=fake,multidisorder --dpi-desync-autottl --dpi-desync-split-pos=midsld $FAKE
 --dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=@G $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
 --dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld
