@@ -108,11 +108,11 @@ show_status() {
         local dline=""
         if [ "$degraded" = "1" ]; then
             if [ "$mode" = "vpn" ]; then
-                dline="⚠️ $up не отвечает,
-              пока работает DNS VPN"
+                dline="⚠️ $up не ответил,
+              пока DNS VPN (проверяю снова)"
             else
-                dline="⚠️ $up не отвечает,
-              пока работает DNS оператора"
+                dline="⚠️ $up не ответил,
+              пока DNS оператора (проверяю снова)"
             fi
         else
             case "$dns" in
@@ -134,7 +134,8 @@ show_status() {
         if [ "$vpn_up" = "1" ]; then
             echo "📱 DNS телефона: через VPN"
         elif [ "$phone" = "1" ] && [ "$degraded" = "1" ]; then
-            echo "📱 DNS телефона: обычный ($up не отвечает)"
+            echo "📱 DNS телефона: пока обычный —"
+            echo "   $up не ответил, проверяю снова"
         elif [ "$phone" = "1" ]; then
             echo "📱 DNS телефона: $up 🔒"
         fi

@@ -1557,12 +1557,14 @@ dnsproxy_start() {
         # apply_state, и проверка в apply_dns_mode шла через старое
         # соединение -> ложный откат на 30с (лог 2.6.2, 09:24:30-09:25:06).
         log "dnsproxy: маршрут сменился ($DNSPROXY_STARTED_ROUTE -> $route_now) — перезапуск"
-        DNS_ROUTE_CHANGED_TS=$(date +%s)
+        dns_route_changed
     fi
     dnsproxy_stop
 
-    # timeout 3с: при "молчащем" апстриме (белые списки) запрос висел ~15с
-    args="-l 0.0.0.0 -p $DNSPROXY_PORT --cache --cache-optimistic --timeout=3s --refuse-any"
+    # timeout 3с: при "молчащем" апстриме (белые списки) запрос висел ~15с.
+    # cache-max-ttl: comss отдаёт TTL ~2,5 ч вместо 20-60 с у оригинала (CDN
+    # Авито, Google и т.п.) — смена узла CDN доезжала бы до клиентов часами.
+    args="-l 0.0.0.0 -p $DNSPROXY_PORT --cache --cache-optimistic --cache-max-ttl=600 --timeout=3s --refuse-any"
     for u in $ups; do args="$args -u $u"; done
     for u in $DNS_FALLBACKS; do args="$args -f $u"; done
     for u in $DNS_BOOTSTRAP; do args="$args -b $u"; done
@@ -1829,6 +1831,15 @@ dns_degrade() {
     phone_status_refresh
 }
 
+# Маршрут root сменился (VPN поднялся/пропал, сменился WAN). Если мы в откате,
+# то, возможно, как раз из-за старого пути: перепроверяем через INTERVAL и без
+# условия активности, а не через RECOVER (лог 2.7: 15:24:02 rmnet появился,
+# а DoH вернулся только в 15:24:36).
+dns_route_changed() {
+    DNS_ROUTE_CHANGED_TS=$(date +%s)
+    [ "$DNS_DEGRADED" = "1" ] && DNS_FAST_RECHECK=1
+}
+
 dns_restore() {
     [ "$DNS_DEGRADED" = "1" ] || return 0
     DNS_DEGRADED=0
@@ -1853,6 +1864,9 @@ dns_activity() {
 # Байты rx+tx на текущем WAN: грубый признак "модем сейчас и так работает"
 wan_bytes() {
     local w="$LAST_WAN_IFACE" rx tx
+    # без раздачи apply_state зовётся редко и WAN мог ещё не попасть сюда:
+    # тогда счётчик стоял на 0 и проверка восстановления не шла вовсе
+    [ -n "$w" ] || w=$(get_wan_iface)
     [ -n "$w" ] || { echo 0; return; }
     rx=$(cat "/sys/class/net/$w/statistics/rx_bytes" 2>/dev/null || echo 0)
     tx=$(cat "/sys/class/net/$w/statistics/tx_bytes" 2>/dev/null || echo 0)
@@ -1985,7 +1999,7 @@ phone_dns_reconcile() {
     local route
     route=$(route_id)
     if dnsproxy_alive && [ -n "$DNSPROXY_STARTED_ROUTE" ] &&        [ "$route" != "$DNSPROXY_STARTED_ROUTE" ] && [ "$route" != "wan:" ]; then
-        DNS_ROUTE_CHANGED_TS=$(date +%s)
+        dns_route_changed
         dnsproxy_restart "маршрут: $DNSPROXY_STARTED_ROUTE -> $route"
     fi
     # "VPN пропал" — принимаем сразу, "VPN появился" — только 2 раза подряд.
@@ -2033,6 +2047,14 @@ phone_dns_reconcile() {
     if [ "$PHONE_DNS_RETRY" -gt 0 ]; then
         PHONE_DNS_RETRY=$((PHONE_DNS_RETRY - 1))
         return 0
+    fi
+
+    # Сети ещё нет (загрузка, авиарежим): проверка DoH заведомо провалится и
+    # уведёт в откат — после загрузки 2.7 это давало ~50с "comss не отвечает"
+    # (лог 15:23:44 -> 15:24:36). Ждём, пока появится WAN.
+    if [ "$route" = "wan:" ]; then
+        LAST_WAN_IFACE=$(get_wan_iface)
+        [ -n "$LAST_WAN_IFACE" ] || return 0
     fi
 
     # Экземпляр с DNS_UPSTREAMS и тегом direct-doh — общий с раздачей в direct
@@ -2898,7 +2920,7 @@ monitor_loop() {
 trap 'handle_usr1' USR1
 trap 'cleanup_on_exit' TERM INT
 
-echo "=== VPN Tether v2.7 (3.10.0-hybrid.9) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.7.1 (3.10.0-hybrid.10) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
