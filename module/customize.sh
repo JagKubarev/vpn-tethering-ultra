@@ -24,6 +24,7 @@ case "$ARCH" in
 esac
 set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/action.sh"  0 0 0755
+set_perm "$MODPATH/webctl.sh"  0 0 0755
 
 # Настройки пользователя — вне папки модуля, чтобы переживали обновления.
 # Существующий файл не трогаем.

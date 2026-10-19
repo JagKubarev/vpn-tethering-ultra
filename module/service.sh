@@ -235,7 +235,11 @@ DNS_PROBE_TIMEOUT=4    # сек: столько ждём ответ вообще
 # ждёт ответа по UDP и только потом уходит на TCP — часть картинок не
 # успевает загрузиться. REJECT, а не DROP: приложение сразу видит закрытый
 # порт и идёт по обычному HTTPS без ожидания.
-QUIC_BLOCK_APPS="com.avito.android"
+QUIC_BLOCK_APPS=""   # пример: "com.avito.android"
+# Адаптивные профили сети. 0 = всегда FAST (BBR), без пингов по WAN.
+# 1 = пинг 1.1.1.1 через WAN раз в ~20с, RTT > порога (или потеря) 2 раза
+#     подряд -> STABLE (те же BBR, больше SYN-ретраев).
+NET_PROFILE_ADAPTIVE=0
 # =====================================================================
 
 # ------------------------------------------------------------------------
@@ -281,31 +285,54 @@ load_user_conf() {
         key=$(printf '%s' "${line%%=*}" | tr -d ' \t')
         val=$(printf '%s' "${line#*=}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
         val="${val#\"}"; val="${val%\"}"; val="${val#\'}"; val="${val%\'}"
-        case "$key" in
-            DNSPROXY_ENABLE|DNS_DIRECT|DNS_VPN|DNS_PHONE|DNS_UPSTREAMS|DNS_FALLBACKS|DNS_VPN_UPSTREAMS|DNS_BOOTSTRAP|\
-            DNS_HEALTH_INTERVAL|DNS_HEALTH_RECOVER|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
-            QUIC_BLOCK_APPS)
-                _conf_set "$key" "$val" ;;
-            '') ;;
+        [ -n "$key" ] || continue
+        case " $CONF_KEYS " in
+            *" $key "*) _conf_set "$key" "$val" ;;
             *) USER_CONF_NOTE="$USER_CONF_NOTE ?$key(неизвестный ключ)" ;;
         esac
     done < "$USER_CONF"
 }
+
+# Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS"
+# Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
+# ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
+for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
+conf_restore_defaults() {
+    local k
+    for k in $CONF_KEYS; do eval "$k=\"\$DEF_$k\""; done
+}
+
+# Для WebUI (webroot/webctl.sh): те же умолчания и та же проверка значений,
+# что у демона, — без второй копии правил. Демон при этом не запускается.
+case "$1" in
+    --defaults)
+        for _k in $CONF_KEYS; do eval "printf '%s=%s\n' \"\$_k\" \"\$DEF_$_k\""; done
+        exit 0 ;;
+    --check)
+        case " $CONF_KEYS " in *" $2 "*) ;; *) exit 2 ;; esac
+        USER_CONF_NOTE=""
+        _conf_set "$2" "$3"
+        case "$USER_CONF_NOTE" in *'!'*) exit 1 ;; esac
+        exit 0 ;;
+esac
+
 load_user_conf
 
 # Главный выключатель dnsproxy: всё, что на нём держится, — в старое поведение
-if [ "$DNSPROXY_ENABLE" != "1" ]; then
-    DNS_DIRECT="plain"
-    DNS_VPN="dnat"
-    DNS_PHONE=0
-fi
+conf_apply_overrides() {
+    if [ "$DNSPROXY_ENABLE" != "1" ]; then
+        DNS_DIRECT="plain"
+        DNS_VPN="dnat"
+        DNS_PHONE=0
+    fi
+}
+conf_apply_overrides
 
 FORCE_PUBLIC_DNS=0
 
-# Адаптивные профили сети. 0 = всегда FAST (BBR), без пингов по WAN.
-# 1 = пинг 1.1.1.1 через WAN раз в ~20с, RTT > порога (или потеря) 2 раза
-#     подряд -> STABLE (те же BBR, больше SYN-ретраев).
-NET_PROFILE_ADAPTIVE=0
+# (NET_PROFILE_ADAPTIVE — выше, в блоке настроек: раньше он задавался здесь,
+# ПОСЛЕ чтения vpn_tether.conf, и значение из файла затиралось)
 RTT_THRESHOLD_STABLE=250
 
 TIMEOUT_CMD="timeout 3"
@@ -409,6 +436,7 @@ FLAG_FILE="$MODULE_DIR/vpn_tether_enabled"
 STATUS_FILE="$MODULE_DIR/status"
 REQ_FILE="$MODULE_DIR/toggle_req"
 ACK_FILE="$MODULE_DIR/toggle_ack"
+RELOAD_FILE="$MODULE_DIR/reload_req"   # есть вместе с USR1 = перечитать настройки (WebUI)
 USR1_PENDING=0
 DISCOVERY_SRC=""
 LOG_FILE="/data/local/tmp/vpn_tether.log"
@@ -444,6 +472,7 @@ for _c in $_DP_CANDIDATES; do
     [ -x "$_c" ] && DNSPROXY_BIN="$_c" && break
 done
 # DNSPROXY_ENABLE=0 -> бинарь "не найден": dnsproxy не стартует ни при каком раскладе
+DNSPROXY_BIN_FOUND="$DNSPROXY_BIN"
 [ "$DNSPROXY_ENABLE" = "1" ] || DNSPROXY_BIN=""
 DNSPROXY_PID_FILE="/data/local/tmp/vpn_tether_dnsproxy.pid"
 DNSPROXY_LOG="/data/local/tmp/vpn_tether_dnsproxy.log"
@@ -605,6 +634,8 @@ update_status() {
         echo "kill_switch=$KILL_SWITCH"
         echo "mtu=$tun0_mtu"
         echo "mss=$CURRENT_MSS"
+        echo "quic_uids=$QUIC_UIDS"
+        echo "conf_note=$USER_CONF_NOTE"
         echo "updated=$(date '+%H:%M:%S')"
     } > "$STATUS_FILE.tmp" 2>/dev/null && mv -f "$STATUS_FILE.tmp" "$STATUS_FILE"
 
@@ -2775,6 +2806,10 @@ handle_change() {
     # сработать посреди apply_state, и "FORCE_UPDATE=0" после него терял сигнал.
     if [ "$USR1_PENDING" -eq 1 ]; then
         USR1_PENDING=0
+        if [ -f "$RELOAD_FILE" ]; then
+            rm -f "$RELOAD_FILE"
+            reload_config
+        fi
         refresh_vpn_target
         FORCE_UPDATE=1
         ack_token=$(cat "$REQ_FILE" 2>/dev/null)
@@ -2933,6 +2968,47 @@ handle_change() {
     return 0
 }
 
+# Перечитать vpn_tether.conf без перезагрузки (кнопка "Применить" в WebUI).
+# Зовётся из handle_change перед полной пересборкой (FORCE_UPDATE): здесь
+# только сбрасываем то, что пересборка сама не переставит, — DNS-состояние,
+# DNS телефона, QUIC, kill-switch при выключении, описание модуля.
+reload_config() {
+    local old_ks="$KILL_SWITCH"
+    conf_restore_defaults
+    USER_CONF_NOTE=""
+    load_user_conf
+    conf_apply_overrides
+    DNSPROXY_BIN="$DNSPROXY_BIN_FOUND"
+    [ "$DNSPROXY_ENABLE" = "1" ] || DNSPROXY_BIN=""
+    log "Настройки перечитаны:${USER_CONF_NOTE:- (всё по умолчанию)}"
+    log "Config: DNSPROXY=$DNSPROXY_ENABLE KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE UPSTREAMS=[$DNS_UPSTREAMS] QUIC_BLOCK=[$QUIC_BLOCK_APPS] HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s"
+
+    # DNS: всё с нуля — пересборка поставит заново под новые настройки
+    if [ "$PHONE_DNS_ON" = "1" ]; then phone_dns_rules_off; fi
+    PHONE_DNS_ON=0
+    PHONE_DNS_RETRY=0
+    PHONE_VPN_SEEN=""
+    PHONE_VPN_STABLE=""
+    dnsproxy_stop
+    dnsproxy_port_guard_down
+    DNSPROXY_SIG=""
+    DNSPROXY_STARTED_ROUTE=""
+    DNS_STATE=""
+    DNS_DEGRADED=0
+    DNS_FAST_RECHECK=0
+    DNS_FAIL_SIG=""
+    DNS_HEALTH_LAST=0
+    DNS_ROUTE_CHANGED_TS=$(date +%s)
+
+    # guard_apply при KILL_SWITCH=0 ничего не делает — старый guard остался бы
+    [ "$old_ks" = "1" ] && [ "$KILL_SWITCH" != "1" ] && guard_down
+
+    quic_block_down
+    quic_block_apply
+
+    [ "$STATUS_IN_DESCRIPTION" = "1" ] || set_description "$MODULE_DESC_DEFAULT"
+}
+
 # Только помечаем: вся работа — в handle_change, в основном потоке цикла
 handle_usr1() {
     USR1_PENDING=1
@@ -2989,7 +3065,7 @@ monitor_loop() {
 trap 'handle_usr1' USR1
 trap 'cleanup_on_exit' TERM INT
 
-echo "=== VPN Tether v2.7.2 (3.10.0-hybrid.11) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.8 (3.10.0-hybrid.12) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"

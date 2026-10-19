@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VPN Tethering</title>
+<style>
+:root {
+  --bg: #f4f5f7;
+  --card: #ffffff;
+  --text: #16181d;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --accent: #2563eb;
+  --accent-text: #ffffff;
+  --input: #f9fafb;
+  --green: #16a34a;
+  --amber: #d97706;
+  --red: #dc2626;
+  --grey: #9ca3af;
+  --blue: #2563eb;
+  --shadow: 0 1px 2px rgba(0,0,0,.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115;
+    --card: #181b21;
+    --text: #e8eaee;
+    --muted: #9aa1ad;
+    --line: #2a2f38;
+    --accent: #4f8cff;
+    --accent-text: #0b1020;
+    --input: #12151a;
+    --green: #22c55e;
+    --amber: #f59e0b;
+    --red: #ef4444;
+    --grey: #6b7280;
+    --blue: #4f8cff;
+    --shadow: none;
+  }
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body {
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding: calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 96px);
+  max-width: 640px; margin: 0 auto;
+}
+h1 { font-size: 20px; font-weight: 600; margin: 4px 2px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+h1 small { font-size: 13px; font-weight: 400; color: var(--muted); }
+h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 22px 4px 8px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+.pad { padding: 16px; }
+
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; background: var(--grey); }
+.dot.green { background: var(--green); } .dot.amber { background: var(--amber); }
+.dot.red { background: var(--red); } .dot.blue { background: var(--blue); }
+.dot.big { width: 14px; height: 14px; }
+
+.hero { display: flex; gap: 12px; align-items: flex-start; }
+.hero .dot { margin-top: 6px; }
+.hero-title { font-size: 18px; font-weight: 600; }
+.hero-sub { color: var(--muted); font-size: 14px; margin-top: 2px; }
+
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.kv .k { color: var(--muted); white-space: nowrap; }
+.kv .v { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+
+.btn { appearance: none; border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 10px; padding: 10px 14px; font: inherit; font-weight: 500; cursor: pointer; }
+.btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.btn.wide { width: 100%; margin-top: 14px; padding: 12px; }
+.btn.small { padding: 6px 10px; font-size: 13px; }
+.btn:disabled { opacity: .5; }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-top: 1px solid var(--line); }
+.row:first-child { border-top: 0; }
+.row .txt { flex: 1; min-width: 0; }
+.row .t { font-weight: 500; }
+.row .s { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.row.off { opacity: .45; pointer-events: none; }
+.row.col { flex-direction: column; align-items: stretch; }
+.badge { font-size: 11px; color: var(--accent); border: 1px solid currentColor; border-radius: 6px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
+
+.sw { position: relative; width: 46px; height: 28px; flex: none; }
+.sw input { opacity: 0; position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; z-index: 1; cursor: pointer; }
+.sw span { position: absolute; inset: 0; background: var(--line); border-radius: 14px; transition: background .15s; }
+.sw span::after { content: ""; position: absolute; width: 22px; height: 22px; left: 3px; top: 3px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
+.sw input:checked + span { background: var(--accent); }
+.sw input:checked + span::after { transform: translateX(18px); }
+
+select, input[type=text], input[type=number], input[type=search] {
+  width: 100%; font: inherit; color: var(--text); background: var(--input);
+  border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; margin-top: 8px;
+}
+select { appearance: auto; }
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.err { color: var(--red); font-size: 13px; margin-top: 6px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; background: var(--input); border: 1px solid var(--line); border-radius: 999px; padding: 5px 6px 5px 12px; font-size: 13px; }
+.chip button { border: 0; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; padding: 0 6px; cursor: pointer; }
+.empty { color: var(--muted); font-size: 13px; margin-top: 10px; }
+
+details > summary { list-style: none; cursor: pointer; padding: 13px 16px; font-weight: 500; display: flex; justify-content: space-between; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::after { content: "›"; color: var(--muted); transform: rotate(90deg); transition: transform .15s; }
+details[open] > summary::after { transform: rotate(-90deg); }
+
+pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; border-top: 1px solid var(--line); }
+
+.applybar { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px calc(env(safe-area-inset-bottom) + 12px); background: var(--card); border-top: 1px solid var(--line); display: none; z-index: 10; }
+.applybar.show { display: block; }
+.applybar .in { max-width: 640px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
+.applybar .msg { flex: 1; font-size: 14px; color: var(--muted); }
+
+.sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; z-index: 20; }
+.sheet-bg.show { display: block; }
+.sheet { position: fixed; left: 0; right: 0; bottom: 0; max-height: 85vh; background: var(--card); border-radius: 16px 16px 0 0; display: none; flex-direction: column; z-index: 21; padding-bottom: env(safe-area-inset-bottom); }
+.sheet.show { display: flex; }
+.sheet .head { padding: 14px 16px 6px; }
+.sheet .list { overflow: auto; padding: 0 0 12px; }
+.app { display: flex; align-items: center; gap: 12px; padding: 10px 16px; cursor: pointer; }
+.app img { width: 32px; height: 32px; border-radius: 8px; flex: none; }
+.app .ph { width: 32px; height: 32px; border-radius: 8px; background: var(--input); border: 1px solid var(--line); flex: none; }
+.app .n { font-weight: 500; }
+.app .p { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.app.sel .n::after { content: " ✓"; color: var(--accent); }
+
+.toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 90px); transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 9px 14px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 30; max-width: calc(100% - 32px); }
+.toast.show { opacity: .95; }
+.muted { color: var(--muted); }
+.mt8 { margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<h1>VPN Tethering <small id="ver"></small></h1>
+
+<!-- ============ Состояние ============ -->
+<div class="card pad" id="statusCard">
+  <div class="hero">
+    <span class="dot big" id="heroDot"></span>
+    <div>
+      <div class="hero-title" id="heroTitle">Загрузка…</div>
+      <div class="hero-sub" id="heroSub"></div>
+    </div>
+  </div>
+  <div class="kv" id="kv"></div>
+  <button class="btn primary wide" id="toggleBtn" disabled>Переключить</button>
+</div>
+
+<!-- ============ Защита ============ -->
+<h2>Защита</h2>
+<div class="card">
+  <div class="row">
+    <div class="txt"><div class="t">Kill-switch</div>
+      <div class="s">Если VPN упал, раздача не уходит напрямую и твой IP не светится.</div></div>
+    <label class="sw"><input type="checkbox" data-key="KILL_SWITCH"><span></span></label>
+  </div>
+  <div class="row" data-dep="KILL_SWITCH">
+    <div class="txt"><div class="t">Строгий режим</div>
+      <div class="s">Выбран VPN, а он не подключён — раздача на паузе. Если выключить, раздача сама перейдёт на «напрямую».</div></div>
+    <label class="sw"><input type="checkbox" data-key="KILL_SWITCH_STRICT"><span></span></label>
+  </div>
+</div>
+
+<!-- ============ DNS ============ -->
+<h2>DNS</h2>
+<div class="card">
+  <div class="row">
+    <div class="txt"><div class="t">Свой DNS (DoH)</div>
+      <div class="s">Зашифрованный DNS через dnsproxy. Выключи, если мешает: DNS будет как в старых версиях.</div></div>
+    <label class="sw"><input type="checkbox" data-key="DNSPROXY_ENABLE"><span></span></label>
+  </div>
+  <div class="row col" data-dep="DNSPROXY_ENABLE">
+    <div class="txt"><div class="t">DoH-сервер</div>
+      <div class="s">Без VPN. comss открывает ChatGPT, Gemini, Claude и другие сервисы с гео-блоком.</div></div>
+    <select id="upSelect">
+      <option value="https://dns.comss.one/dns-query">comss.one</option>
+      <option value="https://cloudflare-dns.com/dns-query">Cloudflare</option>
+      <option value="https://dns.google/dns-query">Google</option>
+      <option value="https://dns.adguard-dns.com/dns-query">AdGuard</option>
+      <option value="https://dns.quad9.net/dns-query">Quad9</option>
+      <option value="custom">Свой адрес…</option>
+    </select>
+    <input type="text" id="upCustom" placeholder="https://example.com/dns-query" style="display:none" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <div class="err" id="upErr" style="display:none"></div>
+  </div>
+  <div class="row" data-dep="DNSPROXY_ENABLE">
+    <div class="txt"><div class="t">DNS телефона</div>
+      <div class="s">Когда VPN выключен, сам телефон тоже спрашивает DNS через DoH-сервер.</div></div>
+    <label class="sw"><input type="checkbox" data-key="DNS_PHONE"><span></span></label>
+  </div>
+  <div class="row" data-dep="DNSPROXY_ENABLE">
+    <div class="txt"><div class="t">DoH для раздачи напрямую</div>
+      <div class="s">Устройства на раздаче без VPN тоже получают DNS через DoH-сервер.</div></div>
+    <label class="sw"><input type="checkbox" id="directDoh"><span></span></label>
+  </div>
+  <div class="row col" data-dep="DNSPROXY_ENABLE">
+    <div class="txt"><div class="t">DNS раздачи через VPN</div></div>
+    <select data-key="DNS_VPN">
+      <option value="dnat">DNS VPN-клиента</option>
+      <option value="cache">DNS VPN-клиента + кэш</option>
+      <option value="doh">DoH через туннель (Google, Cloudflare)</option>
+    </select>
+  </div>
+</div>
+
+<!-- ============ QUIC ============ -->
+<h2>Приложения без QUIC</h2>
+<div class="card pad">
+  <div class="muted" style="font-size:13px">У этих приложений закрыт HTTP/3 (UDP 443), и они идут по обычному HTTPS. Помогает, когда оператор режет QUIC и часть картинок или видео не грузится.</div>
+  <div class="chips" id="quicChips"></div>
+  <div class="mt8"><button class="btn small" id="quicAdd">Добавить приложение</button></div>
+</div>
+
+<!-- ============ Прочее ============ -->
+<h2>Прочее</h2>
+<div class="card">
+  <div class="row">
+    <div class="txt"><div class="t">Состояние в описании модуля</div>
+      <div class="s">Показывать текущий режим в списке модулей KernelSU.</div></div>
+    <label class="sw"><input type="checkbox" data-key="STATUS_IN_DESCRIPTION"><span></span></label>
+  </div>
+  <details>
+    <summary>Дополнительно</summary>
+    <div class="row col">
+      <div class="txt"><div class="t">Запасные DoH-серверы</div>
+        <div class="s">Если основной не ответил. Только шифрованные.</div></div>
+      <input type="text" data-key="DNS_FALLBACKS" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="row col">
+      <div class="txt"><div class="t">DoH через туннель</div>
+        <div class="s">Серверы для режима «DoH через туннель».</div></div>
+      <input type="text" data-key="DNS_VPN_UPSTREAMS" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="row col">
+      <div class="txt"><div class="t">Bootstrap DNS</div>
+        <div class="s">Чем узнать адрес самого DoH-сервера (IP:порт).</div></div>
+      <input type="text" data-key="DNS_BOOTSTRAP" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="row col">
+      <div class="txt"><div class="t">Проверка DoH, сек</div>
+        <div class="s">Как часто проверять сервер (2–600).</div></div>
+      <input type="number" min="2" max="600" data-key="DNS_HEALTH_INTERVAL">
+    </div>
+    <div class="row col">
+      <div class="txt"><div class="t">Проверка возврата, сек</div>
+        <div class="s">Как часто проверять, ожил ли сервер после сбоя (2–600).</div></div>
+      <input type="number" min="2" max="600" data-key="DNS_HEALTH_RECOVER">
+    </div>
+    <div class="row">
+      <div class="txt"><div class="t">Адаптивный профиль сети</div>
+        <div class="s">Пинг 1.1.1.1 мимо VPN раз в ~20 с, на плохой связи больше повторов TCP.</div></div>
+      <label class="sw"><input type="checkbox" data-key="NET_PROFILE_ADAPTIVE"><span></span></label>
+    </div>
+    <div class="row"><button class="btn small" id="resetAll">Сбросить все настройки</button></div>
+  </details>
+</div>
+
+<!-- ============ Диагностика ============ -->
+<h2>Диагностика</h2>
+<div class="card">
+  <div class="row">
+    <div class="txt"><div class="t">Проверка DoH</div><div class="s" id="dohRes">Запрос через запущенный dnsproxy.</div></div>
+    <button class="btn small" id="dohBtn">Проверить</button>
+  </div>
+  <details id="logBox">
+    <summary>Журнал</summary>
+    <div class="row btn-row" style="border-top:0;padding-top:0">
+      <button class="btn small" id="logRefresh">Обновить</button>
+      <button class="btn small" id="logCopy">Скопировать</button>
+    </div>
+    <pre class="log" id="log"></pre>
+  </details>
+</div>
+
+<div class="applybar" id="applybar"><div class="in">
+  <div class="msg" id="applyMsg">Есть несохранённые изменения</div>
+  <button class="btn" id="revertBtn">Отмена</button>
+  <button class="btn primary" id="applyBtn">Применить</button>
+</div></div>
+
+<div class="sheet-bg" id="sheetBg"></div>
+<div class="sheet" id="sheet">
+  <div class="head">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <b>Выбери приложения</b><button class="btn small" id="sheetDone">Готово</button>
+    </div>
+    <input type="search" id="appSearch" placeholder="Поиск">
+  </div>
+  <div class="list" id="appList"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+const MOD = '/data/adb/modules/vpn-to-hotspot-usb';
+const CTL = 'sh ' + MOD + '/webctl.sh';
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => Array.from(document.querySelectorAll(s));
+const q = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
+const HAS_KSU = typeof ksu !== 'undefined' && ksu && typeof ksu.exec === 'function';
+
+// ---------------------------------------------------------------- exec
+let cbSeq = 0;
+function exec(cmd) {
+  if (!HAS_KSU) return Promise.resolve(mockExec(cmd));
+  return new Promise((resolve) => {
+    const name = 'vt_cb_' + Date.now() + '_' + (cbSeq++);
+    window[name] = (errno, stdout, stderr) => {
+      delete window[name];
+      resolve({ errno, out: stdout || '', err: stderr || '' });
+    };
+    try { ksu.exec(cmd, '{}', name); }
+    catch (e) { delete window[name]; resolve({ errno: 1, out: '', err: String(e) }); }
+  });
+}
+const ctl = (args) => exec(CTL + ' ' + args);
+
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast.tm); toast.tm = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+function parseKV(text) {
+  const o = {};
+  text.split('\n').forEach((l) => { const i = l.indexOf('='); if (i > 0) o[l.slice(0, i)] = l.slice(i + 1); });
+  return o;
+}
+
+// ---------------------------------------------------------------- состояние
+const IFNAME = (i) => /^(wlan|ap|swlan|softap|hotspot)/.test(i) ? 'Wi-Fi'
+  : /^(rndis|ncm|usb)/.test(i) ? 'USB' : /^(bt-pan|bnep)/.test(i) ? 'Bluetooth'
+  : /^eth/.test(i) ? 'Ethernet' : i;
+function friendly(ifs) {
+  const out = [];
+  (ifs || '').split(/\s+/).filter(Boolean).forEach((i) => { const n = IFNAME(i); if (!out.includes(n)) out.push(n); });
+  return out.join(', ');
+}
+
+let ST = {};
+function kvRow(k, v, dot) {
+  return '<div class="k">' + k + '</div><div class="v">' + (dot ? '<span class="dot ' + dot + '"></span>' : '') +
+    '<span>' + v + '</span></div>';
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function renderStatus(s) {
+  ST = s;
+  $('#ver').textContent = s.module_version || '';
+  const dot = $('#heroDot'), title = $('#heroTitle'), sub = $('#heroSub'), btn = $('#toggleBtn');
+  const names = friendly(s.ifaces);
+  const up = esc(s.dns_upstream || 'DoH');
+
+  if (s.daemon !== '1') {
+    dot.className = 'dot big red'; title.textContent = 'Модуль не запущен';
+    sub.textContent = 'Перезагрузи телефон. Если не поможет, пришли журнал.';
+    $('#kv').innerHTML = ''; btn.disabled = true; btn.textContent = 'Переключить';
+    return;
+  }
+  btn.disabled = false;
+  btn.textContent = s.target === 'vpn' ? 'Раздавать напрямую' : 'Раздавать через VPN';
+
+  if (!names) {
+    dot.className = 'dot big'; title.textContent = 'Раздача выключена';
+    sub.textContent = 'Включи точку доступа или USB-модем. Режим при включении: ' + (s.target === 'vpn' ? 'через VPN' : 'напрямую') + '.';
+  } else if (s.mode === 'vpn') {
+    dot.className = 'dot big green'; title.textContent = 'Раздача через VPN';
+    sub.textContent = 'Устройства выходят в интернет только через VPN.';
+  } else if (s.mode === 'blocked') {
+    dot.className = 'dot big red'; title.textContent = 'VPN не подключён';
+    sub.textContent = 'Раздача на паузе, чтобы не засветить настоящий IP. Включи VPN-клиент, и она заработает сама.';
+  } else {
+    dot.className = 'dot big blue'; title.textContent = 'Раздача напрямую';
+    sub.textContent = 'Без VPN, через оператора.';
+  }
+
+  let h = '';
+  if (names) h += kvRow('Раздаю на', esc(names));
+  h += kvRow('VPN', s.vpn_up === '1' ? 'подключён' : 'не подключён', s.vpn_up === '1' ? 'green' : '');
+
+  // DNS раздачи
+  if (names && s.mode !== 'blocked') {
+    const ds = s.dns_state || '';
+    let t = '', d = 'green';
+    if (s.dns_degraded === '1') { t = up + ' не ответил, пока ' + (s.mode === 'vpn' ? 'DNS VPN' : 'DNS оператора') + '. Проверяю снова'; d = 'amber'; }
+    else if (ds === 'dnsproxy doh') t = s.mode === 'vpn' ? 'DoH через VPN' : up + ', зашифрован';
+    else if (ds === 'dnsproxy cache') t = 'DNS VPN + кэш';
+    else if (ds === 'DNAT (dnsproxy упал)') { t = 'обычный (dnsproxy не запустился)'; d = 'red'; }
+    else if (ds.indexOf('DNAT') === 0) { t = (s.mode === 'vpn' ? 'через VPN ' : 'обычный ') + '(' + esc(ds.slice(5)) + ')'; d = s.mode === 'vpn' ? 'green' : ''; }
+    if (t) h += kvRow('DNS раздачи', t, d);
+  }
+  // DNS телефона
+  if (s.dnsproxy_enable === '1' && s.dns_phone_enabled === '1') {
+    if (s.vpn_up === '1') h += kvRow('DNS телефона', 'через VPN', 'green');
+    else if (s.phone_dns === '1' && s.dns_degraded === '1') h += kvRow('DNS телефона', 'пока обычный: ' + up + ' не ответил, проверяю снова', 'amber');
+    else if (s.phone_dns === '1') h += kvRow('DNS телефона', up + ', зашифрован', 'green');
+    else h += kvRow('DNS телефона', 'обычный', '');
+  }
+  if (s.mode === 'vpn') {
+    h += kvRow('Kill-switch', s.kill_switch === '1' ? 'включён' : 'выключен', s.kill_switch === '1' ? 'green' : 'amber');
+    if (s.mtu && +s.mss > 0) h += kvRow('MTU / MSS', esc(s.mtu + ' / ' + s.mss));
+  }
+  if (s.quic_uids) h += kvRow('Без QUIC', esc(String(s.quic_uids.split(' ').length)) + ' прил.');
+  const bad = (s.conf_note || '').split(' ').filter((x) => x[0] === '!' || x[0] === '?');
+  if (bad.length) h += kvRow('Конфиг', 'пропущено: ' + esc(bad.join(', ')), 'amber');
+  if (s.updated) h += kvRow('Обновлено', esc(s.updated));
+  $('#kv').innerHTML = h;
+}
+
+async function loadStatus() {
+  const r = await ctl('status');
+  renderStatus(parseKV(r.out));
+}
+
+// ---------------------------------------------------------------- настройки
+let DEF = {}, USR = {}, CUR = {};   // умолчания, из файла, текущие в форме
+const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAMS','DNS_FALLBACKS','DNS_VPN_UPSTREAMS',
+  'DNS_BOOTSTRAP','DNS_HEALTH_INTERVAL','DNS_HEALTH_RECOVER','KILL_SWITCH','KILL_SWITCH_STRICT','NET_PROFILE_ADAPTIVE',
+  'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS'];
+const saved = (k) => (k in USR ? USR[k] : (DEF[k] || ''));
+
+async function loadConf() {
+  const r = await ctl('conf');
+  DEF = {}; USR = {};
+  r.out.split('\n').forEach((l) => {
+    const m = /^([DU]) ([A-Z_]+)=(.*)$/.exec(l);
+    if (m) (m[1] === 'D' ? DEF : USR)[m[2]] = m[3];
+  });
+  CUR = {}; KEYS.forEach((k) => { CUR[k] = saved(k); });
+  renderForm();
+}
+
+function renderForm() {
+  $$('[data-key]').forEach((el) => {
+    const k = el.dataset.key, v = CUR[k] || '';
+    if (el.type === 'checkbox') el.checked = v === '1';
+    else el.value = v;
+  });
+  $('#directDoh').checked = CUR.DNS_DIRECT !== 'plain';
+  // DoH-сервер
+  const first = (CUR.DNS_UPSTREAMS || '').trim();
+  const opt = Array.from($('#upSelect').options).find((o) => o.value === first);
+  $('#upSelect').value = opt ? first : 'custom';
+  $('#upCustom').style.display = opt ? 'none' : '';
+  if (!opt) $('#upCustom').value = first;
+  renderChips();
+  renderDeps();
+  renderBar();
+}
+
+function renderDeps() {
+  $$('[data-dep]').forEach((row) => { row.classList.toggle('off', CUR[row.dataset.dep] !== '1'); });
+}
+
+function changedKeys() { return KEYS.filter((k) => (CUR[k] || '') !== (saved(k) || '')); }
+function renderBar() {
+  const n = changedKeys().length;
+  $('#applybar').classList.toggle('show', n > 0);
+  $('#applyMsg').textContent = n ? 'Изменений: ' + n : '';
+}
+
+function setCur(k, v) { CUR[k] = v; renderDeps(); renderBar(); }
+
+$$('[data-key]').forEach((el) => {
+  const k = el.dataset.key;
+  el.addEventListener(el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input', () => {
+    setCur(k, el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value.trim());
+  });
+});
+$('#directDoh').addEventListener('change', (e) => setCur('DNS_DIRECT', e.target.checked ? 'doh' : 'plain'));
+
+function upValue() {
+  const sel = $('#upSelect').value;
+  return sel === 'custom' ? $('#upCustom').value.trim() : sel;
+}
+$('#upSelect').addEventListener('change', () => {
+  const custom = $('#upSelect').value === 'custom';
+  $('#upCustom').style.display = custom ? '' : 'none';
+  if (custom) $('#upCustom').focus();
+  setCur('DNS_UPSTREAMS', upValue());
+});
+$('#upCustom').addEventListener('input', () => setCur('DNS_UPSTREAMS', upValue()));
+
+// ---------------------------------------------------------------- QUIC: приложения
+let APPS = null;   // [{pkg, label}]
+const label = (pkg) => { const a = (APPS || []).find((x) => x.pkg === pkg); return a ? a.label : pkg; };
+const quicList = () => (CUR.QUIC_BLOCK_APPS || '').split(/\s+/).filter(Boolean);
+
+function renderChips() {
+  const list = quicList();
+  $('#quicChips').innerHTML = list.length
+    ? list.map((p) => '<span class="chip">' + esc(label(p)) + '<button data-rm="' + esc(p) + '" aria-label="Убрать">×</button></span>').join('')
+    : '<div class="empty">Нет приложений — QUIC ни у кого не закрыт.</div>';
+}
+$('#quicChips').addEventListener('click', (e) => {
+  const p = e.target.dataset && e.target.dataset.rm;
+  if (!p) return;
+  setCur('QUIC_BLOCK_APPS', quicList().filter((x) => x !== p).join(' '));
+  renderChips();
+});
+
+async function loadApps() {
+  if (APPS) return APPS;
+  let list = [];
+  try {
+    if (HAS_KSU && typeof ksu.listPackages === 'function') {
+      const pkgs = JSON.parse(ksu.listPackages('user'));
+      let info = [];
+      if (typeof ksu.getPackagesInfo === 'function') info = JSON.parse(ksu.getPackagesInfo(JSON.stringify(pkgs)));
+      list = pkgs.map((p) => { const i = info.find((x) => x.packageName === p); return { pkg: p, label: (i && i.appLabel) || p }; });
+    }
+  } catch (e) { list = []; }
+  if (!list.length) {
+    const r = await ctl('apps');
+    list = r.out.split('\n').map((s) => s.trim()).filter(Boolean).map((p) => ({ pkg: p, label: p }));
+  }
+  list.sort((a, b) => a.label.localeCompare(b.label, 'ru'));
+  APPS = list;
+  return APPS;
+}
+
+function renderAppList() {
+  const f = $('#appSearch').value.trim().toLowerCase();
+  const sel = quicList();
+  const items = (APPS || []).filter((a) => !f || a.label.toLowerCase().includes(f) || a.pkg.toLowerCase().includes(f));
+  $('#appList').innerHTML = items.map((a) =>
+    '<div class="app' + (sel.includes(a.pkg) ? ' sel' : '') + '" data-pkg="' + esc(a.pkg) + '">' +
+    (HAS_KSU ? '<img src="ksu://icon/' + esc(a.pkg) + '" alt="" onerror="this.outerHTML=\'<span class=ph></span>\'">' : '<span class="ph"></span>') +
+    '<div><div class="n">' + esc(a.label) + '</div>' + (a.label !== a.pkg ? '<div class="p">' + esc(a.pkg) + '</div>' : '') + '</div></div>').join('') ||
+    '<div class="empty" style="padding:0 16px">Ничего не найдено</div>';
+}
+$('#appList').addEventListener('click', (e) => {
+  const row = e.target.closest('.app'); if (!row) return;
+  const p = row.dataset.pkg, list = quicList();
+  setCur('QUIC_BLOCK_APPS', (list.includes(p) ? list.filter((x) => x !== p) : list.concat(p)).join(' '));
+  row.classList.toggle('sel');
+  renderChips();
+});
+function openSheet(on) {
+  $('#sheet').classList.toggle('show', on); $('#sheetBg').classList.toggle('show', on);
+}
+$('#quicAdd').addEventListener('click', async () => {
+  $('#appSearch').value = ''; $('#appList').innerHTML = '<div class="empty" style="padding:0 16px">Загружаю список…</div>';
+  openSheet(true);
+  await loadApps(); renderAppList(); renderChips();
+});
+$('#appSearch').addEventListener('input', renderAppList);
+$('#sheetDone').addEventListener('click', () => openSheet(false));
+$('#sheetBg').addEventListener('click', () => openSheet(false));
+
+// ---------------------------------------------------------------- применить
+function validate() {
+  const u = CUR.DNS_UPSTREAMS || '';
+  const bad = CUR.DNSPROXY_ENABLE === '1' && (!u || !/^(https|tls|quic|h3|sdns|udp|tcp):\/\/\S+(\s+\S+)*$/.test(u));
+  $('#upErr').style.display = bad ? '' : 'none';
+  $('#upErr').textContent = bad ? 'Нужен адрес вида https://сервер/dns-query' : '';
+  return !bad;
+}
+
+async function waitAck(token, sec) {
+  for (let i = 0; i < sec * 2; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    const r = await ctl('ack');
+    if (r.out.trim() === token) return true;
+  }
+  return false;
+}
+
+let busy = false;
+$('#applyBtn').addEventListener('click', async () => {
+  if (busy || !validate()) return;
+  busy = true; $('#applyBtn').disabled = true; $('#applyMsg').textContent = 'Сохраняю…';
+  try {
+    for (const k of changedKeys()) {
+      const v = CUR[k] || '';
+      const r = v === (DEF[k] || '') ? await ctl('unset ' + k) : await ctl('set ' + k + ' ' + q(v));
+      if (!/^OK/.test(r.out.trim())) { toast(k + ': ' + (r.out.trim().replace(/^ERR /, '') || 'ошибка')); return; }
+    }
+    $('#applyMsg').textContent = 'Применяю…';
+    const r = await ctl('apply');
+    const m = /^OK (\S+)/.exec(r.out.trim());
+    if (!m) { toast('Сохранено. Применится после перезагрузки (' + (r.out.trim().replace(/^ERR /, '') || 'демон не ответил') + ')'); }
+    else if (await waitAck(m[1], 25)) toast('Настройки применены');
+    else toast('Сохранено, но модуль не ответил за 25 с');
+    await loadConf(); await loadStatus();
+  } finally {
+    busy = false; $('#applyBtn').disabled = false; renderBar();
+  }
+});
+$('#revertBtn').addEventListener('click', () => { KEYS.forEach((k) => { CUR[k] = saved(k); }); renderForm(); });
+$('#resetAll').addEventListener('click', () => {
+  if (!confirm('Вернуть все настройки к значениям по умолчанию?')) return;
+  KEYS.forEach((k) => { CUR[k] = DEF[k] || ''; }); renderForm();
+});
+
+// ---------------------------------------------------------------- переключение
+$('#toggleBtn').addEventListener('click', async () => {
+  if (busy) return;
+  busy = true; const btn = $('#toggleBtn'); btn.disabled = true; btn.textContent = 'Переключаю…';
+  try {
+    const r = await ctl('toggle');
+    const m = /^OK (\S+)/.exec(r.out.trim());
+    if (!m) toast(r.out.trim().replace(/^ERR /, '') || 'Не получилось');
+    else if (!(await waitAck(m[1], 20))) toast('Модуль не ответил за 20 с');
+  } finally { busy = false; await loadStatus(); }
+});
+
+// ---------------------------------------------------------------- диагностика
+$('#dohBtn').addEventListener('click', async () => {
+  const el = $('#dohRes'); el.textContent = 'Проверяю…';
+  const r = (await ctl('doh')).out.trim();
+  if (r === 'off') el.innerHTML = '<span class="dot"></span> dnsproxy сейчас не нужен (VPN или DoH выключен)';
+  else if (/^ok /.test(r)) el.innerHTML = '<span class="dot green"></span> Отвечает, ' + esc(r.slice(3)) + ' мс';
+  else el.innerHTML = '<span class="dot red"></span> ' + esc(r.replace(/^fail /, ''));
+});
+
+async function loadLog() {
+  const r = await ctl('log 200');
+  const pre = $('#log'); pre.textContent = r.out || 'Журнал пуст';
+  pre.scrollTop = pre.scrollHeight;
+}
+$('#logBox').addEventListener('toggle', () => { if ($('#logBox').open) loadLog(); });
+$('#logRefresh').addEventListener('click', loadLog);
+$('#logCopy').addEventListener('click', async () => {
+  const text = $('#log').textContent;
+  try { await navigator.clipboard.writeText(text); toast('Скопировано'); }
+  catch (e) {
+    const r = document.createRange(); r.selectNodeContents($('#log'));
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    toast(document.execCommand('copy') ? 'Скопировано' : 'Выделено, скопируй вручную');
+  }
+});
+
+// ---------------------------------------------------------------- старт
+(async () => {
+  await Promise.all([loadStatus(), loadConf()]);
+  loadApps().then(renderChips);
+  setInterval(() => { if (!document.hidden && !busy) loadStatus(); }, 3000);
+})();
+
+// ---------------------------------------------------------------- без KernelSU (предпросмотр в браузере)
+function mockExec(cmd) {
+  const a = cmd.replace(CTL + ' ', '');
+  const M = window.__mock || (window.__mock = {
+    target: 'vpn', conf: 'U DNSPROXY_ENABLE=1\n', ack: '',
+  });
+  if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=v2.8 (предпросмотр)\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
+    '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
+    '\ndns_degraded=0\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.comss.one/dns-query\nD DNS_FALLBACKS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=1\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=com.avito.android\n' + M.conf };
+  if (a === 'toggle') { M.target = M.target === 'vpn' ? 'direct' : 'vpn'; M.ack = 't' + Date.now(); return { errno: 0, out: 'OK ' + M.ack }; }
+  if (a === 'apply') { M.ack = 'a' + Date.now(); return { errno: 0, out: 'OK ' + M.ack }; }
+  if (a === 'ack') return { errno: 0, out: M.ack };
+  if (/^(set|unset) /.test(a)) return { errno: 0, out: 'OK' };
+  if (a === 'apps') return { errno: 0, out: 'com.avito.android\nru.ozon.app.android\norg.telegram.messenger\ncom.google.android.youtube\n' };
+  if (a === 'doh') return { errno: 0, out: 'ok 184' };
+  if (/^log/.test(a)) return { errno: 0, out: '[20:15:01] Toggle signal received\n[20:15:02] VPN setup complete\n' };
+  return { errno: 1, out: 'ERR' };
+}
+</script>
+</body>
+</html>
