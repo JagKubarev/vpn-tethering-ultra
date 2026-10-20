@@ -249,6 +249,11 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
     <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_BLOCK"><span></span></label>
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">YouTube мимо кэша оператора</div>
+      <div class="s">Если плеер получил видеосервер в сети оператора (кэш Google, который часто почти не отдаёт видео), соединение сразу отбивается, и плеер берёт сервер Google.</div></div>
+    <label class="sw"><input type="checkbox" data-key="YT_GGC_BLOCK"><span></span></label>
+  </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Своя стратегия для каждой сети</div>
       <div class="s">Модуль запоминает стратегию для Wi-Fi (по названию) и мобильной сети (по оператору) и сам переключает её при смене сети. Подбор ниже запоминает лучшую для текущей сети.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_PER_NET"><span></span></label>
@@ -304,6 +309,8 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
     <input type="text" id="stHost" placeholder="youtube.com" autocapitalize="off" autocorrect="off" spellcheck="false">
     <button class="btn" id="stBtn" style="margin-top:8px;white-space:nowrap">Проверить</button>
   </div>
+  <button class="btn" id="ytBtn" style="margin-top:8px">Скорость YouTube</button>
+  <div class="s muted" style="font-size:12px;margin-top:4px">Качает файл с сервера Google под именем видеосервера — так видно, режет ли ТСПУ скорость видео и помогает ли стратегия. ~15 секунд, трафик до ~80 МБ.</div>
   <div id="stRes" class="mt8" style="font-size:14px"></div>
 </div>
 <div class="card pad" style="margin-top:10px">
@@ -509,7 +516,8 @@ function renderStatus(s) {
   if (names && s.mode !== 'blocked') {
     const ds = s.dns_state || '';
     let t = '', d = 'green';
-    if (s.dns_degraded === '1') { t = up + ' не ответил, пока ' + (s.mode === 'vpn' ? 'DNS VPN' : 'DNS оператора') + '. Проверяю снова'; d = 'amber'; }
+    if (s.dns_degraded === '1') { t = 'DoH не отвечает, пока ' + (s.mode === 'vpn' ? 'DNS VPN' : 'DNS оператора') + '. Проверяю снова'; d = 'amber'; }
+    else if (ds === 'dnsproxy doh' && s.dns_alt === '1' && s.mode !== 'vpn') { t = up + ' (запасной), зашифрован. Основной не отвечает'; d = 'amber'; }
     else if (ds === 'dnsproxy doh') t = s.mode === 'vpn' ? 'DoH через VPN' : up + ', зашифрован';
     else if (ds === 'dnsproxy cache') t = 'DNS VPN + кэш';
     else if (ds === 'DNAT (dnsproxy упал)') { t = 'обычный (dnsproxy не запустился)'; d = 'red'; }
@@ -519,7 +527,8 @@ function renderStatus(s) {
   // DNS телефона
   if (s.dnsproxy_enable === '1' && s.dns_phone_enabled === '1') {
     if (s.vpn_up === '1') h += kvRow('DNS телефона', 'через VPN', 'green');
-    else if (s.phone_dns === '1' && s.dns_degraded === '1') h += kvRow('DNS телефона', 'пока обычный: ' + up + ' не ответил, проверяю снова', 'amber');
+    else if (s.phone_dns === '1' && s.dns_degraded === '1') h += kvRow('DNS телефона', 'пока обычный: DoH не отвечает, проверяю снова', 'amber');
+    else if (s.phone_dns === '1' && s.dns_alt === '1') h += kvRow('DNS телефона', up + ' (запасной), зашифрован', 'amber');
     else if (s.phone_dns === '1') h += kvRow('DNS телефона', up + ', зашифрован', 'green');
     else h += kvRow('DNS телефона', 'обычный', '');
   }
@@ -533,6 +542,7 @@ function renderStatus(s) {
       (s.zapret_src === 'net' ? ' (своя для «' + esc(s.net_label) + '»)' : ' (общая)');
     if (+s.zapret_auto > 0) zt += ' · найдено сайтов: ' + esc(s.zapret_auto);
     h += kvRow('Обход DPI', zt, 'green');
+    if (s.ggc === 'on') h += kvRow('YouTube', 'мимо кэша оператора', 'green');
   }
   else if (s.zapret === 'fail') h += kvRow('Обход DPI', 'nfqws не запустился, повтор через минуту', 'red');
   if (s.dnsproxy_enable === '1' && s.meta_eu === '1') {
@@ -558,7 +568,7 @@ let DEF = {}, USR = {}, CUR = {};   // умолчания, из файла, те
 const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAMS','DNS_FALLBACKS','DNS_VPN_UPSTREAMS',
   'DNS_BOOTSTRAP','DNS_HEALTH_INTERVAL','DNS_HEALTH_RECOVER','KILL_SWITCH','KILL_SWITCH_STRICT','NET_PROFILE_ADAPTIVE',
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK',
-  'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS'];
+  'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK'];
 const saved = (k) => (k in USR ? USR[k] : (DEF[k] || ''));
 
 async function loadConf() {
@@ -849,6 +859,31 @@ $('#stBtn').addEventListener('click', async () => {
   } finally { btn.disabled = false; }
 });
 
+// скорость видео: "direct|zapret <http> <байт/с> <rc>"
+function ytLine(label, v) {
+  const m = /^(\d{3}) ([\d.]+) (\d+)/.exec(v || '');
+  if (!m) return '<div class="st-line"><span class="dot"></span>' + label + ': нет данных</div>';
+  const mbit = (+m[2]) * 8 / 1e6, ok = m[1] !== '000' && mbit >= 3;
+  const t = m[1] === '000' ? (ST_RC[m[3]] || 'ошибка ' + esc(m[3])) : mbit.toFixed(1) + ' Мбит/с' + (mbit < 3 ? ' — режут' : '');
+  return '<div class="st-line"><span class="dot ' + (ok ? 'green' : 'red') + '"></span>' + label + ': ' + t + '</div>';
+}
+$('#ytBtn').addEventListener('click', async () => {
+  const btn = $('#ytBtn'), res = $('#stRes');
+  btn.disabled = true; res.innerHTML = '<span class="muted">Меряю скорость, ~15 секунд…</span>';
+  try {
+    const r = await ctl('ytspeed');
+    const out = r.out.trim();
+    if (/^ERR/m.test(out)) {
+      res.innerHTML = '<div class="st-line"><span class="dot red"></span>' + esc(out.replace(/^[\s\S]*?ERR /, '')) + '</div>';
+      return;
+    }
+    const o = {};
+    out.split('\n').forEach((l) => { const i = l.indexOf(' '); if (i > 0) o[l.slice(0, i)] = l.slice(i + 1); });
+    res.innerHTML = ytLine('Видео без обхода', o.direct) + ytLine('Видео с обходом', o.zapret) +
+      '<div class="muted mt8" style="font-size:13px">Это скорость до серверов Google. Если тут быстро, а видео тормозит — дело в выданном плеером сервере (кэш оператора) или в связи.</div>';
+  } finally { btn.disabled = false; }
+});
+
 // ---------------------------------------------------------------- подбор стратегии
 const SC_DEFAULT = 'www.youtube.com i.ytimg.com discord.com gateway.discord.gg x.com www.facebook.com rutracker.org www.linkedin.com ya.ru www.google.com';
 $('#scSites').value = SC_DEFAULT;
@@ -1049,8 +1084,8 @@ function mockExec(cmd) {
   });
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=v2.8 (предпросмотр)\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
-    '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.comss.one/dns-query\nD DNS_FALLBACKS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=1\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=0\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=0\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\n' + M.conf };
+    '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.comss.one/dns-query\nD DNS_FALLBACKS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=1\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=0\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=0\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=1\n' + M.conf };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +
     'mobile:25002|md5sig||MegaFon|выбрана вручную|2026-10-19 18:40\n')).split('\n').filter(Boolean).map((l) => 'N ' + l).join('\n') };
@@ -1075,6 +1110,7 @@ function mockExec(cmd) {
     '0|10|2|0|--dpi-desync=fake,multisplit --dpi-desync-autottl --dpi-desync-split-pos=1 --dpi-desync-fake-tls=@G|быстрый| ya.ru:x28 google.com:x28\n' };
   if (/^zscan-start /.test(a)) return { errno: 0, out: 'OK' };
   if (/^sitetest /.test(a)) return { errno: 0, out: 'ip 142.251.155.4\ndirect 000 8.001 28\nzapret 200 1.02 0\n' };
+  if (a === 'ytspeed') return { errno: 0, out: 'ip 64.233.161.190\ndirect 000 0 28\nzapret 200 6912000 0\n' };
   if (/^log/.test(a)) return { errno: 0, out: '[20:15:01] Toggle signal received\n[20:15:02] VPN setup complete\n' };
   return { errno: 1, out: 'ERR' };
 }

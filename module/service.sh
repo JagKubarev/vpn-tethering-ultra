@@ -203,6 +203,22 @@
 #   Теперь nfqws работает с группой ZAPRET_GID, и его пакеты пропускаются
 #   по владельцу сокета — это метка, которую система не трогает.
 # ============================================================================
+# v2.17 — YouTube, DNS и лёгкий цикл:
+#   - YT_GGC_BLOCK (вкл.): плеер YouTube получал видеосервер-кэш в сети
+#     оператора (YOTA: 188.170.166.x), тот отдавал 0.2-0.5 КБ/с — видео
+#     висело 20-30с. Такие соединения (googlevideo.com не на адрес Google,
+#     zapret/google-ipv4.txt) теперь сразу получают RST -> сервер Google.
+#   - DoH: comss молчит -> dnsproxy на запасных DoH (Google/Cloudflare), а не
+#     сразу DNS оператора (заглушки в кэше). Оператор — только если молчат все.
+#   - "Применить" в WebUI пересобирает раздачу только при смене DNS или
+#     kill-switch; zapret/QUIC — точечно, без обрыва соединений клиентов.
+#   - VPN поднялся: dnsproxy не перезапускается ради 2 секунд работы.
+#   - Цикл: ~170 -> меньше процессов за проход (интерфейсы без внешних
+#     команд, ip rule раз за проход, хуки zapret и исключение AdGuard — раз
+#     в ~10с, владелец VPN — раз на подключение).
+#   - TCP: ECN=2 (как у Android) вместо Full-ECN.
+#   - WebUI: переключатель YouTube/кэш, запасной DoH в статусе, "Скорость YouTube".
+# ============================================================================
 # ============================================================================
 
 umask 022
@@ -299,6 +315,14 @@ ZAPRET_PHONE=1          # 1 = и приложения телефона (кром
 ZAPRET_STRATEGY=fakeddisorder  # fakeddisorder | md5sig | md5sig2 | badseq | disorder | seqovl | custom (ZAPRET_ARGS)
 ZAPRET_ARGS=""          # для custom: аргументы --dpi-desync*, файлы подделок только @G/@Q (подбирает сканер в WebUI)
 ZAPRET_QUIC_BLOCK=1     # закрыть QUIC раздаче, пока zapret включён: браузер сразу идёт по TCP
+# YouTube мимо кэшей Google у оператора (GGC). Плеер получает видеосервер
+# rr*---sn-*.googlevideo.com, и это бывает кэш внутри сети оператора
+# (20.10, YOTA/МегаФон: 188.170.166.x). Рукопожатие с обходом проходит, а
+# данные почти не идут (0.2-0.5 КБ/с) — видео висит 20-30с, пока плеер не
+# сдастся. Соединение с googlevideo.com на адрес НЕ из сетей Google
+# (zapret/google-ipv4.txt) сразу получает RST, и плеер идёт на сервер Google
+# (с обходом 45-55 Мбит/с). Только мимо VPN и пока zapret включён.
+YT_GGC_BLOCK=1
 # Своя стратегия для каждой сети: Wi-Fi — по названию, мобильная — по
 # оператору (zapret/netid.sh). Запоминается подбором в WebUI (лучшая) или
 # выбором вручную, хранится в ZAPRET_NETS_FILE; при смене сети nfqws сам
@@ -355,7 +379,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     local key="$1" val="$2" ok=1
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
-        ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_PER_NET|DNS_META_EU)
+        ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_MODE)     case "$val" in list|all) ;; *) ok=0 ;; esac ;;
         ZAPRET_STRATEGY) zapret_strategy_valid "$val" || ok=0 ;;
@@ -399,7 +423,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -670,6 +694,14 @@ ZAPRET_GID=3998            # группа nfqws: на rmnet метку стир�
 CHAIN_ZAPRET="VPN_ZAPRET"          # mangle POSTROUTING: исходящие -> nfqws
 CHAIN_ZAPRET_IN="VPN_ZAPRET_IN"    # mangle PREROUTING: ответы -> nfqws (автосписок)
 CHAIN_ZAPRET_QUIC="VPN_ZAPRET_QUIC" # filter FORWARD: QUIC раздачи
+CHAIN_ZAPRET_GGC="VPN_ZAPRET_GGC"   # filter OUTPUT/FORWARD: YouTube мимо кэшей оператора
+# Хук: первые пакеты HTTPS, в которых есть имя googlevideo.com (SNI в
+# ClientHello; у постквантового ClientHello из двух сегментов имя может
+# оказаться во втором — поэтому 1:6, а не 1:1)
+GGC_MATCH="-p tcp --dport 443 -m connbytes --connbytes-dir original --connbytes-mode packets --connbytes 1:6 -m string --string googlevideo.com --algo bm"
+GGC_STATE=""            # что стоит: "" | v4 | v4+v6 (для лога)
+ZAPRET_HOOK_TICK=0      # проверка хуков zapret — раз в ~10с, не каждый цикл
+ZAPRET_OWNER_TUN="-"    # для какого tun уже узнали владельца VPN
 # VPN-клиенты: их собственное соединение с сервером (часто TLS на 443) zapret
 # трогать не должен — иначе можно сломать переподключение VPN.
 VPN_CLIENT_PKGS="llc.itdev.incy com.happproxy org.amnezia.vpn org.amnezia.awg com.wireguard.android com.zaneschepke.wireguardautotunnel com.zaneschepke.wireguardautotunnel.nightly com.v2ray.ang app.hiddify.com moe.nb4a io.nekohasekai.sfa com.github.dyhkwong.sagernet io.github.saeeddev94.xray com.github.kr328.clash com.github.metacubex.clash.meta de.blinkt.openvpn net.openvpn.openvpn org.outline.android.client com.cloudflare.onedotonedotonedotone com.v2raytun.android dev.hexasoftware.v2box com.exclave.exclave"
@@ -698,6 +730,12 @@ PHONE_VPN_SEEN=""      # сглаживание: последнее наблюд
 PHONE_VPN_STABLE=""    # подтверждённое двумя итерациями подряд
 PHONE_DNS_V6=0
 DNS_DEGRADED=0         # 1 = DoH-апстрим не отвечает, DNS временно обычный
+DNS_ALT_UPS=""         # не пусто = основной DoH молчит, dnsproxy на DNS_FALLBACKS
+DNS_ALT_LAST=0         # когда последний раз проверяли, ожил ли основной
+DNS_EXEMPT_TICK=0      # исключение AdGuard проверяем раз в ~10с
+DHCP_IFACES_CACHE=""   # ss -lun раз в ~6с (раздача и так видна по ip rule netd)
+DHCP_IFACES_TICK=0
+IP_RULE_CACHE=""       # ip rule show — один раз за проход handle_change
 DNS_HEALTH_LAST=0
 DNS_LOG_SEEN=0         # размер лога dnsproxy на прошлой проверке
 DNS_ACT_LAST=""        # счётчик DNS-редиректов на прошлой проверке
@@ -831,7 +869,7 @@ update_status() {
     # action.sh: он собирает из них понятный человеку текст.
     local vpn_up=0 up_host
     vpn_up_now && vpn_up=1
-    up_host=$(echo "$DNS_UPSTREAMS" | awk '{print $1}' | sed -E 's#^[a-z0-9]+://##; s#[/:].*##')
+    up_host=$(echo "${DNS_ALT_UPS:-$DNS_UPSTREAMS}" | awk '{print $1}' | sed -E 's#^[a-z0-9]+://##; s#[/:].*##')
     {
         printf '%s\n%s\n' "$status_line" "$ifaces"
         echo "mode=$mode"
@@ -840,6 +878,8 @@ update_status() {
         echo "vpn_up=$vpn_up"
         echo "dns_state=$DNS_STATE"
         echo "dns_degraded=$DNS_DEGRADED"
+        echo "dns_alt=$([ -n "$DNS_ALT_UPS" ] && echo 1 || echo 0)"
+        echo "ggc=$([ -n "$GGC_STATE" ] && echo on || echo off)"
         echo "phone_dns=$PHONE_DNS_ON"
         echo "dns_phone_enabled=$DNS_PHONE"
         echo "dnsproxy_enable=$DNSPROXY_ENABLE"
@@ -944,8 +984,25 @@ ip_rule_del_all() {
     rm -f "$RULES_FILE"
 }
 
+# Уникальные слова по алфавиту -> NORM_OUT, без внешних команд (было
+# echo|tr|sort|grep|tr|sed = 6 процессов, и так 3-4 раза за цикл).
+_norm_words() {
+    local w o out=""
+    for w in $*; do
+        case " $out " in *" $w "*) continue ;; esac
+        local done_=0 res=""
+        for o in $out; do
+            if [ "$done_" = 0 ] && [ "$w" \< "$o" ]; then res="$res $w"; done_=1; fi
+            res="$res $o"
+        done
+        [ "$done_" = 0 ] && res="$res $w"
+        out="${res# }"
+    done
+    NORM_OUT="$out"
+}
 normalize_tether_ifaces() {
-    echo "$*" | tr -s '[:space:]' '\n' | sort -u | grep -v '^$' | tr '\n' ' ' | sed 's/ $//'
+    _norm_words "$@"
+    echo "$NORM_OUT"
 }
 
 # Только настоящие имена интерфейсов. 2.11, 20.10: после ребута в файле
@@ -954,12 +1011,17 @@ normalize_tether_ifaces() {
 # правила. Откуда — не поймали (лог до ребута затёрт); теперь мусор
 # отбрасывается с записью в лог, а прошлый лог сохраняется (.prev).
 clean_iface_list() {
-    local i out=""
-    for i in $(echo "$*" | tr '|' ' '); do
+    _clean_ifaces "$@"
+    echo "$CLEAN_OUT"
+}
+_clean_ifaces() {   # -> CLEAN_OUT, без подоболочек
+    local i out="" IFS=" 	|
+"
+    for i in $*; do
         case "$i" in netd|heuristic|*[!A-Za-z0-9_.-]*) continue ;; esac
         case " $out " in *" $i "*) ;; *) out="$out $i" ;; esac
     done
-    echo "${out# }"
+    CLEAN_OUT="${out# }"
 }
 
 normalize_iface_name() {
@@ -1062,8 +1124,12 @@ detect_tun_name() {
 # Эвристика по RFC1918 ниже — только фолбэк: при VPN "ip route get" от root
 # уходит в tun0, и wlan0 (клиент Wi-Fi) принимался за раздачу.
 # ----------------------------------------------------------------------------
+ip_rules() {   # кэш на проход handle_change (там же и сбрасывается)
+    if [ -n "$IP_RULE_CACHE" ]; then printf '%s\n' "$IP_RULE_CACHE"; else $ip rule show 2>/dev/null; fi
+}
+
 netd_tether_pairs() {
-    $ip rule show 2>/dev/null | awk '
+    ip_rules | awk '
         /^3000:/ { next }
         /fwmark|uidrange|oif / { next }
         {
@@ -1080,7 +1146,7 @@ netd_tether_pairs() {
 }
 
 netd_default_iface() {
-    $ip rule show 2>/dev/null | awk '
+    ip_rules | awk '
         /fwmark 0x0\/0xffff iif lo lookup/ && !/uidrange/ {
             for (i = 1; i <= NF; i++) if ($i == "lookup") { print $(i + 1); exit }
         }' | sed 's/_local$//'
@@ -1088,6 +1154,19 @@ netd_default_iface() {
 
 # Интерфейсы, на которых висит DHCP-сервер (раздача без аплинка тоже видна)
 dhcp_server_ifaces() {
+    # раз в ~3 вызова: точку доступа и USB netd и так показывает в ip rule,
+    # это — запасной признак для раздач без правила netd
+    DHCP_IFACES_TICK=$((DHCP_IFACES_TICK + 1))
+    if [ "$DHCP_IFACES_TICK" -lt 3 ] && [ -n "$DHCP_IFACES_CACHE" ]; then
+        echo "$DHCP_IFACES_CACHE"
+        return
+    fi
+    DHCP_IFACES_TICK=0
+    DHCP_IFACES_CACHE=$(_dhcp_server_ifaces_live | tr '\n' ' ')
+    [ -n "$DHCP_IFACES_CACHE" ] || DHCP_IFACES_CACHE=" "
+    echo "$DHCP_IFACES_CACHE"
+}
+_dhcp_server_ifaces_live() {
     ss -lun 2>/dev/null | grep -oE '%[A-Za-z0-9_.-]+:67([^0-9]|$)' | \
         sed -E 's/^%//; s/:67.*//' | sort -u
 }
@@ -1128,7 +1207,7 @@ get_tether_discovery() {
     local ifaces="" iface src
 
     for iface in $(netd_tether_pairs | awk '{ print $1 }') $(dhcp_server_ifaces); do
-        iface=$(normalize_iface_name "$iface")
+        iface="${iface%%@*}"
         is_excluded_iface "$iface" && continue
         [ "$iface" = "$TUN_NAME" ] && continue
         has_private_ip4 "$iface" || continue
@@ -1393,7 +1472,9 @@ apply_network_profile() {
         if grep -q bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
             echo bbr > /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || true
         fi
-        echo 1 > /proc/sys/net/ipv4/tcp_ecn 2>/dev/null || true
+        # ECN=2 (как у Android): принимаем, но сами не просим — на мобильных
+        # сетях встречаются узлы, которые режут или портят ECN-пакеты
+        echo 2 > /proc/sys/net/ipv4/tcp_ecn 2>/dev/null || true
         echo 1 > /proc/sys/net/ipv4/tcp_ecn_fallback 2>/dev/null || true
         set_sysctl net.ipv4.tcp_syn_retries 5
         set_sysctl net.ipv4.tcp_slow_start_after_idle 0
@@ -1404,11 +1485,11 @@ apply_network_profile() {
         else
             echo cubic > /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || true
         fi
-        echo 1 > /proc/sys/net/ipv4/tcp_ecn 2>/dev/null || true
+        echo 2 > /proc/sys/net/ipv4/tcp_ecn 2>/dev/null || true
         echo 1 > /proc/sys/net/ipv4/tcp_ecn_fallback 2>/dev/null || true
         set_sysctl net.ipv4.tcp_syn_retries 3
         set_sysctl net.ipv4.tcp_slow_start_after_idle 0
-        log "FAST profile: BBR/cubic + Full-ECN + Low Latency"
+        log "FAST profile: BBR/cubic + ECN по запросу сервера"
     fi
     
     CURRENT_NET_PROFILE=$profile
@@ -1741,7 +1822,7 @@ dnsproxy_spawn() {
     # пользовательские (cacerts-added, напр. AdGuard HTTPS-фильтр) не берём.
     local certs="SSL_CERT_DIR=/apex/com.android.conscrypt/cacerts:/system/etc/security/cacerts"
     if [ "$DNSPROXY_SU_G" = "1" ]; then
-        dnsproxy_exempt
+        dnsproxy_exempt force
         su -g "$DNSPROXY_GID" -c "$certs exec $DNSPROXY_BIN $1 -o $2" >/dev/null 2>&1 < /dev/null &
     else
         env "$certs" $DNSPROXY_BIN $1 -o "$2" >/dev/null 2>&1 < /dev/null &
@@ -1805,9 +1886,14 @@ meta_eu_watchdog() {
 # Исключение dnsproxy из перехвата AdGuard: RETURN по GID первым в nat OUTPUT.
 # AdGuard при перезапуске вставляет свой jump в позицию 1 — поэтому проверяем
 # именно позицию, а не наличие.
-dnsproxy_exempt() {
+dnsproxy_exempt() {   # [force] — без него не чаще раза в ~10с (зовут 2 раза за цикл)
     local t want
     [ "$DNSPROXY_SU_G" = "1" ] || return 0
+    if [ "$1" != "force" ]; then
+        DNS_EXEMPT_TICK=$((DNS_EXEMPT_TICK + 1))
+        [ "$DNS_EXEMPT_TICK" -ge 10 ] || return 0
+    fi
+    DNS_EXEMPT_TICK=0
     want="-A OUTPUT -m owner --gid-owner $DNSPROXY_GID -j RETURN"
     for t in "$iptables" "$ip6tables"; do
         [ "$($t -t nat -S OUTPUT 2>/dev/null | sed -n 2p)" = "$want" ] && continue
@@ -1924,7 +2010,9 @@ dnsproxy_start() {
     # Авито, Google и т.п.) — смена узла CDN доезжала бы до клиентов часами.
     args="-l 0.0.0.0 -p $DNSPROXY_PORT --cache --cache-optimistic --cache-max-ttl=600 --timeout=3s --refuse-any"
     for u in $ups; do args="$args -u $u"; done
-    for u in $DNS_FALLBACKS; do args="$args -f $u"; done
+    local fb="$DNS_FALLBACKS"
+    [ -n "$DNS_ALT_UPS" ] && [ "$ups" = "$DNS_ALT_UPS" ] && fb="$DNS_UPSTREAMS"
+    for u in $fb; do args="$args -f $u"; done
     for u in $DNS_BOOTSTRAP; do args="$args -b $u"; done
 
     : > "$DNSPROXY_LOG"
@@ -2023,7 +2111,7 @@ apply_dns_mode() {
     dns4="${servers%%"|"*}"
 
     if [ "$mode" = "direct" ]; then
-        [ "$DNS_DIRECT" = "doh" ] && { want="doh"; ups="$DNS_UPSTREAMS"; }
+        [ "$DNS_DIRECT" = "doh" ] && { want="doh"; ups="${DNS_ALT_UPS:-$DNS_UPSTREAMS}"; }
     else
         case "$DNS_VPN" in
             cache) want="cache"; ups="$dns4:53" ;;
@@ -2052,7 +2140,7 @@ apply_dns_mode() {
             DNS_STATE_IFACES="$ifaces"
             # Апстрим недоступен (белые списки, блокировка) — dnsproxy НЕ гасим:
             # DNS временно на обычный, dns_health вернёт DoH, когда оживёт.
-            if dnsproxy_probe_cold; then
+            if dnsproxy_probe_cold || dns_try_alt "проверка при настройке"; then
                 DNS_DEGRADED=0
             else
                 dns_degrade "проверка при настройке"
@@ -2234,6 +2322,64 @@ wan_bytes() {
     echo $((rx + tx))
 }
 
+# --- ступенька между comss и оператором ------------------------------------
+# 20.10: comss ответил за 3680мс (это уже "comss молчит, ответил фолбэк"), и
+# модуль увёл DNS к оператору — а тот для заблокированных сайтов может отдать
+# заглушку, которая потом сидит в кэше Android/Windows. Теперь: основной
+# DoH молчит -> тот же dnsproxy, но основными становятся DNS_FALLBACKS
+# (Google/Cloudflare DoH). К оператору — только если молчат и они (белые
+# списки). Ожил ли основной — проверяем curl-ом раз в DNS_HEALTH_RECOVER,
+# не трогая dnsproxy (его кэш не теряется).
+dns_hosts_of() { echo $* | sed -E 's#[a-z0-9]+://([^/: ]+)[^ ]*#\1#g'; }
+
+dns_try_alt() {     # 0 = перешли на запасные DoH и они отвечают
+    [ -z "$DNS_ALT_UPS" ] || return 1
+    [ -n "$DNS_FALLBACKS" ] || return 1
+    case "$DNSPROXY_SIG" in "direct-doh|"*) ;; *) return 1 ;; esac
+    DNS_ALT_UPS="$DNS_FALLBACKS"
+    if dnsproxy_start "direct-doh" $DNS_ALT_UPS && dnsproxy_probe_cold; then
+        log "WARNING: DoH-апстрим не отвечает ($1) — DNS через запасные DoH ($(dns_hosts_of $DNS_ALT_UPS)), $(dns_hosts_of $DNS_UPSTREAMS) проверяю раз в ${DNS_HEALTH_RECOVER}с"
+        DNS_ALT_LAST=$(date +%s)
+        phone_status_refresh
+        return 0
+    fi
+    # запасные тоже молчат — обратно на основной, дальше откат к оператору
+    DNS_ALT_UPS=""
+    dnsproxy_start "direct-doh" $DNS_UPSTREAMS
+    return 1
+}
+
+# Основной DoH отвечает? Напрямую curl-ом, от группы dnsproxy (мимо AdGuard).
+dns_primary_alive() {
+    local u code
+    set -- $DNS_UPSTREAMS
+    u="$1"
+    case "$u" in https://*) ;; *) return 1 ;; esac
+    command -v curl >/dev/null 2>&1 || return 1
+    case "$u" in *\?*) u="$u&" ;; *) u="$u?" ;; esac
+    u="${u}dns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"
+    if [ "$DNSPROXY_SU_G" = "1" ]; then
+        code=$(su -g "$DNSPROXY_GID" -c "curl -s -o /dev/null -m 4 --capath /apex/com.android.conscrypt/cacerts -H 'accept: application/dns-message' -w '%{http_code}' '$u'" 2>/dev/null)
+    else
+        code=$(curl -s -o /dev/null -m 4 --capath /apex/com.android.conscrypt/cacerts -H 'accept: application/dns-message' -w '%{http_code}' "$u" 2>/dev/null)
+    fi
+    [ "$code" = "200" ]
+}
+
+dns_alt_recheck() {
+    [ -n "$DNS_ALT_UPS" ] && [ "$DNS_DEGRADED" = "0" ] || return 1
+    [ $(( $1 - DNS_ALT_LAST )) -ge "$DNS_HEALTH_RECOVER" ] || return 1
+    DNS_ALT_LAST=$1
+    dns_primary_alive || return 1
+    DNS_ALT_UPS=""
+    if dnsproxy_start "direct-doh" $DNS_UPSTREAMS; then
+        log "DoH-апстрим $(dns_hosts_of $DNS_UPSTREAMS) снова отвечает — DNS обратно через него"
+    fi
+    DNS_HEALTH_LAST=0
+    phone_status_refresh
+    return 0
+}
+
 # Из цикла. Пока DoH работает — проверка раз в DNS_HEALTH_INTERVAL, при
 # неудаче сразу вторая (одна медленная секунда в автобусе — не повод).
 # В деградации — раз в DNS_HEALTH_RECOVER. И то и другое — только если
@@ -2244,6 +2390,7 @@ dns_health() {
     dnsproxy_alive || return 0
     dnsproxy_log_rotate
     now=$(date +%s)
+    dns_alt_recheck "$now" && return 0
 
     # Пассивный сигнал: в логе dnsproxy появились "exchange failed" — у
     # клиентов уже сыпятся ошибки, проверяем сейчас, не ждём интервал.
@@ -2296,7 +2443,13 @@ dns_health() {
         dns_restore
     elif [ "$DNS_DEGRADED" = "0" ]; then
         # одна неудача — не повод (одна плохая секунда в автобусе), сразу вторая
-        dnsproxy_probe || dns_degrade "2 проверки подряд: $DNS_PROBE_LAST_MS$(case "$DNS_PROBE_LAST_MS" in [0-9]*) echo 'мс, медленно' ;; esac)"
+        if ! dnsproxy_probe; then
+            local why="2 проверки подряд: $DNS_PROBE_LAST_MS$(case "$DNS_PROBE_LAST_MS" in [0-9]*) echo 'мс, медленно' ;; esac)"
+            dns_try_alt "$why" || dns_degrade "$why"
+        fi
+    else
+        # в откате основной не ожил — может, ожили запасные
+        dns_try_alt "проверка восстановления" && dns_restore
     fi
     DNS_HEALTH_LAST=$(date +%s)
 }
@@ -2326,7 +2479,7 @@ phone_dns_rules_on() {
         [ "$t" = "$ip6tables" ] && PHONE_DNS_V6=1
     done
     # исключение dnsproxy из AdGuard обратно на первое место
-    dnsproxy_exempt
+    dnsproxy_exempt force
 }
 
 phone_dns_rules_off() {
@@ -2596,6 +2749,65 @@ zapret_rules_on() {
             while $t -D FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; do :; done
         fi
     done
+    zapret_ggc_on
+}
+
+# --- YT_GGC_BLOCK: googlevideo.com на адреса не из сетей Google -> RST ----
+# filter, а не mangle: отказ до NFQUEUE, nfqws этот ClientHello не видит.
+# OUTPUT — телефон (если zapret для телефона включён), FORWARD — раздача.
+# tun+ — мимо: через VPN кэш оператора не попадается.
+zapret_ggc_hooks_off() {
+    local t="$1" c _n
+    for c in OUTPUT FORWARD; do
+        _n=0; while [ $_n -lt 8 ] && $t -D "$c" $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null; do _n=$((_n + 1)); done
+    done
+}
+
+zapret_ggc_on() {
+    local t f p n st=""
+    for t in "$iptables" "$ip6tables"; do
+        zapret_ggc_hooks_off "$t"
+        if [ "$t" = "$iptables" ]; then f="$ZAPRET_DIR/google-ipv4.txt"; else f="$ZAPRET_DIR/google-ipv6.txt"; fi
+        if [ "$YT_GGC_BLOCK" != "1" ] || [ ! -s "$f" ]; then
+            $t -F "$CHAIN_ZAPRET_GGC" 2>/dev/null; $t -X "$CHAIN_ZAPRET_GGC" 2>/dev/null
+            continue
+        fi
+        $t -N "$CHAIN_ZAPRET_GGC" 2>/dev/null
+        $t -F "$CHAIN_ZAPRET_GGC" 2>/dev/null
+        $t -A "$CHAIN_ZAPRET_GGC" -o tun+ -j RETURN 2>/dev/null
+        $t -A "$CHAIN_ZAPRET_GGC" -o lo -j RETURN 2>/dev/null
+        n=0
+        while read -r p; do
+            case "$p" in ''|'#'*) continue ;; esac
+            $t -A "$CHAIN_ZAPRET_GGC" -d "$p" -j RETURN 2>/dev/null && n=$((n + 1))
+        done < "$f"
+        # список не встал (битый файл) — лучше пропустить всё, чем отбить сервер Google
+        if [ "$n" -lt 5 ]; then
+            $t -F "$CHAIN_ZAPRET_GGC" 2>/dev/null; $t -X "$CHAIN_ZAPRET_GGC" 2>/dev/null
+            continue
+        fi
+        $t -A "$CHAIN_ZAPRET_GGC" -p tcp -j REJECT --reject-with tcp-reset 2>/dev/null
+        $t -I FORWARD 1 $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null
+        [ "$ZAPRET_PHONE" = "1" ] && $t -I OUTPUT 1 $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null
+        st="$st${st:++}$([ "$t" = "$iptables" ] && echo v4 || echo v6)"
+    done
+    [ "$st" != "$GGC_STATE" ] && [ -n "$st" ] && log "zapret: YouTube мимо кэшей оператора включено ($st)"
+    GGC_STATE="$st"
+}
+
+zapret_ggc_off() {
+    local t
+    for t in "$iptables" "$ip6tables"; do
+        zapret_ggc_hooks_off "$t"
+        $t -F "$CHAIN_ZAPRET_GGC" 2>/dev/null; $t -X "$CHAIN_ZAPRET_GGC" 2>/dev/null
+    done
+    GGC_STATE=""
+}
+
+# сколько соединений с кэшами оператора отбито (для status/WebUI)
+zapret_ggc_hits() {
+    [ -n "$GGC_STATE" ] || { echo 0; return; }
+    $iptables -L "$CHAIN_ZAPRET_GGC" -v -x -n 2>/dev/null | awk '/REJECT/ {s += $1} END {print s + 0}'
 }
 
 zapret_rules_off() {
@@ -2608,6 +2820,7 @@ zapret_rules_off() {
         $t -t mangle -F "$CHAIN_ZAPRET_IN" 2>/dev/null; $t -t mangle -X "$CHAIN_ZAPRET_IN" 2>/dev/null
         $t -F "$CHAIN_ZAPRET_QUIC" 2>/dev/null;         $t -X "$CHAIN_ZAPRET_QUIC" 2>/dev/null
     done
+    zapret_ggc_off
 }
 
 zapret_down() {
@@ -2646,7 +2859,12 @@ zapret_reconcile() {
         ZAPRET_TICK=0
         ZAPRET_NET_DIRTY=0
         ZAPRET_NETS_STAMP="$stamp"
-        vpn_up_now && zapret_learn_vpn_owner
+        # dumpsys connectivity тяжёлый (system_server) — раз на каждый tun, а
+        # не каждые 30с: владелец VPN за сессию не меняется
+        if vpn_up_now; then
+            local _ti; _ti=$(read_table_index "$TUN_NAME")
+            [ "$_ti" != "$ZAPRET_OWNER_TUN" ] && { zapret_learn_vpn_owner; ZAPRET_OWNER_TUN="$_ti"; }
+        fi
         zapret_pick_strategy
         args=$(zapret_args)
         excl=$(zapret_vpn_uids)
@@ -2673,10 +2891,20 @@ zapret_reconcile() {
         if [ "$ZAPRET_STATE" = "on" ]; then phone_status_refresh; else ZAPRET_STATE="starting"; fi
     fi
 
-    # правила: впервые / сменились исключения / хук снесли (netd пересобрал цепочки)
-    if [ "$ZAPRET_STATE" != "on" ] || [ "$excl" != "$ZAPRET_EXCL_RUN" ] || \
-       ! $iptables -t mangle -C POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null || \
-       { [ "$ZAPRET_QUIC_BLOCK" = "1" ] && ! $iptables -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; }; then
+    # правила: впервые / сменились исключения / хук снесли (netd пересобрал
+    # цепочки). iptables -C читает всю таблицу (у Android тысячи правил) —
+    # хуки проверяем раз в ~10с: без хука zapret просто не работает, утечки нет
+    local _hooks_bad=0
+    ZAPRET_HOOK_TICK=$((ZAPRET_HOOK_TICK + 1))
+    if [ "$ZAPRET_STATE" = "on" ] && [ "$ZAPRET_HOOK_TICK" -ge 5 ]; then
+        ZAPRET_HOOK_TICK=0
+        if ! $iptables -t mangle -C POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null || \
+           { [ "$ZAPRET_QUIC_BLOCK" = "1" ] && ! $iptables -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; } || \
+           { [ -n "$GGC_STATE" ] && ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null; }; then
+            _hooks_bad=1
+        fi
+    fi
+    if [ "$ZAPRET_STATE" != "on" ] || [ "$excl" != "$ZAPRET_EXCL_RUN" ] || [ "$_hooks_bad" = 1 ]; then
         zapret_rules_on "$excl"
         if [ "$ZAPRET_STATE" != "on" ]; then
             log "zapret: включён (режим $ZAPRET_MODE, телефон: $ZAPRET_PHONE, QUIC раздачи: $([ "$ZAPRET_QUIC_BLOCK" = 1 ] && echo закрыт || echo открыт); VPN-клиенты в исключениях: ${excl:-нет})"
@@ -2713,7 +2941,18 @@ phone_dns_reconcile() {
     route=$(route_id)
     if dnsproxy_alive && [ -n "$DNSPROXY_STARTED_ROUTE" ] &&        [ "$route" != "$DNSPROXY_STARTED_ROUTE" ] && [ "$route" != "wan:" ]; then
         dns_route_changed
-        dnsproxy_restart "маршрут: $DNSPROXY_STARTED_ROUTE -> $route"
+        case "$DNS_STATE" in
+            dnsproxy*) dnsproxy_restart "маршрут: $DNSPROXY_STARTED_ROUTE -> $route" ;;
+            *)
+                if [ "$up" = "1" ]; then
+                    # VPN поднялся, раздача dnsproxy не пользуется: DNS телефона
+                    # сейчас уйдёт в VPN, и dnsproxy остановится. Раньше его
+                    # перезапускали под VPN и через 2с всё равно гасили.
+                    PHONE_VPN_SEEN=1
+                else
+                    dnsproxy_restart "маршрут: $DNSPROXY_STARTED_ROUTE -> $route"
+                fi ;;
+        esac
     fi
     # "VPN пропал" — принимаем сразу, "VPN появился" — только 2 раза подряд.
     # Пока ждали второго замера (~2-4с), DNS телефона шёл к оператору, и
@@ -2772,9 +3011,9 @@ phone_dns_reconcile() {
 
     # Экземпляр с DNS_UPSTREAMS и тегом direct-doh — общий с раздачей в direct
     case "$DNS_STATE" in dnsproxy*) ;; *) dnsproxy_port_guard ;; esac
-    if dnsproxy_start "direct-doh" $DNS_UPSTREAMS; then
+    if dnsproxy_start "direct-doh" ${DNS_ALT_UPS:-$DNS_UPSTREAMS}; then
         PHONE_DNS_ON=1
-        if [ "$DNS_DEGRADED" = "0" ] && dnsproxy_probe_cold; then
+        if [ "$DNS_DEGRADED" = "0" ] && { dnsproxy_probe_cold || dns_try_alt "DNS телефона, проверка при включении"; }; then
             phone_dns_rules_on
             log "DNS телефона -> dnsproxy :$DNSPROXY_PORT (VPN не поднят; IPv6: $([ "$PHONE_DNS_V6" = 1 ] && echo да || echo 'нет ip6 nat'))"
             phone_status_refresh
@@ -3321,17 +3560,18 @@ apply_state() {
         tun_idx=$(read_table_index "$TUN_NAME")
     fi
 
-    tether_ifaces=$(normalize_tether_ifaces $tether_ifaces)
+    _norm_words $tether_ifaces; tether_ifaces="$NORM_OUT"
     local _clean
-    _clean=$(clean_iface_list $tether_ifaces)
+    _clean_ifaces $tether_ifaces; _clean="$CLEAN_OUT"
     if [ "$_clean" != "$tether_ifaces" ]; then
         log "WARNING: странные имена раздачи [$tether_ifaces] -> [$_clean] (discovery: $DISCOVERY_SRC, last: [$LAST_TETHER_IFACES])"
         tether_ifaces="$_clean"
     fi
     LAST_TETHER_IFACES_STABLE="${LAST_TETHER_IFACES_STABLE:-$tether_ifaces}"
     
-    local sorted_current=$(echo "$tether_ifaces" | tr -s '[:space:]' '\n' | sort | tr '\n' ' ' | sed 's/ $//')
-    local sorted_stable=$(echo "$LAST_TETHER_IFACES_STABLE" | tr -s '[:space:]' '\n' | sort | tr '\n' ' ' | sed 's/ $//')
+    local sorted_current sorted_stable
+    _norm_words $tether_ifaces; sorted_current="$NORM_OUT"
+    _norm_words $LAST_TETHER_IFACES_STABLE; sorted_stable="$NORM_OUT"
     
     if [ -z "$tether_ifaces" ]; then
         EMPTY_TETHER_COUNT=$((EMPTY_TETHER_COUNT + 1))
@@ -3471,12 +3711,14 @@ handle_change() {
     # сработать посреди apply_state, и "FORCE_UPDATE=0" после него терял сигнал.
     if [ "$USR1_PENDING" -eq 1 ]; then
         USR1_PENDING=0
+        local _force=1
         if [ -f "$RELOAD_FILE" ]; then
             rm -f "$RELOAD_FILE"
             reload_config
+            [ "$RELOAD_NEED_REBUILD" = "1" ] || _force=0
         fi
         refresh_vpn_target
-        FORCE_UPDATE=1
+        FORCE_UPDATE=$_force
         ack_token=$(cat "$REQ_FILE" 2>/dev/null)
         [ -z "$ack_token" ] && ack_token="noreq"
     fi
@@ -3484,6 +3726,7 @@ handle_change() {
     [ "$FORCE_UPDATE" -eq 0 ] && [ $((now - LAST_HANDLE_TS)) -lt $DEBOUNCE_SECS ] && { _NEED_UPDATE=1; return 0; }
 
     LAST_HANDLE_TS=$now
+    IP_RULE_CACHE=$($ip rule show 2>/dev/null)
 
     if [ "$LAST_VPN_ACTIVE" = "false" ] || ! $ip link show "$TUN_NAME" >/dev/null 2>&1; then
         local new_tun=$(detect_tun_name)
@@ -3572,6 +3815,8 @@ handle_change() {
 
     local tun_idx=$(read_table_index "$TUN_NAME")
     refresh_tether_ifaces
+    # дальше правила меняются (setup_*), кэш ip rule больше не верен
+    IP_RULE_CACHE=""
     local tether_ifaces="$TETHER_NOW"
     
     if [ -z "$tether_ifaces" ]; then
@@ -3643,46 +3888,84 @@ handle_change() {
 # Зовётся из handle_change перед полной пересборкой (FORCE_UPDATE): здесь
 # только сбрасываем то, что пересборка сама не переставит, — DNS-состояние,
 # DNS телефона, QUIC, kill-switch при выключении, описание модуля.
+# Группы настроек для reload_config: что пересобирать при смене.
+# DNS и kill-switch живут в правилах раздачи -> полная пересборка (с ней —
+# сброс соединений клиентов). zapret, QUIC приложений и прочее — точечно:
+# 20.10 каждое "Применить" (переключение zapret) рвало все соединения
+# ноутбука и перезапускало dnsproxy с пустым кэшем.
+CONF_GRP_DNS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS"
+CONF_GRP_KS="KILL_SWITCH KILL_SWITCH_STRICT"
+CONF_GRP_QUIC="QUIC_BLOCK_APPS"
+CONF_GRP_ZAPRET="ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET YT_GGC_BLOCK"
+_conf_grp_sig() {   # $1 = имя переменной-результата, дальше ключи
+    local _v="$1" _k _o=""; shift
+    for _k in "$@"; do eval "_o=\"\$_o|\$$_k\""; done
+    eval "$_v=\"\$_o\""
+}
+RELOAD_NEED_REBUILD=1
+
 reload_config() {
-    local old_ks="$KILL_SWITCH"
+    local old_ks="$KILL_SWITCH" s_dns0 s_ks0 s_quic0 s_zap0 s_dns1 s_ks1 s_quic1 s_zap1 what=""
+    _conf_grp_sig s_dns0 $CONF_GRP_DNS
+    _conf_grp_sig s_ks0 $CONF_GRP_KS
+    _conf_grp_sig s_quic0 $CONF_GRP_QUIC
+    _conf_grp_sig s_zap0 $CONF_GRP_ZAPRET
     conf_restore_defaults
     USER_CONF_NOTE=""
     load_user_conf
     conf_apply_overrides
     DNSPROXY_BIN="$DNSPROXY_BIN_FOUND"
     [ "$DNSPROXY_ENABLE" = "1" ] || DNSPROXY_BIN=""
+    _conf_grp_sig s_dns1 $CONF_GRP_DNS
+    _conf_grp_sig s_ks1 $CONF_GRP_KS
+    _conf_grp_sig s_quic1 $CONF_GRP_QUIC
+    _conf_grp_sig s_zap1 $CONF_GRP_ZAPRET
+    RELOAD_NEED_REBUILD=0
+    [ "$s_dns0" != "$s_dns1" ] && { what="$what DNS"; RELOAD_NEED_REBUILD=1; }
+    [ "$s_ks0" != "$s_ks1" ] && { what="$what kill-switch"; RELOAD_NEED_REBUILD=1; }
+    [ "$s_quic0" != "$s_quic1" ] && what="$what QUIC-приложений"
+    [ "$s_zap0" != "$s_zap1" ] && what="$what zapret"
     log "Настройки перечитаны:${USER_CONF_NOTE:- (всё по умолчанию)}"
+    log "Применяю:${what:- ничего не поменялось}$([ "$RELOAD_NEED_REBUILD" = 1 ] && echo ' — пересборка правил раздачи' || echo ' — без пересборки раздачи')"
     log "Config: DNSPROXY=$DNSPROXY_ENABLE KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE UPSTREAMS=[$DNS_UPSTREAMS] QUIC_BLOCK=[$QUIC_BLOCK_APPS] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/phone=$ZAPRET_PHONE/quic=$ZAPRET_QUIC_BLOCK/per_net=$ZAPRET_PER_NET META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s"
 
-    # DNS: всё с нуля — пересборка поставит заново под новые настройки
-    if [ "$PHONE_DNS_ON" = "1" ]; then phone_dns_rules_off; fi
-    PHONE_DNS_ON=0
-    PHONE_DNS_RETRY=0
-    PHONE_VPN_SEEN=""
-    PHONE_VPN_STABLE=""
-    dnsproxy_stop
-    dnsproxy_port_guard_down
-    DNSPROXY_SIG=""
-    DNSPROXY_STARTED_ROUTE=""
-    DNS_STATE=""
-    DNS_DEGRADED=0
-    DNS_FAST_RECHECK=0
-    DNS_FAIL_SIG=""
-    DNS_HEALTH_LAST=0
-    DNS_ROUTE_CHANGED_TS=$(date +%s)
+    if [ "$s_dns0" != "$s_dns1" ]; then
+        # DNS: всё с нуля — пересборка поставит заново под новые настройки
+        if [ "$PHONE_DNS_ON" = "1" ]; then phone_dns_rules_off; fi
+        PHONE_DNS_ON=0
+        PHONE_DNS_RETRY=0
+        PHONE_VPN_SEEN=""
+        PHONE_VPN_STABLE=""
+        dnsproxy_stop
+        dnsproxy_port_guard_down
+        DNSPROXY_SIG=""
+        DNSPROXY_STARTED_ROUTE=""
+        DNS_STATE=""
+        DNS_DEGRADED=0
+        DNS_ALT_UPS=""
+        DNS_FAST_RECHECK=0
+        DNS_FAIL_SIG=""
+        DNS_HEALTH_LAST=0
+        DNS_ROUTE_CHANGED_TS=$(date +%s)
+    fi
 
     # guard_apply при KILL_SWITCH=0 ничего не делает — старый guard остался бы
     [ "$old_ks" = "1" ] && [ "$KILL_SWITCH" != "1" ] && guard_down
 
-    quic_block_down
-    quic_block_apply
+    if [ "$s_quic0" != "$s_quic1" ]; then
+        quic_block_down
+        quic_block_apply
+    fi
 
-    # zapret: снять всё, цикл поднимет заново под новые настройки (~2с)
-    zapret_down
-    NET_ID_FORCE=1
-    ZAPRET_NET_BAD=""
+    if [ "$s_zap0" != "$s_zap1" ]; then
+        # zapret: снять всё, цикл поднимет заново под новые настройки (~2с)
+        zapret_down
+        NET_ID_FORCE=1
+        ZAPRET_NET_BAD=""
+    fi
 
     [ "$STATUS_IN_DESCRIPTION" = "1" ] || set_description "$MODULE_DESC_DEFAULT"
+    phone_status_refresh
 }
 
 # Только помечаем: вся работа — в handle_change, в основном потоке цикла
@@ -3754,7 +4037,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.16 (3.10.0-hybrid.20) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.17 (3.10.0-hybrid.21) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
