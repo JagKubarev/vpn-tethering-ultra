@@ -18,6 +18,7 @@
 #   webctl.sh zlist-set 'д1 д2'       записать свой список (с проверкой)
 #   webctl.sh zauto-clear             очистить автосписок
 #   webctl.sh sitetest ДОМЕН          открывается ли сайт мимо VPN без/с обходом
+#   webctl.sh ytspeed                 скорость "видео YouTube" мимо VPN без/с обходом
 #   webctl.sh znet                    текущая сеть + стратегии, запомненные для сетей
 #   webctl.sh znet-set СТР 'АРГ' [ЗАМЕТКА]   запомнить стратегию для текущей сети
 #   webctl.sh znet-del КЛЮЧ           забыть стратегию сети
@@ -298,6 +299,48 @@ case "$1" in
         nqpid=$!
         sleep 0.7
         if kill -0 "$nqpid" 2>/dev/null; then echo "zapret $(one)"; else echo "zapret 000 0 nfqws"; fi
+        ;;
+
+    ytspeed)
+        # Скорость видео мимо VPN. ТСПУ режет по имени видеосервера в TLS (SNI),
+        # а у настоящих видеосерверов нет большого файла без подписанной ссылки.
+        # Поэтому: сервер Google (dl.google.com), имя в SNI — googlevideo.com,
+        # файл — по заголовку Host. Так видно и замедление, и помогает ли обход.
+        wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
+        [ -n "$wan" ] || { echo "ERR не знаю интерфейс оператора — модуль ещё не видел сеть"; exit 1; }
+        ip -4 addr show "$wan" 2>/dev/null | grep -q "inet " || { echo "ERR у $wan нет адреса — сеть только что сменилась? Повтори через полминуты"; exit 1; }
+        case "$(uname -m)" in aarch64|arm64) nq="$MODDIR/bin/nfqws-arm64" ;; *) nq="$MODDIR/bin/nfqws-arm" ;; esac
+        [ -x "$nq" ] || { echo "ERR нет nfqws"; exit 1; }
+        CA=/apex/com.android.conscrypt/cacerts
+        [ -d "$CA" ] || CA=/system/etc/security/cacerts
+        Q=202
+        RULE_NFQ="-o $wan -m owner --uid-owner 0 -p tcp --dport 443 -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
+        yt_cleanup() {
+            [ -n "$nqpid" ] && kill "$nqpid" 2>/dev/null
+            iptables -w 2 -t mangle -D POSTROUTING $RULE_NFQ 2>/dev/null
+            iptables -w 2 -t mangle -D VPN_ZAPRET -m owner --uid-owner 0 -j RETURN 2>/dev/null
+            iptables -w 2 -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
+        }
+        trap yt_cleanup EXIT INT TERM HUP
+        iptables -w 2 -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
+        iptables -w 2 -t mangle -I VPN_ZAPRET 1 -m owner --uid-owner 0 -j RETURN 2>/dev/null
+        ip=$(curl -s -m 6 --capath "$CA" -H 'accept: application/dns-json' \
+            "https://1.1.1.1/dns-query?name=dl.google.com&type=A" 2>/dev/null | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')
+        [ -n "$ip" ] || { echo "ERR не удалось узнать адрес сервера Google"; exit 1; }
+        H="rr1---sn-gvnuxaxjvh-n8vz.googlevideo.com"
+        yt_one() {
+            curl -s -k -o /dev/null -m 6 --interface "$wan" --connect-to "$H:443:$ip:443" -H 'Host: dl.google.com' \
+                -w '%{http_code} %{speed_download}' "https://$H/linux/direct/google-chrome-stable_current_amd64.deb" 2>/dev/null
+            echo " $?"
+        }
+        echo "ip $ip"
+        echo "direct $(yt_one)"
+        iptables -w 2 -t mangle -I POSTROUTING 1 $RULE_NFQ
+        nk=$(cur_net); nk=${nk%%"|"*}
+        "$nq" --qnum=$Q --uid=0:3998 --bind-fix4 $(sh "$MODDIR/service.sh" --zapret-strategy "$nk") >/dev/null 2>&1 &
+        nqpid=$!
+        sleep 0.7
+        if kill -0 "$nqpid" 2>/dev/null; then echo "zapret $(yt_one)"; else echo "zapret 000 0 nfqws"; fi
         ;;
 
     # --- стратегия для каждой сети ----------------------------------------
