@@ -292,7 +292,9 @@ case "$1" in
         echo "direct $(one)"
         iptables -w 2 -t mangle -I POSTROUTING 1 $RULE_NFQ
         nk=$(cur_net); nk=${nk%%"|"*}
-        "$nq" --qnum=$Q --uid=0:0 --bind-fix4 $(sh "$MODDIR/service.sh" --zapret-strategy "$nk") >/dev/null 2>&1 &
+        # группа 3998 (ZAPRET_GID): основной zapret пропускает её пакеты, даже
+        # если наше uid-0 исключение в VPN_ZAPRET пропадёт при пересборке
+        "$nq" --qnum=$Q --uid=0:3998 --bind-fix4 $(sh "$MODDIR/service.sh" --zapret-strategy "$nk") >/dev/null 2>&1 &
         nqpid=$!
         sleep 0.7
         if kill -0 "$nqpid" 2>/dev/null; then echo "zapret $(one)"; else echo "zapret 000 0 nfqws"; fi

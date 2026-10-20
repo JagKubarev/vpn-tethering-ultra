@@ -194,6 +194,15 @@
 #   украинские и европейские издания, сайты VPN, Bluesky, Tumblr, Goodreads,
 #   Bandcamp, LostFilm и др. Перепроверено на YOTA (blockscan, параллельность 3).
 # ============================================================================
+# v2.16 — zapret на мобильном интернете: Qualcomm-цепочка
+#   qcom_qos_reset_POSTROUTING (-o rmnet_data+ -j MARK --set-xmark 0/0xffffffff)
+#   стирает метку 0x40000000 у пакетов самого nfqws раньше, чем до них доходит
+#   VPN_ZAPRET (она в конце POSTROUTING). nfqws получал свои фейки и куски
+#   ClientHello обратно и коверкал их второй раз: google/youtube/discord
+#   ломались только с включённым обходом, на Wi-Fi (wlan) всё работало.
+#   Теперь nfqws работает с группой ZAPRET_GID, и его пакеты пропускаются
+#   по владельцу сокета — это метка, которую система не трогает.
+# ============================================================================
 # ============================================================================
 
 umask 022
@@ -656,6 +665,8 @@ ZAPRET_PID_FILE="/data/local/tmp/vpn_tether_nfqws.pid"
 ZAPRET_LOG="/data/local/tmp/vpn_tether_nfqws.log"
 ZAPRET_QNUM=200
 ZAPRET_MARK=0x40000000     # метка поддельных пакетов nfqws (по умолчанию у nfqws)
+ZAPRET_GID=3998            # группа nfqws: на rmnet метку стирает qcom_qos_reset, а
+                           # владельца сокета — нет; по нему узнаём пакеты nfqws
 CHAIN_ZAPRET="VPN_ZAPRET"          # mangle POSTROUTING: исходящие -> nfqws
 CHAIN_ZAPRET_IN="VPN_ZAPRET_IN"    # mangle PREROUTING: ответы -> nfqws (автосписок)
 CHAIN_ZAPRET_QUIC="VPN_ZAPRET_QUIC" # filter FORWARD: QUIC раздачи
@@ -2388,7 +2399,8 @@ quic_block_down() {
 # zapret (nfqws): обход DPI для трафика мимо VPN.
 #  - mangle POSTROUTING -> VPN_ZAPRET: первые пакеты HTTPS-соединений уходят
 #    в nfqws (очередь ZAPRET_QNUM). Пропускаем: tun* (VPN), lo, локальные
-#    сети, поддельные пакеты самого nfqws (метка), VPN-клиентов, dnsproxy.
+#    сети, пакеты самого nfqws (метка и группа ZAPRET_GID), VPN-клиентов,
+#    dnsproxy.
 #    Раздача (пакеты без сокета) обрабатывается всегда, телефон — если
 #    ZAPRET_PHONE=1.
 #  - mangle PREROUTING -> VPN_ZAPRET_IN: первые ответы — nfqws по ним видит
@@ -2439,7 +2451,7 @@ zapret_learn_vpn_owner() {
 }
 
 zapret_args() {
-    local a="--qnum=$ZAPRET_QNUM --uid=0:0 --bind-fix4 --bind-fix6 --filter-tcp=443"
+    local a="--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 --filter-tcp=443"
     if [ "$ZAPRET_MODE" = "list" ]; then
         a="$a --hostlist=$ZAPRET_LIST_DEFAULT"
         # пустой список не передаём: не полагаемся на то, как nfqws его трактует
@@ -2540,6 +2552,8 @@ zapret_rules_on() {
         $t -t mangle -A "$CHAIN_ZAPRET" -o lo -j RETURN 2>/dev/null
         $t -t mangle -A "$CHAIN_ZAPRET" -d "$lan" -j RETURN 2>/dev/null
         $t -t mangle -A "$CHAIN_ZAPRET" -m mark --mark "$ZAPRET_MARK/$ZAPRET_MARK" -j RETURN 2>/dev/null
+        # метку выше на rmnet стирает qcom_qos_reset — дублируем по группе сокета
+        $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$ZAPRET_GID" -j RETURN 2>/dev/null
         if [ "$ZAPRET_PHONE" = "1" ]; then
             for u in $excl; do
                 $t -t mangle -A "$CHAIN_ZAPRET" -m owner --uid-owner "$u" -j RETURN 2>/dev/null
@@ -3740,7 +3754,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.15 (3.10.0-hybrid.19) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.16 (3.10.0-hybrid.20) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"

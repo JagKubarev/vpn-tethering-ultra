@@ -125,7 +125,8 @@ $IPT -t mangle -I POSTROUTING 1 $RULE
 run_strat() {
     local a="$1" stage="$2" real ok=0 brk=0 sum=0 det="" v t
     real=$(echo "$a" | sed "s#@G#@$ZDIR/tls_clienthello_www_google_com.bin#g; s#@Q#@$ZDIR/quic_initial_www_google_com.bin#g")
-    "$NQ" --qnum=$Q --uid=0:0 --bind-fix4 $real > "$TMP/nq.log" 2>&1 &
+    # группа 3998 = ZAPRET_GID из service.sh: основной zapret её не трогает
+    "$NQ" --qnum=$Q --uid=0:3998 --bind-fix4 $real > "$TMP/nq.log" 2>&1 &
     NQPID=$!
     sleep 0.6
     if ! kill -0 "$NQPID" 2>/dev/null; then
