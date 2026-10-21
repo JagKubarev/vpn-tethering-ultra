@@ -186,6 +186,17 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
   </div>
 </div>
 
+<!-- ============ Диагностика ============ -->
+<h2>Диагностика сети</h2>
+<div class="card">
+  <div class="row col">
+    <div class="txt"><div class="t">Что делает оператор</div>
+      <div class="s">Подмена DNS, обрыв соединений после первых килобайт, белые списки, Telegram. Мимо VPN и обхода, около минуты.</div></div>
+    <div class="mt8"><button class="btn small" id="diagBtn">Проверить</button></div>
+    <div class="kv" id="diagOut" style="display:none"></div>
+  </div>
+</div>
+
 <!-- ============ DNS ============ -->
 <h2>DNS</h2>
 <div class="card">
@@ -581,6 +592,7 @@ function renderStatus(s) {
     let zt = 'включён';
     if (s.zapret_strategy) zt += ' · ' + esc(stratName(s.zapret_strategy, s.zapret_eff_args)) +
       (s.zapret_src === 'net' ? ' (своя для «' + esc(s.net_label) + '»)' : s.zapret_src === 'label' ? ' (как у «' + esc(s.net_label) + '», код сети ' + esc(s.net_key) + ')' : ' (общая)');
+    if (s.zapret_eff_yt) zt += ' · YouTube: ' + esc(stratLabel(s.zapret_eff_yt));
     if (+s.zapret_auto > 0) zt += ' · найдено сайтов: ' + esc(s.zapret_auto);
     h += kvRow('Обход DPI', zt, 'green');
     if (s.ggc === 'on') h += kvRow('YouTube', 'мимо кэша оператора', 'green');
@@ -852,6 +864,18 @@ async function loadZev() {
   $('#zev').textContent = lines.length ? lines.join('\n') : 'Пока пусто: сторож пишет сюда поломки и починки, подбор — свои итоги.';
 }
 $('#zevBox').addEventListener('toggle', () => { if ($('#zevBox').open) loadZev(); });
+$('#diagBtn').addEventListener('click', async () => {
+  const b = $('#diagBtn'), o = $('#diagOut');
+  b.disabled = true; b.textContent = 'Проверяю… (~1 мин)';
+  o.style.display = ''; o.innerHTML = kvRow('Идёт проверка', 'DNS, хостинги, белые списки, Telegram…', '');
+  try {
+    const r = await ctl('diag');
+    const rows = (r.out || '').split('\n').filter((l) => l.indexOf('R ') === 0).map((l) => l.slice(2).split('|'));
+    const col = { ok: 'green', warn: 'amber', bad: 'red', info: '' };
+    o.innerHTML = rows.length ? rows.map((f) => kvRow(esc(f[2] || f[0]), esc(f.slice(3).join('|')), col[f[1]] || '')).join('')
+      : kvRow('Ошибка', esc((r.out || 'нет ответа').replace(/^ERR /, '')), 'red');
+  } finally { b.disabled = false; b.textContent = 'Проверить ещё раз'; }
+});
 $('#logRefresh').addEventListener('click', loadLog);
 $('#logPrev').addEventListener('click', async () => {
   const r = await ctl('log-prev');
@@ -1159,6 +1183,7 @@ function mockExec(cmd) {
   if (a === 'zauto') return { errno: 0, out: 'example.org\nfoo.net\n' };
   if (/^zlist-set /.test(a)) return { errno: 0, out: 'OK 1' };
   if (a === 'zauto-clear') return { errno: 0, out: 'OK' };
+  if (a === 'diag') return { errno: 0, out: 'R dns|warn|Подмена DNS|оператор подменяет ответы обычного DNS (2 из 3: rutracker.org:195.208.4.1) — без DoH заблокированные сайты получат заглушку\nR tcp16|ok|Обрыв на 16–64 КБ|нет: 128 КБ скачались (4 из 4)\nR wl|ok|Белые списки|нет: зарубежные сайты открываются (4 из 4)\nR tg|bad|Telegram|закрыт по IP: серверы (0 из 5) и веб-версия недоступны — только через VPN\n' };
   if (/^zevents/.test(a)) return { errno: 0, out: '2026-10-21 12:40|YOTA|сторож: стратегия работает\n2026-10-21 13:44|YOTA|сторож: стратегия не открывает заблокированные (www.youtube.com discord.com) — ищу замену\n2026-10-21 13:45|YOTA|сторож: вернул прежнюю стратегию: --dpi-desync=multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1\n' };
   if (a === 'zscan-status') return { errno: 0, out: 'state=done\nmode=quick\ndone=21\ntotal=21\nstage=готово\nmsg=\nblocked=www.youtube.com i.ytimg.com discord.com gateway.discord.gg x.com www.facebook.com rutracker.org www.linkedin.com\nalive=0\n' };
   if (a === 'zscan-results') return { errno: 0, out:
