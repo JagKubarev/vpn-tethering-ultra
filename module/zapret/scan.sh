@@ -35,6 +35,7 @@ IPT="iptables -w 2"
 TMP="$OUT.tmp"
 EVENTS=/data/adb/vpn_tether_zapret_events
 HIST=/data/adb/vpn_tether_zapret_hist
+ZNETS=/data/adb/vpn_tether_zapret_nets
 case "$MODE" in quick|full|check) ;; *) echo "scan.sh: режим quick|full|check" >&2; exit 2 ;; esac
 
 st() { # обновить файл состояния: st key=val ...
@@ -228,8 +229,12 @@ if [ "$MODE" = "check" ]; then
         tail -n 1 "$OUT.results" | awk -F'|' -v nb="$NB" \
             '{ o = $1 - ($2 - nb); need = (nb >= 4) ? nb - 1 : nb; exit !($3 == 0 && o >= need) }'
     }
+    # последний прогон не открыл вообще ничего, даже контрольные — это связь
+    nothing_opened() { tail -n 1 "$OUT.results" | awk -F'|' '{ exit !($1 == 0) }'; }
+    # что не открылось у последнего прогона: "youtube.com:x28 ..." (для журнала)
+    last_fail() { tail -n 1 "$OUT.results" | cut -d'|' -f7 | cut -c1-200; }
     # аргументы текущей — с пометками @G/@Q, как их хранит файл сетей
-    CUR=$(sh "$MODDIR/service.sh" --zapret-strategy "${NETID%%"|"*}" 2>/dev/null | \
+    CUR=$(sh "$MODDIR/service.sh" --zapret-strategy "${NETID%%"|"*}" "${NETID#*"|"}" 2>/dev/null | \
         sed "s#@$ZDIR/tls_clienthello_www_google_com.bin#@G#g; s#@$ZDIR/quic_initial_www_google_com.bin#@Q#g")
     S_total=2
     st stage="проверяю стратегию сети"
@@ -240,9 +245,35 @@ if [ "$MODE" = "check" ]; then
         st state=done stage="готово" msg="текущая стратегия работает"
         exit 0
     fi
-    event "сторож: стратегия не открывает заблокированные ($(echo $BLOCKED)) — ищу замену"
-    # прежние стратегии этой сети, новые первыми (только свои параметры: custom)
-    K="${NETID%%"|"*}" awk -F'|' '$1 == ENVIRON["K"] && $2 == "custom" && $3 != "" { l[++n] = $3 } END { for (i = n; i >= 1; i--) print l[i] }' \
+    # 16:21 21.10: все сайты разом "не открылись", подбор выбрал стратегию
+    # хуже прежней. Связь пропала — не меняем ничего; иначе перепроверка через минуту.
+    if nothing_opened; then
+        event "сторож: не открылось вообще ничего, даже контрольные — похоже, связь; стратегию не трогаю"
+        wd_last "нет связи, отложил"
+        st state=done stage="готово" msg="нет связи — проверка отложена"
+        exit 0
+    fi
+    FAIL1=$(last_fail)
+    st stage="перепроверка через минуту"
+    sleep 60
+    if passed "$CUR" "текущая"; then
+        event "сторож: кратковременный сбой ($FAIL1) — через минуту стратегия работает"
+        wd_last "работает (был сбой)"
+        st state=done stage="готово" msg="кратковременный сбой — стратегия работает"
+        exit 0
+    fi
+    if nothing_opened; then
+        event "сторож: не открылось вообще ничего, даже контрольные — похоже, связь; стратегию не трогаю"
+        wd_last "нет связи, отложил"
+        st state=done stage="готово" msg="нет связи — проверка отложена"
+        exit 0
+    fi
+    event "сторож: стратегия не открывает ($(last_fail)) — ищу замену"
+    # прежние стратегии этой сети и сетей с тем же названием (YOTA = 25011 и
+    # 25002), новые первыми, без повторов (только свои параметры: custom)
+    KEYS=$(L="${NETID#*"|"}" K="${NETID%%"|"*}" awk -F'|' '$4 == ENVIRON["L"] { printf "%s ", $1 } END { print ENVIRON["K"] }' "$ZNETS" 2>/dev/null)
+    [ -n "$KEYS" ] || KEYS="${NETID%%"|"*}"
+    KS=" $KEYS " awk -F'|' 'index(ENVIRON["KS"], " " $1 " ") && $2 == "custom" && $3 != "" { l[++n] = $3 } END { for (i = n; i >= 1; i--) if (!(l[i] in s)) { s[l[i]] = 1; print l[i] } }' \
         "$HIST" 2>/dev/null > "$TMP/hist"
     S_total=$((S_done + $(wc -l < "$TMP/hist")))
     st stage="пробую прежние стратегии"

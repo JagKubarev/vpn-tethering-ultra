@@ -244,6 +244,23 @@
 #   tcp-reset без -p tcp iptables не принимает, ошибка глушилась. Подсеть
 #   попадала в список, а соединения к ней ждали закрытия по ss -K (~6-10с).
 # ============================================================================
+# v2.19 — по логам 21.10 (3 ч на YOTA):
+#   - Мёртвые видеосерверы раздачи не ловились: модуль tether_unblock на каждом
+#     пакете с TTL≠63 (Windows: 127) пишет CONNMARK 0x40/0xffffffff и стирает
+#     нашу пометку. Соединение теперь «видео», если помечено ИЛИ сервер в
+#     сетях Google (zapret/google-ipv4.txt); отбой по-прежнему только для SNI
+#     googlevideo.com, остальные сервисы Google не задевает.
+#   - DNS: comss то отвечал, то нет — dnsproxy перезапускался 45 раз за час
+#     (основной <-> запасные), каждый раз с пустым кэшем. Вернуться на основной
+#     можно не раньше DNS_ALT_HOLD (10 мин) и после 2 удачных проверок подряд;
+#     дёргается (2 ухода за 30 мин) — держим запасные 30 мин.
+#   - Мобильная сеть YOTA временами видна как mobile:25002 (сеть МегаФона):
+#     своей стратегии нет -> общая (на подделках, ломалась). Нет своей —
+#     берём стратегию сети с тем же названием.
+#   - Сторож: перед заменой стратегии перепроверяет через минуту; не открылось
+#     вообще ничего (и контрольные) — это связь, а не ТСПУ: ничего не меняет.
+#     В журнал — какие сайты не открылись и с какой ошибкой.
+# ============================================================================
 # ============================================================================
 
 umask 022
@@ -311,6 +328,12 @@ DNS_PHONE=1
 # модем спит), поэтому короткий интервал почти ничего не стоит.
 DNS_HEALTH_INTERVAL=5
 DNS_HEALTH_RECOVER=30
+# Ушли на запасные DoH — обратно на основной не раньше чем через
+# DNS_ALT_HOLD сек и после 2 удачных проверок подряд. Основной "дёргается"
+# (2 ухода за 30 мин) — держим запасные DNS_ALT_HOLD_FLAP сек. Каждый
+# переход — перезапуск dnsproxy с пустым кэшем (21.10: 45 раз за час).
+DNS_ALT_HOLD=600
+DNS_ALT_HOLD_FLAP=1800
 # В откате: трафик на WAN за период меньше этого (байт) = телефон простаивает,
 # проверку восстановления пропускаем
 DNS_HEALTH_IDLE_BYTES=20000
@@ -534,11 +557,17 @@ zapret_strategy_args() {
     esac
 }
 # Стратегия, запомненная для сети $1: "стратегия|аргументы" или ничего
-# (нет записи / запись не прошла проверку — тогда общая).
+# (нет записи / запись не прошла проверку — тогда общая). Своей нет, а
+# передано название $2 — стратегия сети с тем же названием (YOTA видна то
+# как 25011, то как 25002 — сеть МегаФона), код возврата 3.
 zapret_net_entry() {
-    local line st za
+    local line st za rc=0
     [ -n "$1" ] && [ -f "$ZAPRET_NETS_FILE" ] || return 1
     line=$(K="$1" awk -F'|' '$1 == ENVIRON["K"] { l = $0 } END { if (l != "") print l }' "$ZAPRET_NETS_FILE" 2>/dev/null)
+    if [ -z "$line" ] && [ -n "$2" ]; then
+        line=$(L="$2" awk -F'|' '$4 == ENVIRON["L"] { l = $0 } END { if (l != "") print l }' "$ZAPRET_NETS_FILE" 2>/dev/null)
+        rc=3
+    fi
     [ -n "$line" ] || return 1
     st=$(printf '%s\n' "$line" | cut -d'|' -f2)
     za=$(printf '%s\n' "$line" | cut -d'|' -f3)
@@ -547,12 +576,13 @@ zapret_net_entry() {
     [ "$st" = custom ] && [ -z "$za" ] && return 2
     [ "$st" = custom ] || za=""
     printf '%s|%s\n' "$st" "$za"
+    return $rc
 }
 # Для WebUI ("проверить сайт"): стратегия с учётом vpn_tether.conf и, если
 # передан ключ сети, — запомненной для неё
 if [ "$1" = "--zapret-strategy" ]; then
     _e=""
-    [ "$ZAPRET_PER_NET" = "1" ] && _e=$(zapret_net_entry "$2")
+    [ "$ZAPRET_PER_NET" = "1" ] && _e=$(zapret_net_entry "$2" "$3")
     if [ -n "$_e" ]; then
         zapret_strategy_args "${0%/*}/zapret" "${_e%%"|"*}" "${_e#*"|"}"
     else
@@ -754,6 +784,7 @@ CHAIN_YT_DEAD="VPN_YT_DEAD"     # filter OUTPUT/FORWARD: мёртвые подс
 YT_CTMARK=0x10000000
 YT_DEAD_FILE="/data/local/tmp/vpn_tether_ytdead"   # "подсеть/24 до_когда(epoch) ip"
 YT_SEEN_FILE="/data/local/tmp/vpn_tether_ytseen"   # кандидаты: "кортеж впервые вид учтён"
+YT_GRANGES="/data/local/tmp/vpn_tether_ytgr"       # сети Google числами: "начало конец"
 YT_DEAD_STATE=""        # "" | on
 YT_DEAD_SIG=""          # содержимое цепочки отбоя (чтобы не пересобирать зря)
 YT_DEAD_TICK=0
@@ -795,6 +826,9 @@ PHONE_DNS_V6=0
 DNS_DEGRADED=0         # 1 = DoH-апстрим не отвечает, DNS временно обычный
 DNS_ALT_UPS=""         # не пусто = основной DoH молчит, dnsproxy на DNS_FALLBACKS
 DNS_ALT_LAST=0         # когда последний раз проверяли, ожил ли основной
+DNS_ALT_SINCE=0        # когда ушли на запасные
+DNS_ALT_OKS=0          # удачных проверок основного подряд
+DNS_ALT_TRIPS=""       # время уходов на запасные (за 30 мин) — признак "дёргается"
 DNS_EXEMPT_TICK=0      # исключение AdGuard проверяем раз в ~10с
 DHCP_IFACES_CACHE=""   # ss -lun раз в ~6с (раздача и так видна по ip rule netd)
 DHCP_IFACES_TICK=0
@@ -2404,8 +2438,15 @@ dns_try_alt() {     # 0 = перешли на запасные DoH и они о�
     case "$DNSPROXY_SIG" in "direct-doh|"*) ;; *) return 1 ;; esac
     DNS_ALT_UPS="$DNS_FALLBACKS"
     if dnsproxy_start "direct-doh" $DNS_ALT_UPS && dnsproxy_probe_cold; then
-        log "WARNING: DoH-апстрим не отвечает ($1) — DNS через запасные DoH ($(dns_hosts_of $DNS_ALT_UPS)), $(dns_hosts_of $DNS_UPSTREAMS) проверяю раз в ${DNS_HEALTH_RECOVER}с"
-        DNS_ALT_LAST=$(date +%s)
+        local now t keep="" hold="$DNS_ALT_HOLD"
+        now=$(date +%s)
+        for t in $DNS_ALT_TRIPS; do [ $((now - t)) -lt 1800 ] && keep="$keep $t"; done
+        DNS_ALT_TRIPS="$keep $now"
+        [ "$(echo $DNS_ALT_TRIPS | wc -w)" -ge 2 ] && hold="$DNS_ALT_HOLD_FLAP"
+        log "WARNING: DoH-апстрим не отвечает ($1) — DNS через запасные DoH ($(dns_hosts_of $DNS_ALT_UPS)); на $(dns_hosts_of $DNS_UPSTREAMS) вернусь не раньше чем через $((hold / 60)) мин$([ "$hold" = "$DNS_ALT_HOLD_FLAP" ] && echo ' (он дёргается)')"
+        DNS_ALT_LAST=$now
+        DNS_ALT_SINCE=$now
+        DNS_ALT_OKS=0
         phone_status_refresh
         return 0
     fi
@@ -2433,11 +2474,17 @@ dns_primary_alive() {
 }
 
 dns_alt_recheck() {
+    local hold="$DNS_ALT_HOLD"
     [ -n "$DNS_ALT_UPS" ] && [ "$DNS_DEGRADED" = "0" ] || return 1
     [ $(( $1 - DNS_ALT_LAST )) -ge "$DNS_HEALTH_RECOVER" ] || return 1
     DNS_ALT_LAST=$1
-    dns_primary_alive || return 1
+    # основной должен ответить 2 проверки подряд, и не раньше срока: иначе
+    # при "дёргающемся" comss dnsproxy перезапускался туда-обратно каждые 30-40с
+    if dns_primary_alive; then DNS_ALT_OKS=$((DNS_ALT_OKS + 1)); else DNS_ALT_OKS=0; return 1; fi
+    [ "$(echo $DNS_ALT_TRIPS | wc -w)" -ge 2 ] && hold="$DNS_ALT_HOLD_FLAP"
+    [ "$DNS_ALT_OKS" -ge 2 ] && [ $(( $1 - DNS_ALT_SINCE )) -ge "$hold" ] || return 1
     DNS_ALT_UPS=""
+    DNS_ALT_OKS=0
     if dnsproxy_start "direct-doh" $DNS_UPSTREAMS; then
         log "DoH-апстрим $(dns_hosts_of $DNS_UPSTREAMS) снова отвечает — DNS обратно через него"
     fi
@@ -2687,7 +2734,7 @@ zapret_pick_strategy() {
     ZAPRET_EFF_ARGS="$ZAPRET_ARGS"
     ZAPRET_NET_SRC="default"
     [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] || return 0
-    e=$(zapret_net_entry "$NET_KEY"); rc=$?
+    e=$(zapret_net_entry "$NET_KEY" "$NET_LABEL"); rc=$?
     if [ "$rc" = 2 ]; then
         [ "$ZAPRET_NET_BAD" = "$NET_KEY" ] || log "WARNING: zapret: запись для сети «$NET_LABEL» в $ZAPRET_NETS_FILE не прошла проверку — общая стратегия"
         ZAPRET_NET_BAD="$NET_KEY"
@@ -2697,6 +2744,7 @@ zapret_pick_strategy() {
     ZAPRET_EFF_STRATEGY="${e%%"|"*}"
     ZAPRET_EFF_ARGS="${e#*"|"}"
     ZAPRET_NET_SRC="net"
+    [ "$rc" = 3 ] && ZAPRET_NET_SRC="label"
 }
 
 # Узнать сеть (zapret/netid.sh): при смене WAN / по сигналу смены сети, а на
@@ -2745,8 +2793,8 @@ zapret_start() {
     sleep 0.5
     if kill -0 "$pid" 2>/dev/null; then
         echo "$pid" > "$ZAPRET_PID_FILE"
-        if [ "$ZAPRET_NET_SRC" = "net" ]; then
-            log "zapret: nfqws запущен (pid $pid, стратегия сети «$NET_LABEL»: $ZAPRET_EFF_STRATEGY${ZAPRET_EFF_ARGS:+ [$ZAPRET_EFF_ARGS]}, режим $ZAPRET_MODE)"
+        if [ "$ZAPRET_NET_SRC" = "net" ] || [ "$ZAPRET_NET_SRC" = "label" ]; then
+            log "zapret: nfqws запущен (pid $pid, стратегия сети «$NET_LABEL»$([ "$ZAPRET_NET_SRC" = label ] && echo " — взята у сети с тем же названием, своей у $NET_KEY нет"): $ZAPRET_EFF_STRATEGY${ZAPRET_EFF_ARGS:+ [$ZAPRET_EFF_ARGS]}, режим $ZAPRET_MODE)"
         else
             log "zapret: nfqws запущен (pid $pid, стратегия $ZAPRET_EFF_STRATEGY — общая${NET_LABEL:+, для «$NET_LABEL» своей нет}, режим $ZAPRET_MODE)"
         fi
@@ -2903,6 +2951,10 @@ yt_dead_on() {
         return 0
     fi
     $iptables -N "$CHAIN_YT_DEAD" 2>/dev/null
+    # сети Google числами — для соединений раздачи, где пометку стирает
+    # tether_unblock (CONNMARK 0x40/0xffffffff на каждом пакете с TTL≠63)
+    awk -F'[./]' '/^[0-9]/ && NF == 5 { s = (($1 * 256 + $2) * 256 + $3) * 256 + $4; printf "%.0f %.0f\n", s, s + 2 ^ (32 - $5) - 1 }' \
+        "$ZAPRET_DIR/google-ipv4.txt" > "$YT_GRANGES" 2>/dev/null
     YT_DEAD_SIG="-"
     yt_dead_apply
     $iptables -t mangle -I FORWARD 1 $YT_MARK_FWD 2>/dev/null
@@ -2918,7 +2970,7 @@ yt_dead_on() {
 yt_dead_off() {
     yt_dead_hooks_off
     $iptables -F "$CHAIN_YT_DEAD" 2>/dev/null; $iptables -X "$CHAIN_YT_DEAD" 2>/dev/null
-    rm -f "$YT_DEAD_FILE" "$YT_SEEN_FILE" "$YT_SEEN_FILE.new"
+    rm -f "$YT_DEAD_FILE" "$YT_SEEN_FILE" "$YT_SEEN_FILE.new" "$YT_GRANGES"
     YT_DEAD_STATE=""; YT_DEAD_SIG=""; YT_STUCK=""
 }
 
@@ -2946,7 +2998,8 @@ yt_dead_hits() {
     $iptables -L "$CHAIN_YT_DEAD" -v -x -n 2>/dev/null | awk '/REJECT/ {s += $1} END {print s + 0}'
 }
 
-# Раз в ~4с: соединения с googlevideo.com из conntrack. ClientHello ушёл
+# Раз в ~4с: соединения с googlevideo.com (помечены; у раздачи пометку
+# может стереть tether_unblock — тогда любые к сетям Google) из conntrack. ClientHello ушёл
 # (>=600 байт), а от сервера дольше YT_DEAD_AFTER — ни байта данных:
 #   пакетов от сервера >=2 — ClientHello он подтвердил, но молчит -> мёртв;
 #   1 (только SYN-ACK) — ClientHello не дошёл: это DPI, а не сервер -> сторожу.
@@ -2960,10 +3013,11 @@ yt_dead_scan() {
         [ "$(awk 'END {print NR}' "$YT_DEAD_FILE")" != "$n" ] && changed=1
     fi
     [ -f "$YT_SEEN_FILE" ] || : > "$YT_SEEN_FILE"
-    out=$($CONNTRACK_BIN -L -p tcp --mark "$YT_CTMARK/$YT_CTMARK" 2>/dev/null | awk -v now="$now" -v after="$YT_DEAD_AFTER" -v sf="$YT_SEEN_FILE" '
+    out=$($CONNTRACK_BIN -L -p tcp --dport 443 2>/dev/null | awk -v now="$now" -v after="$YT_DEAD_AFTER" -v sf="$YT_SEEN_FILE" -v gr="$YT_GRANGES" '
+        FILENAME == gr { gs[++ng] = $1; ge[ng] = $2; next }
         FILENAME == sf { seen[$1] = $2; rep[$1] = $4; next }
         / ESTABLISHED / {
-            src = ""; dst = ""; rsrc = ""; sp = ""; po = -1; bo = -1; pr = -1; br = -1
+            src = ""; dst = ""; rsrc = ""; sp = ""; po = -1; bo = -1; pr = -1; br = -1; mk = 0
             for (i = 1; i <= NF; i++) {
                 split($i, kv, "=")
                 if (kv[1] == "src") { if (src == "") src = kv[2]; else if (rsrc == "") rsrc = kv[2] }
@@ -2971,9 +3025,16 @@ yt_dead_scan() {
                 else if (kv[1] == "sport" && sp == "") sp = kv[2]
                 else if (kv[1] == "packets") { if (po < 0) po = kv[2]; else if (pr < 0) pr = kv[2] }
                 else if (kv[1] == "bytes") { if (bo < 0) bo = kv[2]; else if (br < 0) br = kv[2] }
+                else if (kv[1] == "mark") mk = kv[2]
             }
             # приложение -> AdGuard (REDIRECT): отвечает сам AdGuard, о сервере это ничего не говорит
             if (rsrc != dst) next
+            # не помечено как googlevideo — тогда только если сервер в сетях Google
+            if (int(mk / 268435456) % 2 == 0) {
+                split(dst, o, "."); n = ((o[1] * 256 + o[2]) * 256 + o[3]) * 256 + o[4]; g = 0
+                for (j = 1; j <= ng; j++) if (n >= gs[j] && n <= ge[j]) { g = 1; break }
+                if (!g) next
+            }
             # от сервера — только пустые пакеты (SYN-ACK 60 + ACK 52 байта): ни
             # одного байта данных. Порог по объёму путал с мёртвыми простаивающие
             # соединения с коротким ответом (возобновлённая TLS-сессия)
@@ -2986,7 +3047,7 @@ yt_dead_scan() {
             ns[k] = t0 " " kind " " d
         }
         END { for (k in ns) print k, ns[k] > (sf ".new") }
-    ' "$YT_SEEN_FILE" - 2>/dev/null)
+    ' "$YT_GRANGES" "$YT_SEEN_FILE" - 2>/dev/null)
     if [ -f "$YT_SEEN_FILE.new" ]; then mv -f "$YT_SEEN_FILE.new" "$YT_SEEN_FILE"; else : > "$YT_SEEN_FILE"; fi
 
     for ip in $(printf '%s\n' "$out" | awk '$1 == "HIT" && $2 == "dead" {print $3}' | sort -u); do
@@ -3110,7 +3171,7 @@ zapret_reconcile() {
         args=$(zapret_args)
         excl=$(zapret_vpn_uids)
         [ "$ZAPRET_STATE" = "on" ] && [ "$args" != "$ZAPRET_ARGS_RUN" ] && \
-            log "zapret: аргументы nfqws сменились (сеть «${NET_LABEL:-не определена}», стратегия $ZAPRET_EFF_STRATEGY — $([ "$ZAPRET_NET_SRC" = net ] && echo своя || echo общая)) — перезапускаю"
+            log "zapret: аргументы nfqws сменились (сеть «${NET_LABEL:-не определена}», стратегия $ZAPRET_EFF_STRATEGY — $(case "$ZAPRET_NET_SRC" in net) echo своя ;; label) echo "как у «$NET_LABEL»" ;; *) echo общая ;; esac)) — перезапускаю"
     fi
 
     # nfqws: не запущен / умер / сменились аргументы (свой список, другая сеть)
@@ -4281,7 +4342,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.18.1 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.19 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
