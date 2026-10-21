@@ -288,6 +288,18 @@
 #   (выбран zapret.moe — замена comss, и наоборот); дубли основного в -f не
 #   передаются. В WebUI zapret.moe есть в списке DoH-серверов.
 # ============================================================================
+# v2.22 — идеи из ZDT-D (проверены на YOTA 21.10):
+#   - Своя стратегия для YouTube: nfqws с двумя профилями (--new) — домены
+#     YouTube (zapret/list-youtube.txt) и всё остальное. Подбор ищет лучшую
+#     для каждой группы; одна лучшая для обеих — профиль один, как раньше.
+#     21.10 стратегия открывала YouTube, но не rutracker и аватарки, и наоборот.
+#   - zapret/list-exclude.txt: банки и Госуслуги обход не трогает никогда (и
+#     автосписок их не добавит) — сломанная стратегия не уронит оплату.
+#   - Подбор: приманки с российским SNI (hostfakesplit host=sberbank.ru — на
+#     YOTA наравне с google.com; варианты ZDT-D с datanoack — в полном).
+#   - WebUI: «Диагностика сети» — подмена DNS, обрыв на ~16 КБ у зарубежных
+#     хостингов, белые списки (SNI), Telegram.
+# ============================================================================
 # ============================================================================
 
 umask 022
@@ -603,7 +615,7 @@ zapret_strategy_args() {
 # передано название $2 — стратегия сети с тем же названием (YOTA видна то
 # как 25011, то как 25002 — сеть МегаФона), код возврата 3.
 zapret_net_entry() {
-    local line st za rc=0
+    local line st za yt rc=0
     [ -n "$1" ] && [ -f "$ZAPRET_NETS_FILE" ] || return 1
     line=$(K="$1" awk -F'|' '$1 == ENVIRON["K"] { l = $0 } END { if (l != "") print l }' "$ZAPRET_NETS_FILE" 2>/dev/null)
     if [ -z "$line" ] && [ -n "$2" ]; then
@@ -613,23 +625,36 @@ zapret_net_entry() {
     [ -n "$line" ] || return 1
     st=$(printf '%s\n' "$line" | cut -d'|' -f2)
     za=$(printf '%s\n' "$line" | cut -d'|' -f3)
+    yt=$(printf '%s\n' "$line" | cut -d'|' -f7)
     zapret_strategy_valid "$st" || return 2
     zapret_args_valid "$za" || return 2
+    zapret_args_valid "$yt" || yt=""
     [ "$st" = custom ] && [ -z "$za" ] && return 2
     [ "$st" = custom ] || za=""
-    printf '%s|%s\n' "$st" "$za"
+    printf '%s|%s|%s\n' "$st" "$za" "$yt"
     return $rc
 }
 # Для WebUI ("проверить сайт"): стратегия с учётом vpn_tether.conf и, если
 # передан ключ сети, — запомненной для неё
+#   --zapret-strategy КЛЮЧ [НАЗВАНИЕ] [yt|full]
+#     ""   — стратегия остальных сайтов;
+#     yt   — стратегия YouTube (своя или та же);
+#     full — оба профиля nfqws (--filter/--hostlist ... --new ...) для проверок
 if [ "$1" = "--zapret-strategy" ]; then
-    _e=""
+    _e=""; _z="${0%/*}/zapret"
     [ "$ZAPRET_PER_NET" = "1" ] && _e=$(zapret_net_entry "$2" "$3")
     if [ -n "$_e" ]; then
-        zapret_strategy_args "${0%/*}/zapret" "${_e%%"|"*}" "${_e#*"|"}"
+        _st="${_e%%"|"*}"; _r="${_e#*"|"}"; _za="${_r%%"|"*}"; _yt="${_r#*"|"}"
+        _gen=$(zapret_strategy_args "$_z" "$_st" "$_za")
     else
-        zapret_strategy_args "${0%/*}/zapret"
+        _yt=""; _gen=$(zapret_strategy_args "$_z")
     fi
+    _ytg="$_gen"; [ -n "$_yt" ] && _ytg=$(zapret_strategy_args "$_z" custom "$_yt")
+    case "$4" in
+        yt)   echo "$_ytg" ;;
+        full) if [ -n "$_yt" ]; then echo "--filter-tcp=443 --hostlist=$_z/list-youtube.txt $_ytg --new --filter-tcp=443 $_gen"; else echo "$_gen"; fi ;;
+        *)    echo "$_gen" ;;
+    esac
     exit 0
 fi
 
@@ -800,6 +825,8 @@ for _c in $_NQ_CANDIDATES; do
 done
 ZAPRET_DIR="$MODULE_DIR/zapret"
 ZAPRET_LIST_DEFAULT="$ZAPRET_DIR/list-default.txt"
+ZAPRET_LIST_YT="$ZAPRET_DIR/list-youtube.txt"        # своя стратегия YouTube (2.22)
+ZAPRET_LIST_EXCL="$ZAPRET_DIR/list-exclude.txt"      # банки/Госуслуги — обход не трогает
 ZAPRET_LIST_USER="/data/adb/vpn_tether_zapret.txt"        # свой список (WebUI)
 ZAPRET_LIST_AUTO="/data/adb/vpn_tether_zapret_auto.txt"   # nfqws пополняет сам
 ZAPRET_VPN_UIDS_FILE="/data/adb/vpn_tether_vpn_uids"      # uid VPN-клиентов, замеченных владельцами VPN
@@ -853,6 +880,7 @@ NET_ID_TICK=0
 NET_ID_FORCE=0         # 1 = пересчитать сейчас (смена сети)
 ZAPRET_EFF_STRATEGY="" # что реально запущено: своя стратегия сети или общая
 ZAPRET_EFF_ARGS=""
+ZAPRET_EFF_YT=""       # своя стратегия YouTube для сети (пусто = как у остальных)
 ZAPRET_NET_SRC=""      # net | default
 ZAPRET_NETS_STAMP=""   # stat файла стратегий сетей на прошлой проверке
 ZAPRET_NET_DIRTY=0     # 1 = пересобрать аргументы nfqws сейчас
@@ -1040,6 +1068,7 @@ update_status() {
         echo "zapret_per_net=$ZAPRET_PER_NET"
         echo "zapret_strategy=$ZAPRET_EFF_STRATEGY"
         echo "zapret_eff_args=$ZAPRET_EFF_ARGS"
+        echo "zapret_eff_yt=$ZAPRET_EFF_YT"
         echo "zapret_src=$ZAPRET_NET_SRC"
         echo "net_key=$NET_KEY"
         echo "net_label=$NET_LABEL"
@@ -2775,14 +2804,23 @@ zapret_learn_vpn_owner() {
 }
 
 zapret_args() {
-    local a="--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 --filter-tcp=443"
+    local a="--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6" ex="" g
+    # банки и Госуслуги — мимо обхода в любом профиле (и в автосписок не попадут)
+    grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
+    g="--filter-tcp=443 $ex"
     if [ "$ZAPRET_MODE" = "list" ]; then
-        a="$a --hostlist=$ZAPRET_LIST_DEFAULT"
+        g="$g --hostlist=$ZAPRET_LIST_DEFAULT"
         # пустой список не передаём: не полагаемся на то, как nfqws его трактует
-        grep -q '[a-z0-9]' "$ZAPRET_LIST_USER" 2>/dev/null && a="$a --hostlist=$ZAPRET_LIST_USER"
-        a="$a --hostlist-auto=$ZAPRET_LIST_AUTO"
+        grep -q '[a-z0-9]' "$ZAPRET_LIST_USER" 2>/dev/null && g="$g --hostlist=$ZAPRET_LIST_USER"
+        g="$g --hostlist-auto=$ZAPRET_LIST_AUTO"
     fi
-    echo "$a $(zapret_strategy_args "$ZAPRET_DIR" "$ZAPRET_EFF_STRATEGY" "$ZAPRET_EFF_ARGS")"
+    g="$g $(zapret_strategy_args "$ZAPRET_DIR" "$ZAPRET_EFF_STRATEGY" "$ZAPRET_EFF_ARGS")"
+    # своя стратегия YouTube — первым профилем: nfqws берёт первый подходящий
+    if [ -n "$ZAPRET_EFF_YT" ] && grep -q '[a-z0-9]' "$ZAPRET_LIST_YT" 2>/dev/null; then
+        echo "$a --filter-tcp=443 $ex --hostlist=$ZAPRET_LIST_YT $(zapret_strategy_args "$ZAPRET_DIR" custom "$ZAPRET_EFF_YT") --new $g"
+    else
+        echo "$a $g"
+    fi
 }
 
 # Какая стратегия для текущей сети: запомненная для неё или общая
@@ -2790,6 +2828,7 @@ zapret_pick_strategy() {
     local e rc
     ZAPRET_EFF_STRATEGY="$ZAPRET_STRATEGY"
     ZAPRET_EFF_ARGS="$ZAPRET_ARGS"
+    ZAPRET_EFF_YT=""
     ZAPRET_NET_SRC="default"
     [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] || return 0
     e=$(zapret_net_entry "$NET_KEY" "$NET_LABEL"); rc=$?
@@ -2800,7 +2839,9 @@ zapret_pick_strategy() {
     fi
     [ -n "$e" ] || return 0
     ZAPRET_EFF_STRATEGY="${e%%"|"*}"
-    ZAPRET_EFF_ARGS="${e#*"|"}"
+    e="${e#*"|"}"
+    ZAPRET_EFF_ARGS="${e%%"|"*}"
+    ZAPRET_EFF_YT="${e#*"|"}"
     ZAPRET_NET_SRC="net"
     [ "$rc" = 3 ] && ZAPRET_NET_SRC="label"
 }
@@ -2852,7 +2893,7 @@ zapret_start() {
     if kill -0 "$pid" 2>/dev/null; then
         echo "$pid" > "$ZAPRET_PID_FILE"
         if [ "$ZAPRET_NET_SRC" = "net" ] || [ "$ZAPRET_NET_SRC" = "label" ]; then
-            log "zapret: nfqws запущен (pid $pid, стратегия сети «$NET_LABEL»$([ "$ZAPRET_NET_SRC" = label ] && echo " — взята у сети с тем же названием, своей у $NET_KEY нет"): $ZAPRET_EFF_STRATEGY${ZAPRET_EFF_ARGS:+ [$ZAPRET_EFF_ARGS]}, режим $ZAPRET_MODE)"
+            log "zapret: nfqws запущен (pid $pid, стратегия сети «$NET_LABEL»$([ "$ZAPRET_NET_SRC" = label ] && echo " — взята у сети с тем же названием, своей у $NET_KEY нет"): $ZAPRET_EFF_STRATEGY${ZAPRET_EFF_ARGS:+ [$ZAPRET_EFF_ARGS]}${ZAPRET_EFF_YT:+, YouTube: [$ZAPRET_EFF_YT]}, режим $ZAPRET_MODE)"
         else
             log "zapret: nfqws запущен (pid $pid, стратегия $ZAPRET_EFF_STRATEGY — общая${NET_LABEL:+, для «$NET_LABEL» своей нет}, режим $ZAPRET_MODE)"
         fi
@@ -4545,7 +4586,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.21.1 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.22 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"

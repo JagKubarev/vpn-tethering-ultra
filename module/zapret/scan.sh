@@ -218,6 +218,19 @@ fool_arg() {
 }
 FAKE="--dpi-desync-fake-tls=@G"
 
+# Сайты YouTube в наборе — у них может быть своя стратегия (2.22: второй
+# профиль nfqws по zapret/list-youtube.txt)
+YT_RE='youtube|ytimg|ggpht|googlevideo'
+NBY=$(echo $BLOCKED | tr ' ' '\n' | grep -cE "$YT_RE")
+# оба профиля для проверки: YouTube по своему списку, остальное — общей
+composite() { # composite ОБЩАЯ [YOUTUBE]
+    if [ -n "$2" ] && [ "$2" != "$1" ]; then
+        echo "--filter-tcp=443 --hostlist=$ZDIR/list-youtube.txt $2 --new --filter-tcp=443 $1"
+    else
+        echo "$1"
+    fi
+}
+
 # --- сторож: текущая стратегия -> прежние из истории -> быстрый подбор ----
 WD=0
 if [ "$MODE" = "check" ]; then
@@ -233,8 +246,8 @@ if [ "$MODE" = "check" ]; then
     nothing_opened() { tail -n 1 "$OUT.results" | awk -F'|' '{ exit !($1 == 0) }'; }
     # что не открылось у последнего прогона: "youtube.com:x28 ..." (для журнала)
     last_fail() { tail -n 1 "$OUT.results" | cut -d'|' -f7 | cut -c1-200; }
-    # аргументы текущей — с пометками @G/@Q, как их хранит файл сетей
-    CUR=$(sh "$MODDIR/service.sh" --zapret-strategy "${NETID%%"|"*}" "${NETID#*"|"}" 2>/dev/null | \
+    # текущая — оба профиля (своя YouTube, если есть), с пометками @G/@Q
+    CUR=$(sh "$MODDIR/service.sh" --zapret-strategy "${NETID%%"|"*}" "${NETID#*"|"}" full 2>/dev/null | \
         sed "s#@$ZDIR/tls_clienthello_www_google_com.bin#@G#g; s#@$ZDIR/quic_initial_www_google_com.bin#@Q#g")
     S_total=2
     st stage="проверяю стратегию сети"
@@ -273,20 +286,23 @@ if [ "$MODE" = "check" ]; then
     # 25002), новые первыми, без повторов (только свои параметры: custom)
     KEYS=$(L="${NETID#*"|"}" K="${NETID%%"|"*}" awk -F'|' '$4 == ENVIRON["L"] { printf "%s ", $1 } END { print ENVIRON["K"] }' "$ZNETS" 2>/dev/null)
     [ -n "$KEYS" ] || KEYS="${NETID%%"|"*}"
-    KS=" $KEYS " awk -F'|' 'index(ENVIRON["KS"], " " $1 " ") && $2 == "custom" && $3 != "" { l[++n] = $3 } END { for (i = n; i >= 1; i--) if (!(l[i] in s)) { s[l[i]] = 1; print l[i] } }' \
+    # строка истории: "общая|youtube" (youtube пусто — одна на всё)
+    KS=" $KEYS " awk -F'|' 'index(ENVIRON["KS"], " " $1 " ") && $2 == "custom" && $3 != "" { l[++n] = $3 "|" $6 } END { for (i = n; i >= 1; i--) if (!(l[i] in s)) { s[l[i]] = 1; print l[i] } }' \
         "$HIST" 2>/dev/null > "$TMP/hist"
     S_total=$((S_done + $(wc -l < "$TMP/hist")))
     st stage="пробую прежние стратегии"
-    while IFS= read -r a; do
-        [ -n "$a" ] && [ "$a" != "$CUR" ] || continue
-        if passed "$a" "история" && passed "$a" "история"; then
+    while IFS= read -r h; do
+        a="${h%%"|"*}"; y="${h#*"|"}"
+        c=$(composite "$a" "$y")
+        [ -n "$a" ] && [ "$c" != "$CUR" ] || continue
+        if passed "$c" "история" && passed "$c" "история"; then
             if [ "$(sh "$ZDIR/netid.sh" "$WAN" 2>/dev/null | head -1)" != "$NETID" ]; then
                 wd_last "сеть сменилась во время проверки"
                 st state=done stage="готово" msg="сеть сменилась во время проверки — не запоминаю"
                 exit 0
             fi
-            r=$(sh "$MODDIR/webctl.sh" znet-set custom "$a" "сторож: прежняя рабочая" 2>/dev/null)
-            event "сторож: вернул прежнюю стратегию: $a"
+            r=$(sh "$MODDIR/webctl.sh" znet-set custom "$a" "сторож: прежняя рабочая" "$y" 2>/dev/null)
+            event "сторож: вернул прежнюю стратегию: $a${y:+ (YouTube: $y)}"
             wd_last "починил: прежняя стратегия"
             st state=done stage="готово" msg="вернул прежнюю рабочую стратегию"
             exit 0
@@ -298,7 +314,7 @@ fi
 
 if [ "$MODE" = "quick" ]; then
     # проверенные шаблоны (autottl убран: ломал обычные сайты во всех 6 проверенных сетях)
-    S_total=18
+    S_total=19
     st stage="быстрый подбор"
     while IFS= read -r a; do
         [ -n "$a" ] && run_strat "$a" "быстрый"
@@ -313,6 +329,7 @@ if [ "$MODE" = "quick" ]; then
 --dpi-desync=fake,multisplit --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,sniext+1 $FAKE
 --dpi-desync=fake,fakedsplit --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1 $FAKE
 --dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=www.google.com --dpi-desync-fooling=md5sig
+--dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=sberbank.ru --dpi-desync-fooling=md5sig
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=badseq --dpi-desync-split-pos=1,midsld $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=badsum --dpi-desync-split-pos=midsld $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=ts --dpi-desync-split-pos=midsld $FAKE
@@ -323,7 +340,7 @@ if [ "$MODE" = "quick" ]; then
 --dpi-desync=multisplit --dpi-desync-split-seqovl=652 --dpi-desync-split-pos=2 --dpi-desync-split-seqovl-pattern=@G
 EOF
 else
-    S_total=$(( 14 + 8 + 34 + 4 + 9 ))
+    S_total=$(( 14 + 8 + 36 + 3 + 4 + 9 ))
     # A: только разрез, без подделок
     st stage="1/4 разрез без подделок"
     for m in multisplit multidisorder; do
@@ -345,7 +362,14 @@ else
             done
         done
         run_strat "--dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=www.google.com $(fool_arg $f)" "3"
+        run_strat "--dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=sberbank.ru $(fool_arg $f)" "3"
     done
+    # приманки с российским SNI (идеи ZDT-D): ТСПУ свои сайты не блокирует,
+    # а при белых списках это может оказаться единственным, что проходит
+    st stage="3/4 приманки с российским SNI"
+    run_strat "--dpi-desync=fake,hostfakesplit --dpi-desync-split-pos=host+1 --dpi-desync-hostfakesplit-midhost=midsld --dpi-desync-hostfakesplit-mod=host=www.google.com --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=sberbank.ru --dpi-desync-fooling=datanoack --dpi-desync-repeats=6 --dpi-desync-cutoff=n6" "3"
+    run_strat "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,sld+1 --dpi-desync-split-seqovl=2 --dpi-desync-split-seqovl-pattern=@G --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=max.ru --dpi-desync-fooling=datanoack --dpi-desync-repeats=6 --dpi-desync-cutoff=n5" "3"
+    run_strat "--dpi-desync=fake,multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1 --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=gosuslugi.ru --dpi-desync-fooling=datanoack --dpi-desync-cutoff=n5" "3"
     # C2: разрез с наложением 1 байта (seqovl) — 21.10 YOTA: только он и
     # multidisorder с позиции 1 проходили с ClientHello Chrome/AdGuard
     st stage="3/4 разрез с наложением"
@@ -367,6 +391,12 @@ fi
 # перепроверка лучших: случайный успех не должен выиграть
 st stage="перепроверяю лучшие"
 best 3 > "$TMP/top"
+# + 2 лучших именно для YouTube (могут не попасть в общие 3)
+if [ "$NBY" -gt 0 ]; then
+    awk -F'|' -v re="$YT_RE" '$3 == 0 && $5 !~ /--new/ { n = split($7, d, " "); f = 0; for (i = 1; i <= n; i++) if (d[i] ~ re) f++; print f "|" $4 "|" $5 }' "$OUT.results" | \
+        sort -t'|' -k1,1n -k2,2n | cut -d'|' -f3 | head -n 2 >> "$TMP/top"
+    awk '!s[$0]++' "$TMP/top" > "$TMP/top2" && mv -f "$TMP/top2" "$TMP/top"
+fi
 S_total=$((S_done + $(wc -l < "$TMP/top") * 2))
 while IFS= read -r a; do
     [ -n "$a" ] || continue
@@ -378,30 +408,54 @@ done < "$TMP/top"
 # прогонов), перепроверена, быстрее. Та же логика, что у таблицы в WebUI.
 MSG=""
 NB=$(echo $BLOCKED | wc -w)
-BEST=$(awk -F'|' -v nb="$NB" '
-    { a = $5; ok = $1 + 0; brk = $3 + 0
-      if (!(a in runs)) { mn[a] = ok; mb[a] = brk; ns[a] = $2 + 0 }
+# По группам: остальные сайты (og) и YouTube (oy) — по худшему из прогонов.
+# Общая — лучшая для остальных; для YouTube — своя, только если она открывает
+# больше YouTube, чем общая. Обе строки: "открыла|аргументы".
+pick() { # pick gen|yt
+    awk -F'|' -v nb="$NB" -v nby="$NBY" -v re="$YT_RE" -v want="$1" '
+    $5 ~ /--new/ { next }
+    { a = $5; brk = $3 + 0; n = split($7, d, " "); fy = 0; fg = 0
+      for (i = 1; i <= n; i++) { if (d[i] ~ re) fy++; else fg++ }
+      og = (nb - nby) - fg; oy = nby - fy
+      if (!(a in runs)) { mg[a] = og; my[a] = oy; mb[a] = brk }
       runs[a]++; ms[a] += $4
-      if (ok < mn[a]) mn[a] = ok
+      if (og < mg[a]) mg[a] = og
+      if (oy < my[a]) my[a] = oy
       if (brk > mb[a]) mb[a] = brk }
     END {
       for (a in runs) {
         if (mb[a] > 0) continue
-        o = mn[a] - (ns[a] - nb); if (o <= 0) continue
+        o = (want == "yt") ? my[a] : mg[a]; o2 = (want == "yt") ? mg[a] : my[a]
+        if (o <= 0 && !(want == "gen" && nb == nby && my[a] > 0)) continue
         t = ms[a] / runs[a]
-        if (b == "" || o > bo || (o == bo && runs[a] > br) || (o == bo && runs[a] == br && t < bt)) { b = a; bo = o; br = runs[a]; bt = t }
+        if (b == "" || o > bo || (o == bo && o2 > bo2) || (o == bo && o2 == bo2 && runs[a] > br) || (o == bo && o2 == bo2 && runs[a] == br && t < bt)) { b = a; bo = o; bo2 = o2; br = runs[a]; bt = t; byt = my[a] }
       }
-      if (b != "") print bo "|" b
-    }' "$OUT.results")
+      if (b != "") print bo "|" byt "|" b
+    }' "$OUT.results"
+}
+BG=$(pick gen); BY=$(pick yt)
+BEST=""; BEST_YT=""
+if [ -n "$BG" ]; then
+    BEST="${BG%%"|"*}|${BG#*"|"*"|"}"          # "открыла|аргументы" (остальные сайты)
+    gy=$(echo "$BG" | cut -d'|' -f2)               # сколько YouTube открывает общая
+    if [ -n "$BY" ] && [ "$NBY" -gt 0 ] && [ "${BY%%"|"*}" -gt "$gy" ]; then
+        BEST_YT="${BY#*"|"*"|"}"
+    fi
+fi
 if [ "$PERNET" = "1" ] && [ -n "$BEST" ]; then
     if [ -z "${NETID%%"|"*}" ]; then
         MSG="не понял, что за сеть — стратегия не запомнена, примени вручную"
     elif [ "$(sh "$ZDIR/netid.sh" "$WAN" 2>/dev/null | head -1)" != "$NETID" ]; then
         MSG="сеть сменилась во время подбора — не запоминаю"
     else
-        r=$(sh "$MODDIR/webctl.sh" znet-set custom "${BEST#*"|"}" "подбор: открыла ${BEST%%"|"*} из $NB" 2>/dev/null)
+        if [ -n "$BEST_YT" ]; then
+            how="остальные ${BEST%%"|"*} из $((NB - NBY)), YouTube — своя: ${BY%%"|"*} из $NBY"
+        else
+            how="открыла $((${BEST%%"|"*} + gy)) из $NB"
+        fi
+        r=$(sh "$MODDIR/webctl.sh" znet-set custom "${BEST#*"|"}" "подбор: $how" "$BEST_YT" 2>/dev/null)
         case "$r" in
-            OK*) MSG="лучшая запомнена для сети «${NETID#*"|"}» (открыла ${BEST%%"|"*} из $NB)" ;;
+            OK*) MSG="лучшая запомнена для сети «${NETID#*"|"}» ($how)" ;;
             *)   MSG="не удалось запомнить: ${r#ERR }" ;;
         esac
     fi
