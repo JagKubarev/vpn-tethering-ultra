@@ -46,17 +46,17 @@ if [ ! -f "$CONF" ]; then
 
 # --- Свой DNS (dnsproxy) -------------------------------------
 # 1 = включено: при раздаче НАПРЯМУЮ и на самом телефоне без
-#     VPN DNS идёт через dns.comss.one по зашифрованному DoH
+#     VPN DNS идёт через dns.wlrus.cfd по зашифрованному DoH
 #     (открывает ChatGPT, Gemini, Claude и т.п.).
 # 0 = выключено полностью: DNS как в старых версиях модуля.
 #     Ставь 0, если dnsproxy чем-то мешает.
 DNSPROXY_ENABLE=1
 
-# DNS самого телефона через comss, когда VPN выключен (1/0)
+# DNS самого телефона через DoH, когда VPN выключен (1/0)
 #DNS_PHONE=1
 
 # Какой DoH-сервер использовать (можно несколько через пробел)
-#DNS_UPSTREAMS=https://dns.comss.one/dns-query
+#DNS_UPSTREAMS=https://dns.wlrus.cfd/dns-query
 
 # Закрыть QUIC (HTTP/3) приложениям — они пойдут по обычному
 # HTTPS. Помогает, когда оператор/ТСПУ режет QUIC и у приложения
