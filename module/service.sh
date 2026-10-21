@@ -240,6 +240,10 @@
 #     соединений AdGuard. В наборе youtubei.googleapis.com (лента приложения),
 #     в шаблонах — разрез с позиции 1 (SNI бывает в конце ClientHello).
 # ============================================================================
+# v2.18.1 — отбой мёртвых видеосерверов не ставился: REJECT --reject-with
+#   tcp-reset без -p tcp iptables не принимает, ошибка глушилась. Подсеть
+#   попадала в список, а соединения к ней ждали закрытия по ss -K (~6-10с).
+# ============================================================================
 # ============================================================================
 
 umask 022
@@ -2928,8 +2932,11 @@ yt_dead_apply() {
     [ "$sig" = "$YT_DEAD_SIG" ] && return 0
     $iptables -F "$CHAIN_YT_DEAD" 2>/dev/null
     $iptables -A "$CHAIN_YT_DEAD" -o tun+ -j RETURN 2>/dev/null
+    # -p tcp обязателен: без него REJECT --reject-with tcp-reset не встаёт
+    # (2.18: правило молча не добавлялось, мёртвые сети не отбивались)
     for net in $sig; do
-        $iptables -A "$CHAIN_YT_DEAD" -d "$net" -j REJECT --reject-with tcp-reset 2>/dev/null
+        $iptables -A "$CHAIN_YT_DEAD" -p tcp -d "$net" -j REJECT --reject-with tcp-reset 2>/dev/null || \
+            log "WARNING: YouTube: не удалось поставить отбой для $net"
     done
     YT_DEAD_SIG="$sig"
 }
@@ -4274,7 +4281,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.18 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.18.1 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
