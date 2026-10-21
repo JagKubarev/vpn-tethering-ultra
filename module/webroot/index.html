@@ -553,7 +553,7 @@ function renderStatus(s) {
   if (s.zapret === 'on') {
     let zt = 'включён';
     if (s.zapret_strategy) zt += ' · ' + esc(stratName(s.zapret_strategy, s.zapret_eff_args)) +
-      (s.zapret_src === 'net' ? ' (своя для «' + esc(s.net_label) + '»)' : ' (общая)');
+      (s.zapret_src === 'net' ? ' (своя для «' + esc(s.net_label) + '»)' : s.zapret_src === 'label' ? ' (как у «' + esc(s.net_label) + '», код сети ' + esc(s.net_key) + ')' : ' (общая)');
     if (+s.zapret_auto > 0) zt += ' · найдено сайтов: ' + esc(s.zapret_auto);
     h += kvRow('Обход DPI', zt, 'green');
     if (s.ggc === 'on') h += kvRow('YouTube', 'мимо кэша оператора', 'green');
