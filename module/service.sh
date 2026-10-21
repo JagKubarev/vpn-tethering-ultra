@@ -261,6 +261,18 @@
 #     вообще ничего (и контрольные) — это связь, а не ТСПУ: ничего не меняет.
 #     В журнал — какие сайты не открылись и с какой ошибкой.
 # ============================================================================
+# v2.20 — TETHER_STEALTH: то, ради чего стоял отдельный модуль tether_unblock,
+#   теперь здесь, с переключателем. Отключает проверку раздачи у оператора
+#   (net.tethering.noprovisioning), телефону TTL 63 (устройства с TTL 64 после
+#   раздачи выходят с теми же 63). Пакеты раздачи с другим TTL (Windows: 127)
+#   tether_unblock хотел заворачивать в lo, но ставил метку соединению, а
+#   правило маршрута смотрит на метку пакета — уходили к оператору как есть и
+#   заодно стирали пометку googlevideo. Здесь: считаем их (статус/WebUI) и, при
+#   TETHER_TTL_STRICT=1, отбиваем. Ядро не умеет TTL-target — переписать TTL
+#   нельзя, только на самом устройстве (Windows: DefaultHopLimit 64).
+#   Другие модули, которые тоже трогают TTL/раздачу, ищутся по содержимому
+#   (не по имени) — WebUI и лог предлагают отключить/удалить лишний.
+# ============================================================================
 # ============================================================================
 
 umask 022
@@ -389,6 +401,17 @@ YT_DEAD_MAX=16          # больше подсетей не держим
 # подбор. Только при своей стратегии для сети и без поднятого VPN.
 ZAPRET_WATCHDOG=1
 ZAPRET_WATCHDOG_MIN=15
+# Скрыть раздачу от оператора (2.20; раньше — модуль tether_unblock).
+#  - net.tethering.noprovisioning: Android не спрашивает оператора, можно ли
+#    раздавать (иначе оператор может не дать включить точку или оборвать);
+#  - TTL телефона 63: телефоны/Mac/Linux на раздаче (TTL 64) после телефона
+#    выходят с теми же 63 — их трафик не отличить от трафика телефона;
+#  - пакеты раздачи в мобильную сеть с другим TTL (Windows: 128 -> 127)
+#    считаются; TETHER_TTL_STRICT=1 — отбиваются (раздача без утечки TTL, но
+#    такое устройство без своей настройки TTL останется без интернета).
+# Через VPN наружу идут пакеты телефона (TTL 63) — там и так всё скрыто.
+TETHER_STEALTH=1
+TETHER_TTL_STRICT=0
 # Своя стратегия для каждой сети: Wi-Fi — по названию, мобильная — по
 # оператору (zapret/netid.sh). Запоминается подбором в WebUI (лучшая) или
 # выбором вручную, хранится в ZAPRET_NETS_FILE; при смене сети nfqws сам
@@ -446,7 +469,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG)
+        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
@@ -492,7 +515,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -980,6 +1003,11 @@ update_status() {
         echo "yt_dead=$([ "$YT_DEAD_STATE" = on ] && awk 'END {print NR}' "$YT_DEAD_FILE" 2>/dev/null || echo off)"
         echo "yt_dead_hits=$(yt_dead_hits)"
         echo "zwd=$ZAPRET_WATCHDOG"
+        echo "stealth=$([ "$STEALTH_STATE" = on ] && echo on || echo off)"
+        echo "stealth_strict=$TETHER_TTL_STRICT"
+        echo "ttl_foreign=$(stealth_foreign)"
+        echo "stealth_rivals=$STEALTH_RIVALS"
+        echo "stealth_rival_rules=$STEALTH_RIVAL_RULES"
         echo "phone_dns=$PHONE_DNS_ON"
         echo "dns_phone_enabled=$DNS_PHONE"
         echo "dnsproxy_enable=$DNSPROXY_ENABLE"
@@ -3222,6 +3250,143 @@ zapret_reconcile() {
     fi
 }
 
+# ============================================================================
+# TETHER_STEALTH — скрыть раздачу от оператора
+# ============================================================================
+CHAIN_TTL="VPN_TETHER_TTL"   # filter FORWARD -o <мобильная сеть>: TTL раздачи
+STEALTH_STATE=""             # "" | on
+STEALTH_TICK=0
+STEALTH_FOREIGN_LOGGED=0     # сколько чужих пакетов было, когда писали в лог
+STEALTH_IFS="rmnet+ ccmni+ rev_rmnet+"
+RESETPROP=""
+for _r in /data/adb/ksu/bin/resetprop /data/adb/magisk/resetprop /data/adb/ap/bin/resetprop; do
+    [ -x "$_r" ] && RESETPROP="$_r" && break
+done
+[ -z "$RESETPROP" ] && command -v resetprop >/dev/null 2>&1 && RESETPROP=resetprop
+STEALTH_RIVALS=""           # другие включённые модули, которые трогают TTL/раздачу
+STEALTH_RIVAL_RULES=0       # чужие правила TTL в iptables (вне нашей цепочки)
+STEALTH_RIVALS_LOGGED="-"
+
+# Кто ещё скрывает раздачу — не по имени модуля, а по тому, что он делает:
+# в его скриптах/system.prop TTL, hop limit или проверка раздачи у оператора.
+# Два таких модуля мешают друг другу (21.10: tether_unblock на каждом пакете
+# с TTL≠63 писал CONNMARK 0x40/0xffffffff и стирал наши метки раздачи).
+stealth_find_rivals() {
+    local d f n out=""
+    for d in /data/adb/modules/*; do
+        [ -d "$d" ] || continue
+        [ "$d" = "$MODULE_DIR" ] && continue
+        [ -f "$d/disable" ] && continue
+        [ -f "$d/remove" ] && continue
+        for f in "$d/service.sh" "$d/post-fs-data.sh" "$d/system.prop" "$d/late_start.sh" "$d/boot-completed.sh"; do
+            [ -f "$f" ] || continue
+            if grep -qE 'ip_default_ttl|--ttl-set|-j TTL|--hl-set|hop_limit|noprovisioning|tether_dun_required' "$f" 2>/dev/null; then
+                n=$(sed -n 's/^name=//p' "$d/module.prop" 2>/dev/null | head -n 1 | tr -d '\r|')
+                out="${out:+$out, }${n:-${d##*/}}"
+                break
+            fi
+        done
+    done
+    STEALTH_RIVALS="$out"
+    # правила с TTL не из нашей цепочки (модуль мог уже не значиться, а правила — остаться)
+    STEALTH_RIVAL_RULES=$({ $iptables -S 2>/dev/null; $iptables -t mangle -S 2>/dev/null; } | \
+        grep -E -- '-m ttl|-j TTL' | grep -vc -- "$CHAIN_TTL")
+    if [ "$STEALTH_RIVALS|$STEALTH_RIVAL_RULES" != "$STEALTH_RIVALS_LOGGED" ]; then
+        STEALTH_RIVALS_LOGGED="$STEALTH_RIVALS|$STEALTH_RIVAL_RULES"
+        if [ -n "$STEALTH_RIVALS" ]; then
+            log "WARNING: TTL/раздачу меняет ещё и модуль: $STEALTH_RIVALS — с включённым «Скрыть раздачу» он лишний и мешает (стирает метки соединений раздачи). Отключи или удали его"
+        elif [ "$STEALTH_RIVAL_RULES" -gt 0 ]; then
+            log "WARNING: в iptables чужие правила TTL ($STEALTH_RIVAL_RULES) — их ставит другой модуль или приложение"
+        fi
+    fi
+}
+
+stealth_rules_on() {
+    local o
+    $iptables -N "$CHAIN_TTL" 2>/dev/null
+    $iptables -F "$CHAIN_TTL" 2>/dev/null
+    $iptables -A "$CHAIN_TTL" -m ttl --ttl-eq 63 -j RETURN 2>/dev/null
+    if [ "$TETHER_TTL_STRICT" = "1" ]; then
+        $iptables -A "$CHAIN_TTL" -j REJECT --reject-with icmp-port-unreachable 2>/dev/null
+    else
+        # только счётчик: сколько пакетов раздачи выдали бы её оператору
+        $iptables -A "$CHAIN_TTL" -j RETURN 2>/dev/null
+    fi
+    for o in $STEALTH_IFS; do
+        $iptables -C FORWARD -o "$o" -j "$CHAIN_TTL" 2>/dev/null || \
+            $iptables -I FORWARD 1 -o "$o" -j "$CHAIN_TTL" 2>/dev/null
+    done
+}
+
+stealth_rules_off() {
+    local o _n
+    for o in $STEALTH_IFS; do
+        _n=0; while [ $_n -lt 8 ] && $iptables -D FORWARD -o "$o" -j "$CHAIN_TTL" 2>/dev/null; do _n=$((_n + 1)); done
+    done
+    $iptables -F "$CHAIN_TTL" 2>/dev/null; $iptables -X "$CHAIN_TTL" 2>/dev/null
+}
+
+# сколько пакетов раздачи ушло в мобильную сеть с TTL не 63
+stealth_foreign() {
+    [ "$STEALTH_STATE" = "on" ] || { echo 0; return; }
+    $iptables -L "$CHAIN_TTL" -v -x -n 2>/dev/null | awk 'NR > 2 && !/TTL match/ {s += $1} END {print s + 0}'
+}
+
+stealth_apply() {
+    if [ "$TETHER_STEALTH" = "1" ]; then
+        echo 63 > /proc/sys/net/ipv4/ip_default_ttl 2>/dev/null
+        echo 63 > /proc/sys/net/ipv6/conf/all/hop_limit 2>/dev/null
+        echo 63 > /proc/sys/net/ipv6/conf/default/hop_limit 2>/dev/null
+        [ -n "$RESETPROP" ] && "$RESETPROP" net.tethering.noprovisioning true >/dev/null 2>&1
+        if [ "$STEALTH_STATE" != "on" ]; then
+            settings put global tether_dun_required 0 >/dev/null 2>&1
+            log "Скрытие раздачи: TTL телефона 63, проверка раздачи у оператора отключена$([ -n "$RESETPROP" ] || echo ' (НЕТ resetprop — проверка не отключена)'), чужой TTL раздачи: $([ "$TETHER_TTL_STRICT" = 1 ] && echo отбиваю || echo считаю)"
+        fi
+        stealth_rules_on
+        STEALTH_STATE="on"
+        stealth_find_rivals
+    elif [ "$STEALTH_STATE" = "on" ]; then
+        stealth_off
+        log "Скрытие раздачи выключено: TTL 64, проверка раздачи у оператора — как в системе"
+    fi
+}
+
+stealth_off() {
+    stealth_rules_off
+    [ "$STEALTH_STATE" = "on" ] || return 0
+    STEALTH_STATE=""
+    # то же делает другой модуль — пока он включён, его настройки не трогаем
+    stealth_find_rivals
+    [ -n "$STEALTH_RIVALS" ] && return 0
+    echo 64 > /proc/sys/net/ipv4/ip_default_ttl 2>/dev/null
+    echo 64 > /proc/sys/net/ipv6/conf/all/hop_limit 2>/dev/null
+    echo 64 > /proc/sys/net/ipv6/conf/default/hop_limit 2>/dev/null
+    [ -n "$RESETPROP" ] && "$RESETPROP" --delete net.tethering.noprovisioning >/dev/null 2>&1
+    settings delete global tether_dun_required >/dev/null 2>&1
+}
+
+# из цикла раз в ~30с: хук на месте (netd пересобирает FORWARD), чужой TTL — в лог
+stealth_reconcile() {
+    local n
+    [ "$STEALTH_STATE" = "on" ] || return 0
+    $iptables -C FORWARD -o rmnet+ -j "$CHAIN_TTL" 2>/dev/null || { log "WATCHDOG: скрытие раздачи: хук пропал, ставлю заново"; stealth_rules_on; }
+    # модули стартуют параллельно с нами — чужие ищем ещё и раз в ~5 мин
+    STEALTH_TICK=$((STEALTH_TICK + 1))
+    if [ "$STEALTH_TICK" -ge 10 ]; then
+        STEALTH_TICK=0
+        n="$STEALTH_RIVALS|$STEALTH_RIVAL_RULES"
+        stealth_find_rivals
+        [ "$n" != "$STEALTH_RIVALS|$STEALTH_RIVAL_RULES" ] && phone_status_refresh
+    fi
+    n=$(stealth_foreign)
+    if [ "$n" -gt $((STEALTH_FOREIGN_LOGGED + 100)) ]; then
+        [ "$STEALTH_FOREIGN_LOGGED" = 0 ] && \
+            log "WARNING: раздача: устройство выходит в мобильную сеть с TTL не 64 (Windows?) — оператор может заметить раздачу. На нём: Set-NetIPv4Protocol -DefaultHopLimit 64$([ "$TETHER_TTL_STRICT" = 1 ] && echo ' (сейчас такие пакеты отбиваются)')"
+        STEALTH_FOREIGN_LOGGED=$n
+        phone_status_refresh
+    fi
+}
+
 phone_status_refresh() {
     [ -n "$LAST_STATUS_MODE" ] && update_status "$LAST_STATUS_MODE" "$LAST_STATUS_IFACES" "$CURRENT_NET_PROFILE"
 }
@@ -4199,6 +4364,7 @@ handle_change() {
 CONF_GRP_DNS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS"
 CONF_GRP_KS="KILL_SWITCH KILL_SWITCH_STRICT"
 CONF_GRP_QUIC="QUIC_BLOCK_APPS"
+CONF_GRP_STEALTH="TETHER_STEALTH TETHER_TTL_STRICT"
 CONF_GRP_ZAPRET="ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET YT_GGC_BLOCK YT_DEAD_FAILFAST"
 _conf_grp_sig() {   # $1 = имя переменной-результата, дальше ключи
     local _v="$1" _k _o=""; shift
@@ -4208,11 +4374,12 @@ _conf_grp_sig() {   # $1 = имя переменной-результата, д�
 RELOAD_NEED_REBUILD=1
 
 reload_config() {
-    local old_ks="$KILL_SWITCH" s_dns0 s_ks0 s_quic0 s_zap0 s_dns1 s_ks1 s_quic1 s_zap1 what=""
+    local old_ks="$KILL_SWITCH" s_dns0 s_ks0 s_quic0 s_zap0 s_dns1 s_ks1 s_quic1 s_zap1 s_st0 s_st1 what=""
     _conf_grp_sig s_dns0 $CONF_GRP_DNS
     _conf_grp_sig s_ks0 $CONF_GRP_KS
     _conf_grp_sig s_quic0 $CONF_GRP_QUIC
     _conf_grp_sig s_zap0 $CONF_GRP_ZAPRET
+    _conf_grp_sig s_st0 $CONF_GRP_STEALTH
     conf_restore_defaults
     USER_CONF_NOTE=""
     load_user_conf
@@ -4223,11 +4390,13 @@ reload_config() {
     _conf_grp_sig s_ks1 $CONF_GRP_KS
     _conf_grp_sig s_quic1 $CONF_GRP_QUIC
     _conf_grp_sig s_zap1 $CONF_GRP_ZAPRET
+    _conf_grp_sig s_st1 $CONF_GRP_STEALTH
     RELOAD_NEED_REBUILD=0
     [ "$s_dns0" != "$s_dns1" ] && { what="$what DNS"; RELOAD_NEED_REBUILD=1; }
     [ "$s_ks0" != "$s_ks1" ] && { what="$what kill-switch"; RELOAD_NEED_REBUILD=1; }
     [ "$s_quic0" != "$s_quic1" ] && what="$what QUIC-приложений"
     [ "$s_zap0" != "$s_zap1" ] && what="$what zapret"
+    [ "$s_st0" != "$s_st1" ] && what="$what скрытие-раздачи"
     log "Настройки перечитаны:${USER_CONF_NOTE:- (всё по умолчанию)}"
     log "Применяю:${what:- ничего не поменялось}$([ "$RELOAD_NEED_REBUILD" = 1 ] && echo ' — пересборка правил раздачи' || echo ' — без пересборки раздачи')"
     log "Config: DNSPROXY=$DNSPROXY_ENABLE KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE UPSTREAMS=[$DNS_UPSTREAMS] QUIC_BLOCK=[$QUIC_BLOCK_APPS] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/phone=$ZAPRET_PHONE/quic=$ZAPRET_QUIC_BLOCK/per_net=$ZAPRET_PER_NET META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s"
@@ -4260,6 +4429,8 @@ reload_config() {
         quic_block_apply
     fi
 
+    [ "$s_st0" != "$s_st1" ] && stealth_apply
+
     if [ "$s_zap0" != "$s_zap1" ]; then
         # zapret: снять всё, цикл поднимет заново под новые настройки (~2с)
         zapret_down
@@ -4286,6 +4457,7 @@ cleanup_on_exit() {
     PHONE_DNS_ON=0
     quic_block_down
     zapret_down
+    stealth_off
     dnsproxy_stop
     dnsproxy_port_guard_down
     guard_down
@@ -4318,6 +4490,7 @@ monitor_loop() {
         dns_health
         [ $((_loop_count % 15)) -eq 0 ] && quic_block_apply
         [ $((_loop_count % 15)) -eq 7 ] && meta_eu_watchdog
+        [ $((_loop_count % 15)) -eq 3 ] && stealth_reconcile
         # Tethering перевешивает BPF-фильтры при смене аплинка: раздача и WAN —
         # каждый цикл (1-2 вызова tc), все интерфейсы — раз в ~30с
         if [ $((_loop_count % 15)) -eq 11 ]; then
@@ -4342,13 +4515,14 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.19 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.20 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
 log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/per_net=$ZAPRET_PER_NET YT_DEAD=$YT_DEAD_FAILFAST WATCHDOG=$ZAPRET_WATCHDOG/${ZAPRET_WATCHDOG_MIN}m META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
 
 disable_hw_offload
+stealth_apply
 
 [ ! -f "$FLAG_FILE" ] && { touch "$FLAG_FILE"; log "VPN mode ENABLED by default after reboot"; }
 refresh_vpn_target

@@ -166,6 +166,16 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
       <div class="s">Выбран VPN, а он не подключён — раздача на паузе. Если выключить, раздача сама перейдёт на «напрямую».</div></div>
     <label class="sw"><input type="checkbox" data-key="KILL_SWITCH_STRICT"><span></span></label>
   </div>
+  <div class="row">
+    <div class="txt"><div class="t">Скрыть раздачу от оператора</div>
+      <div class="s">Телефону TTL 63 и без проверки раздачи у оператора. Другие модули, которые меняют TTL, тогда лишние — модуль подскажет, какие отключить. Устройства с TTL 64 (телефоны, Mac) выходят неотличимо от телефона; Windows — только с TTL 64 у себя.</div></div>
+    <label class="sw"><input type="checkbox" data-key="TETHER_STEALTH"><span></span></label>
+  </div>
+  <div class="row" data-dep="TETHER_STEALTH">
+    <div class="txt"><div class="t">Не выпускать чужой TTL</div>
+      <div class="s">Пакеты раздачи с другим TTL (Windows без настройки) не уходят к оператору. Такое устройство останется без интернета напрямую, пока на нём не поставить TTL 64.</div></div>
+    <label class="sw"><input type="checkbox" data-key="TETHER_TTL_STRICT"><span></span></label>
+  </div>
 </div>
 
 <!-- ============ DNS ============ -->
@@ -546,6 +556,14 @@ function renderStatus(s) {
     else if (s.phone_dns === '1') h += kvRow('DNS телефона', up + ', зашифрован', 'green');
     else h += kvRow('DNS телефона', 'обычный', '');
   }
+  if (s.stealth === 'on') {
+    const f = +s.ttl_foreign || 0;
+    h += kvRow('Скрытие раздачи', f ? (s.stealth_strict === '1' ? 'отбито пакетов с чужим TTL: ' + f : 'чужой TTL у устройства раздачи (' + f + ' пак.) — поставь на нём TTL 64') : 'включено, чужого TTL нет', f ? 'amber' : 'green');
+  }
+  if (s.stealth_rivals) h += kvRow('Лишний модуль', esc(s.stealth_rivals) + (s.stealth === 'on'
+      ? ' тоже меняет TTL/раздачу и мешает — отключи или удали его'
+      : ' меняет TTL/раздачу (это умеет и переключатель «Скрыть раздачу»)'), s.stealth === 'on' ? 'amber' : '');
+  else if (s.stealth === 'on' && +s.stealth_rival_rules > 0) h += kvRow('Чужие правила TTL', esc(s.stealth_rival_rules) + ' — их ставит другой модуль или приложение', 'amber');
   if (s.mode === 'vpn') {
     h += kvRow('Kill-switch', s.kill_switch === '1' ? 'включён' : 'выключен', s.kill_switch === '1' ? 'green' : 'amber');
     if (s.mtu && +s.mss > 0) h += kvRow('MTU / MSS', esc(s.mtu + ' / ' + s.mss));
@@ -591,7 +609,7 @@ let DEF = {}, USR = {}, CUR = {};   // умолчания, из файла, те
 const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAMS','DNS_FALLBACKS','DNS_VPN_UPSTREAMS',
   'DNS_BOOTSTRAP','DNS_HEALTH_INTERVAL','DNS_HEALTH_RECOVER','KILL_SWITCH','KILL_SWITCH_STRICT','NET_PROFILE_ADAPTIVE',
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK',
-  'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK','YT_DEAD_FAILFAST','ZAPRET_WATCHDOG'];
+  'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK','YT_DEAD_FAILFAST','ZAPRET_WATCHDOG','TETHER_STEALTH','TETHER_TTL_STRICT'];
 const saved = (k) => (k in USR ? USR[k] : (DEF[k] || ''));
 
 async function loadConf() {
@@ -1114,8 +1132,8 @@ function mockExec(cmd) {
   });
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=v2.8 (предпросмотр)\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
-    '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.comss.one/dns-query\nD DNS_FALLBACKS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=1\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=0\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=0\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\n' + M.conf };
+    '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.comss.one/dns-query\nD DNS_FALLBACKS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=1\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=0\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=0\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\n' + M.conf };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +
     'mobile:25002|md5sig||MegaFon|выбрана вручную|2026-10-19 18:40\n')).split('\n').filter(Boolean).map((l) => 'N ' + l).join('\n') };
