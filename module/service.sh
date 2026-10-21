@@ -223,6 +223,23 @@
 #   отбитого кэша на сервер Google, а ждал или брал другой кэш — без опции
 #   часть роликов хотя бы медленно, но грузится.
 # ============================================================================
+# v2.18 — YouTube на YOTA и сторож обхода (по замерам 21.10):
+#   - YT_DEAD_FAILFAST (вкл.): часть видеосерверов Google (sn-4g5…: 74.125.162/23,
+#     74.125.104/24, 173.194.187/24 ...) с YOTA не отвечает вовсе — даже без
+#     обхода и с чужим SNI. Плеер ждал каждый ~27с (шортсы висели намертво).
+#     Демон по conntrack видит соединение с googlevideo.com, где сервер принял
+#     ClientHello, но за 6с не прислал ни байта, и на 20 мин отбивает эту /24
+#     (RST) — плеер сразу берёт другой сервер. Тест 4 мин: ~70 отбоев, шортсы
+#     и ролики заметно лучше. Набор мёртвых сетей меняется — список не зашит.
+#   - ZAPRET_WATCHDOG (вкл.): раз в 15 мин (и сразу, если видео-соединения
+#     стали застревать на ClientHello) zapret/scan.sh check проверяет текущую
+#     стратегию; сломалась — пробует прежние рабочие для этой сети, потом
+#     быстрый подбор. Журнал: /data/adb/vpn_tether_zapret_events.
+#   - Подбор (scan.sh) проверяет и большим ClientHello (Kyber, 2 сегмента, как у
+#     Chrome/AdGuard): 21.10 стратегия 10/10 на curl пропускала половину
+#     соединений AdGuard. В наборе youtubei.googleapis.com (лента приложения),
+#     в шаблонах — разрез с позиции 1 (SNI бывает в конце ClientHello).
+# ============================================================================
 # ============================================================================
 
 umask 022
@@ -330,6 +347,21 @@ ZAPRET_QUIC_BLOCK=1     # закрыть QUIC раздаче, пока zapret в
 # и на сервер Google не уходил — 20.10 дома за час 384 отказа, часть роликов
 # не открывалась вовсе. Включать, только если у плеера есть серверы Google.
 YT_GGC_BLOCK=0
+# Мёртвые видеосерверы YouTube (2.18). 21.10, YOTA: часть серверов Google
+# (sn-4g5…) не отвечает вовсе — сервер подтверждает ClientHello, но не шлёт
+# ни байта; плеер ждёт ~27с. Демон видит такие соединения с googlevideo.com
+# (conntrack) и на YT_DEAD_TTL сек отбивает их /24 (RST) — плеер сразу идёт
+# на другой сервер. Только мимо VPN и пока zapret включён, только IPv4.
+YT_DEAD_FAILFAST=1
+YT_DEAD_AFTER=6         # сек без ответа сервера после ClientHello = мёртв
+YT_DEAD_TTL=1200        # сек держать подсеть в отбое
+YT_DEAD_MAX=16          # больше подсетей не держим
+# Сторож обхода (2.18): раз в ZAPRET_WATCHDOG_MIN минут (и сразу, если
+# видео-соединения стали застревать на ClientHello) zapret/scan.sh check
+# проверяет стратегию сети; сломалась — прежние рабочие, затем быстрый
+# подбор. Только при своей стратегии для сети и без поднятого VPN.
+ZAPRET_WATCHDOG=1
+ZAPRET_WATCHDOG_MIN=15
 # Своя стратегия для каждой сети: Wi-Fi — по названию, мобильная — по
 # оператору (zapret/netid.sh). Запоминается подбором в WebUI (лучшая) или
 # выбором вручную, хранится в ZAPRET_NETS_FILE; при смене сети nfqws сам
@@ -386,8 +418,11 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     local key="$1" val="$2" ok=1
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
-        ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK)
+        ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
+        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
+        ZAPRET_WATCHDOG_MIN)
+            case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
         ZAPRET_MODE)     case "$val" in list|all) ;; *) ok=0 ;; esac ;;
         ZAPRET_STRATEGY) zapret_strategy_valid "$val" || ok=0 ;;
         ZAPRET_ARGS)     zapret_args_valid "$val" || ok=0 ;;
@@ -430,7 +465,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -707,6 +742,23 @@ CHAIN_ZAPRET_GGC="VPN_ZAPRET_GGC"   # filter OUTPUT/FORWARD: YouTube мимо к
 # оказаться во втором — поэтому 1:6, а не 1:1)
 GGC_MATCH="-p tcp --dport 443 -m connbytes --connbytes-dir original --connbytes-mode packets --connbytes 1:6 -m string --string googlevideo.com --algo bm"
 GGC_STATE=""            # что стоит: "" | v4 | v4+v6 (для лога)
+# Мёртвые видеосерверы (YT_DEAD_FAILFAST). Соединения с googlevideo.com
+# помечаются битом connmark (у netd — младшие 0xfffff, этот бит не трогает),
+# демон ищет их в conntrack и отбивает /24 мёртвых серверов.
+CHAIN_YT_MARK="VPN_YT_MARK"     # mangle OUTPUT/FORWARD: пометить googlevideo.com
+CHAIN_YT_DEAD="VPN_YT_DEAD"     # filter OUTPUT/FORWARD: мёртвые подсети -> RST
+YT_CTMARK=0x10000000
+YT_DEAD_FILE="/data/local/tmp/vpn_tether_ytdead"   # "подсеть/24 до_когда(epoch) ip"
+YT_SEEN_FILE="/data/local/tmp/vpn_tether_ytseen"   # кандидаты: "кортеж впервые вид учтён"
+YT_DEAD_STATE=""        # "" | on
+YT_DEAD_SIG=""          # содержимое цепочки отбоя (чтобы не пересобирать зря)
+YT_DEAD_TICK=0
+YT_DEAD_ADDS=""         # время последних добавлений (защита от лавины)
+YT_DEAD_PAUSE=0         # до какого времени не добавлять (лавина = сломан обход/связь)
+YT_STUCK=""             # время соединений, застрявших на ClientHello (для сторожа)
+ZWD_LAST=0              # когда последний раз запускали сторож
+ZWD_EVENTS="/data/adb/vpn_tether_zapret_events"
+ZSCAN_PID_FILE="/data/local/tmp/vpn_tether_zscan.pid"
 ZAPRET_HOOK_TICK=0      # проверка хуков zapret — раз в ~10с, не каждый цикл
 ZAPRET_OWNER_TUN="-"    # для какого tun уже узнали владельца VPN
 # VPN-клиенты: их собственное соединение с сервером (часто TLS на 443) zapret
@@ -887,6 +939,9 @@ update_status() {
         echo "dns_degraded=$DNS_DEGRADED"
         echo "dns_alt=$([ -n "$DNS_ALT_UPS" ] && echo 1 || echo 0)"
         echo "ggc=$([ -n "$GGC_STATE" ] && echo on || echo off)"
+        echo "yt_dead=$([ "$YT_DEAD_STATE" = on ] && awk 'END {print NR}' "$YT_DEAD_FILE" 2>/dev/null || echo off)"
+        echo "yt_dead_hits=$(yt_dead_hits)"
+        echo "zwd=$ZAPRET_WATCHDOG"
         echo "phone_dns=$PHONE_DNS_ON"
         echo "dns_phone_enabled=$DNS_PHONE"
         echo "dnsproxy_enable=$DNSPROXY_ENABLE"
@@ -2670,6 +2725,8 @@ net_identity_reconcile() {
     NET_LABEL="$l"
     log "Сеть: ${NET_LABEL:-не определена}${NET_KEY:+ ($NET_KEY)}"
     ZAPRET_NET_DIRTY=1
+    # новая сеть — сторож проверит её стратегию через ~1.5 мин, а не через 15
+    [ -n "$NET_KEY" ] && ZWD_LAST=$(( $(date +%s) - ZAPRET_WATCHDOG_MIN * 60 + 90 ))
     phone_status_refresh
 }
 
@@ -2757,6 +2814,7 @@ zapret_rules_on() {
         fi
     done
     zapret_ggc_on
+    yt_dead_on
 }
 
 # --- YT_GGC_BLOCK: googlevideo.com на адреса не из сетей Google -> RST ----
@@ -2817,6 +2875,174 @@ zapret_ggc_hits() {
     $iptables -L "$CHAIN_ZAPRET_GGC" -v -x -n 2>/dev/null | awk '/REJECT/ {s += $1} END {print s + 0}'
 }
 
+# --- YT_DEAD_FAILFAST: мёртвые видеосерверы -> RST ---------------------------
+# Пометка — mangle OUTPUT (телефон, кроме root: это проверки самого модуля) и
+# FORWARD (раздача): там ClientHello ещё целый, nfqws его режет позже, в
+# POSTROUTING. Отбой — filter, как у GGC: RST на ClientHello к подсети из
+# списка. tun+ — мимо: через VPN сервер достижим.
+YT_MARK_OUT="! -o tun+ -m owner ! --uid-owner 0 $GGC_MATCH -j CONNMARK --set-xmark $YT_CTMARK/$YT_CTMARK"
+YT_MARK_FWD="! -o tun+ $GGC_MATCH -j CONNMARK --set-xmark $YT_CTMARK/$YT_CTMARK"
+
+yt_dead_hooks_off() {
+    local c _n
+    _n=0; while [ $_n -lt 8 ] && $iptables -t mangle -D OUTPUT $YT_MARK_OUT 2>/dev/null; do _n=$((_n + 1)); done
+    _n=0; while [ $_n -lt 8 ] && $iptables -t mangle -D FORWARD $YT_MARK_FWD 2>/dev/null; do _n=$((_n + 1)); done
+    for c in OUTPUT FORWARD; do
+        _n=0; while [ $_n -lt 8 ] && $iptables -D "$c" $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null; do _n=$((_n + 1)); done
+    done
+}
+
+yt_dead_on() {
+    yt_dead_hooks_off
+    if [ "$YT_DEAD_FAILFAST" != "1" ] || [ -z "$CONNTRACK_BIN" ]; then
+        yt_dead_off
+        return 0
+    fi
+    $iptables -N "$CHAIN_YT_DEAD" 2>/dev/null
+    YT_DEAD_SIG="-"
+    yt_dead_apply
+    $iptables -t mangle -I FORWARD 1 $YT_MARK_FWD 2>/dev/null
+    $iptables -I FORWARD 1 $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
+    if [ "$ZAPRET_PHONE" = "1" ]; then
+        $iptables -t mangle -I OUTPUT 1 $YT_MARK_OUT 2>/dev/null
+        $iptables -I OUTPUT 1 $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
+    fi
+    [ "$YT_DEAD_STATE" = "on" ] || log "zapret: отбой мёртвых видеосерверов YouTube включён (нет ответа ${YT_DEAD_AFTER}с -> /24 на $((YT_DEAD_TTL / 60)) мин)"
+    YT_DEAD_STATE="on"
+}
+
+yt_dead_off() {
+    yt_dead_hooks_off
+    $iptables -F "$CHAIN_YT_DEAD" 2>/dev/null; $iptables -X "$CHAIN_YT_DEAD" 2>/dev/null
+    rm -f "$YT_DEAD_FILE" "$YT_SEEN_FILE" "$YT_SEEN_FILE.new"
+    YT_DEAD_STATE=""; YT_DEAD_SIG=""; YT_STUCK=""
+}
+
+# цепочка отбоя = содержимое YT_DEAD_FILE (пересобираем только при изменении)
+yt_dead_apply() {
+    local sig="" net
+    for net in $(awk '{print $1}' "$YT_DEAD_FILE" 2>/dev/null | sort -u); do
+        case "$net" in *[!0-9./]*|'') continue ;; esac
+        sig="$sig $net"
+    done
+    [ "$sig" = "$YT_DEAD_SIG" ] && return 0
+    $iptables -F "$CHAIN_YT_DEAD" 2>/dev/null
+    $iptables -A "$CHAIN_YT_DEAD" -o tun+ -j RETURN 2>/dev/null
+    for net in $sig; do
+        $iptables -A "$CHAIN_YT_DEAD" -d "$net" -j REJECT --reject-with tcp-reset 2>/dev/null
+    done
+    YT_DEAD_SIG="$sig"
+}
+
+yt_dead_hits() {
+    [ "$YT_DEAD_STATE" = "on" ] || { echo 0; return; }
+    $iptables -L "$CHAIN_YT_DEAD" -v -x -n 2>/dev/null | awk '/REJECT/ {s += $1} END {print s + 0}'
+}
+
+# Раз в ~4с: соединения с googlevideo.com из conntrack. ClientHello ушёл
+# (>=600 байт), а от сервера дольше YT_DEAD_AFTER — ни байта данных:
+#   пакетов от сервера >=2 — ClientHello он подтвердил, но молчит -> мёртв;
+#   1 (только SYN-ACK) — ClientHello не дошёл: это DPI, а не сервер -> сторожу.
+yt_dead_scan() {
+    [ "$YT_DEAD_STATE" = "on" ] || return 0
+    local now out ip net n t keep="" changed=0 nlist
+    now=$(date +%s)
+    if [ -s "$YT_DEAD_FILE" ]; then
+        n=$(awk 'END {print NR}' "$YT_DEAD_FILE")
+        awk -v now="$now" '$2 > now' "$YT_DEAD_FILE" > "$YT_DEAD_FILE.tmp" 2>/dev/null && mv -f "$YT_DEAD_FILE.tmp" "$YT_DEAD_FILE"
+        [ "$(awk 'END {print NR}' "$YT_DEAD_FILE")" != "$n" ] && changed=1
+    fi
+    [ -f "$YT_SEEN_FILE" ] || : > "$YT_SEEN_FILE"
+    out=$($CONNTRACK_BIN -L -p tcp --mark "$YT_CTMARK/$YT_CTMARK" 2>/dev/null | awk -v now="$now" -v after="$YT_DEAD_AFTER" -v sf="$YT_SEEN_FILE" '
+        FILENAME == sf { seen[$1] = $2; rep[$1] = $4; next }
+        / ESTABLISHED / {
+            src = ""; dst = ""; rsrc = ""; sp = ""; po = -1; bo = -1; pr = -1; br = -1
+            for (i = 1; i <= NF; i++) {
+                split($i, kv, "=")
+                if (kv[1] == "src") { if (src == "") src = kv[2]; else if (rsrc == "") rsrc = kv[2] }
+                else if (kv[1] == "dst" && dst == "") dst = kv[2]
+                else if (kv[1] == "sport" && sp == "") sp = kv[2]
+                else if (kv[1] == "packets") { if (po < 0) po = kv[2]; else if (pr < 0) pr = kv[2] }
+                else if (kv[1] == "bytes") { if (bo < 0) bo = kv[2]; else if (br < 0) br = kv[2] }
+            }
+            # приложение -> AdGuard (REDIRECT): отвечает сам AdGuard, о сервере это ничего не говорит
+            if (rsrc != dst) next
+            # от сервера — только пустые пакеты (SYN-ACK 60 + ACK 52 байта): ни
+            # одного байта данных. Порог по объёму путал с мёртвыми простаивающие
+            # соединения с коротким ответом (возобновлённая TLS-сессия)
+            if (bo < 600 || pr < 1 || br > 60 * pr) next
+            k = src ":" sp ">" dst
+            kind = (pr <= 1) ? "stuck" : "dead"
+            t0 = (k in seen) ? seen[k] : now
+            d = (k in rep) ? rep[k] : 0
+            if (now - t0 >= after && d == 0) { print "HIT", kind, dst; d = 1 }
+            ns[k] = t0 " " kind " " d
+        }
+        END { for (k in ns) print k, ns[k] > (sf ".new") }
+    ' "$YT_SEEN_FILE" - 2>/dev/null)
+    if [ -f "$YT_SEEN_FILE.new" ]; then mv -f "$YT_SEEN_FILE.new" "$YT_SEEN_FILE"; else : > "$YT_SEEN_FILE"; fi
+
+    for ip in $(printf '%s\n' "$out" | awk '$1 == "HIT" && $2 == "dead" {print $3}' | sort -u); do
+        case "$ip" in *[!0-9.]*|'') continue ;; esac
+        net="${ip%.*}.0/24"
+        # уже открытые соединения телефона к нему — закрыть сразу: AdGuard и
+        # приложение переподключатся (с раздачи соединение доживёт до таймаута)
+        ss -K -tn dst "$ip" dport = :443 >/dev/null 2>&1
+        grep -q "^$net " "$YT_DEAD_FILE" 2>/dev/null && continue
+        [ "$now" -lt "$YT_DEAD_PAUSE" ] && continue
+        # лавина (>=6 подсетей за минуту) — не мёртвые серверы, а сломанный
+        # обход или связь: отбив всё подряд, оставим плеер без серверов
+        keep=""
+        for t in $YT_DEAD_ADDS; do [ $((now - t)) -lt 60 ] && keep="$keep $t"; done
+        YT_DEAD_ADDS="$keep"
+        if [ "$(echo $YT_DEAD_ADDS | wc -w)" -ge 6 ]; then
+            YT_DEAD_PAUSE=$((now + 300))
+            log "WARNING: YouTube: слишком много «мёртвых» видеосерверов подряд — похоже, сломан обход или связь; 5 мин новые не отбиваю"
+            continue
+        fi
+        nlist=$(awk 'END {print NR}' "$YT_DEAD_FILE" 2>/dev/null)
+        [ "${nlist:-0}" -ge "$YT_DEAD_MAX" ] && continue
+        echo "$net $((now + YT_DEAD_TTL)) $ip" >> "$YT_DEAD_FILE"
+        YT_DEAD_ADDS="$YT_DEAD_ADDS $now"
+        changed=1
+        log "YouTube: видеосервер $ip принял ClientHello и молчит ${YT_DEAD_AFTER}с — отбиваю $net на $((YT_DEAD_TTL / 60)) мин"
+    done
+
+    # застрявшие на ClientHello — сигнал сторожу (держим последние 2 мин)
+    keep=""
+    for t in $YT_STUCK; do [ $((now - t)) -lt 120 ] && keep="$keep $t"; done
+    n=$(printf '%s\n' "$out" | awk '$1 == "HIT" && $2 == "stuck"' | awk 'END {print NR}')
+    while [ "$n" -gt 0 ]; do keep="$keep $now"; n=$((n - 1)); done
+    YT_STUCK="$keep"
+
+    if [ "$changed" = 1 ]; then
+        yt_dead_apply
+        phone_status_refresh
+    fi
+}
+
+# --- сторож обхода: zapret/scan.sh check в фоне --------------------------
+zapret_watchdog() {
+    local now due n pid
+    [ "$ZAPRET_WATCHDOG" = "1" ] && [ "$ZAPRET_STATE" = "on" ] && [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] || return 0
+    vpn_up_now && return 0
+    now=$(date +%s)
+    # первая проверка — через интервал после старта (сеть успеет устояться)
+    [ "$ZWD_LAST" -eq 0 ] && { ZWD_LAST=$now; return 0; }
+    due=$((ZWD_LAST + ZAPRET_WATCHDOG_MIN * 60))
+    n=$(echo $YT_STUCK | wc -w)
+    if [ "$now" -lt "$due" ]; then
+        # видео застревает на ClientHello — раньше срока, но не чаще раза в 3 мин
+        [ "$n" -ge 3 ] && [ $((now - ZWD_LAST)) -ge 180 ] || return 0
+        log "zapret: $n соединений YouTube застряли на ClientHello — сторож проверяет стратегию"
+    fi
+    pid=$(cat "$ZSCAN_PID_FILE" 2>/dev/null)
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && return 0   # уже идёт подбор/проверка
+    ZWD_LAST=$now
+    YT_STUCK=""
+    setsid sh "$ZAPRET_DIR/scan.sh" check </dev/null >/dev/null 2>&1 &
+}
+
 zapret_rules_off() {
     local t _n
     for t in "$iptables" "$ip6tables"; do
@@ -2828,6 +3054,7 @@ zapret_rules_off() {
         $t -F "$CHAIN_ZAPRET_QUIC" 2>/dev/null;         $t -X "$CHAIN_ZAPRET_QUIC" 2>/dev/null
     done
     zapret_ggc_off
+    yt_dead_off
 }
 
 zapret_down() {
@@ -2907,7 +3134,8 @@ zapret_reconcile() {
         ZAPRET_HOOK_TICK=0
         if ! $iptables -t mangle -C POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null || \
            { [ "$ZAPRET_QUIC_BLOCK" = "1" ] && ! $iptables -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; } || \
-           { [ -n "$GGC_STATE" ] && ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null; }; then
+           { [ -n "$GGC_STATE" ] && ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null; } || \
+           { [ "$YT_DEAD_STATE" = "on" ] && ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null; }; then
             _hooks_bad=1
         fi
     fi
@@ -3903,7 +4131,7 @@ handle_change() {
 CONF_GRP_DNS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS"
 CONF_GRP_KS="KILL_SWITCH KILL_SWITCH_STRICT"
 CONF_GRP_QUIC="QUIC_BLOCK_APPS"
-CONF_GRP_ZAPRET="ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET YT_GGC_BLOCK"
+CONF_GRP_ZAPRET="ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET YT_GGC_BLOCK YT_DEAD_FAILFAST"
 _conf_grp_sig() {   # $1 = имя переменной-результата, дальше ключи
     local _v="$1" _k _o=""; shift
     for _k in "$@"; do eval "_o=\"\$_o|\$$_k\""; done
@@ -4030,6 +4258,8 @@ monitor_loop() {
             bpf_offload_detach $LAST_TETHER_IFACES $LAST_WAN_IFACE
         fi
         zapret_reconcile
+        [ $((_loop_count % 2)) -eq 1 ] && yt_dead_scan
+        zapret_watchdog
         _loop_count=$(( _loop_count + 1 ))
     done
 }
@@ -4044,11 +4274,11 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.17.1 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.18 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
-log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/per_net=$ZAPRET_PER_NET META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
+log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/per_net=$ZAPRET_PER_NET YT_DEAD=$YT_DEAD_FAILFAST WATCHDOG=$ZAPRET_WATCHDOG/${ZAPRET_WATCHDOG_MIN}m META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
 
 disable_hw_offload
 

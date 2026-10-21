@@ -3,6 +3,9 @@
 # Подбор стратегии nfqws (генератор + проверка на живом канале).
 #
 #   scan.sh quick|full "сайт1 сайт2 ..."
+#   scan.sh check            сторож (демон, раз в ~15 мин): работает ли
+#                            стратегия сети; нет — прежние рабочие из истории,
+#                            потом быстрый подбор. Журнал: $EVENTS.
 #
 # Проверяются только запросы самого сканера (root, curl --interface <WAN>)
 # через отдельную очередь NFQUEUE: трафик телефона и раздачи не трогается.
@@ -19,8 +22,9 @@ ZDIR="$MODDIR/zapret"
 OUT=/data/local/tmp/vpn_tether_zscan
 Q=203
 MODE="${1:-quick}"
+MODE0="$MODE"
 SITES="$2"
-[ -n "$SITES" ] || SITES="www.youtube.com i.ytimg.com discord.com gateway.discord.gg x.com www.facebook.com rutracker.org www.linkedin.com ya.ru www.google.com"
+[ -n "$SITES" ] || SITES="www.youtube.com i.ytimg.com youtubei.googleapis.com discord.com gateway.discord.gg x.com www.facebook.com rutracker.org www.linkedin.com ya.ru www.google.com"
 # контрольные сайты без блокировок: по ним отличаем "заблокировано" от "нет связи"
 for _c in ya.ru www.google.com; do case " $SITES " in *" $_c "*) ;; *) SITES="$SITES $_c" ;; esac; done
 CA=/apex/com.android.conscrypt/cacerts
@@ -29,6 +33,9 @@ case "$(uname -m)" in aarch64|arm64) NQ="$MODDIR/bin/nfqws-arm64" ;; *) NQ="$MOD
 WAN=$(sed -n 's/^wan=//p' "$MODDIR/status" 2>/dev/null)
 IPT="iptables -w 2"
 TMP="$OUT.tmp"
+EVENTS=/data/adb/vpn_tether_zapret_events
+HIST=/data/adb/vpn_tether_zapret_hist
+case "$MODE" in quick|full|check) ;; *) echo "scan.sh: режим quick|full|check" >&2; exit 2 ;; esac
 
 st() { # обновить файл состояния: st key=val ...
     local k
@@ -37,6 +44,18 @@ st() { # обновить файл состояния: st key=val ...
         echo "state=$S_state"; echo "mode=$MODE"; echo "done=$S_done"; echo "total=$S_total"
         echo "stage=$S_stage"; echo "msg=$S_msg"; echo "blocked=$S_blocked"; echo "started=$S_started"
     } > "$OUT.status.tmp" && mv -f "$OUT.status.tmp" "$OUT.status"
+}
+
+# итог последней проверки сторожа — для WebUI: "ЧЧ:ММ|текст"
+wd_last() {
+    printf '%s|%s\n' "$(date '+%H:%M')" "$*" > "$OUT.wd"
+}
+
+# журнал сторожа/подбора: "дата|сеть|событие" (держим последние 300 строк)
+event() {
+    printf '%s|%s|%s\n' "$(date '+%Y-%m-%d %H:%M')" "${NETID#*"|"}" "$*" | tr -d '\r' >> "$EVENTS"
+    [ "$(awk 'END {print NR}' "$EVENTS" 2>/dev/null)" -gt 400 ] && { tail -n 300 "$EVENTS" > "$EVENTS.tmp" && mv -f "$EVENTS.tmp" "$EVENTS"; }
+    chmod 600 "$EVENTS" 2>/dev/null
 }
 
 RULE="-o $WAN -m owner --uid-owner 0 -p tcp --dport 443 -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
@@ -52,6 +71,7 @@ cleanup() {
 on_exit() {
     cleanup
     [ "$S_state" = "running" ] && st state=stopped msg="остановлено"
+    [ "$MODE0" = check ] && [ "$S_state" != done ] && wd_last "не проверил: ${S_msg:-$S_state}"
 }
 trap on_exit EXIT
 trap 'exit 0' INT TERM
@@ -84,10 +104,19 @@ done
 [ -s "$TMP/ips" ] || { st state=error msg="не удалось узнать адреса сайтов"; exit 1; }
 NS=$(wc -l < "$TMP/ips")
 
+# Большой ClientHello (постквантовый ключ, 2 TCP-сегмента) — как у Chrome и
+# AdGuard. 21.10 стратегия открывала 10/10 обычным curl и пропускала половину
+# таких. Сайт засчитывается, только если открылся обоими. Не умеет curl —
+# проверяем только обычным.
+BIG=""
+if curl -s -o /dev/null -m 6 --curves X25519Kyber768Draft00:X25519 --interface "$WAN" --capath "$CA" https://ya.ru/ 2>/dev/null; then
+    BIG="X25519Kyber768Draft00:X25519"
+fi
+
 # test_sites -> "ok_count avg_ms" и $TMP/res (h ok|rc)
 test_sites() {
     local pids=""
-    rm -f "$TMP"/r.*
+    rm -f "$TMP"/r.* "$TMP"/b.*
     while read -r h ip; do
         (
             r=$(curl -s -o /dev/null -m 6 --interface "$WAN" --capath "$CA" --resolve "$h:443:$ip" \
@@ -100,9 +129,25 @@ test_sites() {
             if [ -n "$1" ] && [ "$1" != "000" ]; then echo "ok $2" > "$TMP/r.$h"; else echo "x$rc 0" > "$TMP/r.$h"; fi
         ) &
         pids="$pids $!"
+        if [ -n "$BIG" ]; then
+            (
+                c=$(curl -s -o /dev/null -m 6 --curves "$BIG" --interface "$WAN" --capath "$CA" --resolve "$h:443:$ip" \
+                    -w '%{http_code}' "https://$h/" 2>/dev/null)
+                rc=$?
+                if [ -n "$c" ] && [ "$c" != "000" ]; then echo ok > "$TMP/b.$h"; else echo "xb$rc" > "$TMP/b.$h"; fi
+            ) &
+            pids="$pids $!"
+        fi
     done < "$TMP/ips"
     # ждём только свои curl: голый wait ждал бы и nfqws (он тоже наш потомок)
     wait $pids
+    # большой ClientHello не прошёл — сайт не открыт
+    if [ -n "$BIG" ]; then
+        while read -r h ip; do
+            v=""; read -r v _ < "$TMP/b.$h" 2>/dev/null
+            [ "$v" = ok ] || echo "${v:-xb} 0" > "$TMP/r.$h"
+        done < "$TMP/ips"
+    fi
 }
 
 # --- исходное состояние: что вообще заблокировано
@@ -115,7 +160,11 @@ while read -r h ip; do
 done < "$TMP/ips"
 st blocked="$(echo $BLOCKED)"
 [ -n "$BASE_OK" ] || { st state=error msg="через $WAN не открылся ни один сайт, даже без блокировок — нет интернета или сеть сменилась"; exit 1; }
-[ -n "$BLOCKED" ] || { st state=done stage="готово" msg="ни один сайт из набора не заблокирован — подбирать нечего"; exit 0; }
+if [ -z "$BLOCKED" ]; then
+    [ "$MODE" = check ] && wd_last "ничего не заблокировано"
+    st state=done stage="готово" msg="ни один сайт из набора не заблокирован — подбирать нечего"
+    exit 0
+fi
 
 # основной zapret на запросы сканера не влияет и с ним: правило сканера стоит
 # в POSTROUTING первым, вердикт NFQUEUE завершает обход mangle
@@ -157,7 +206,7 @@ best() { # best N [этап]
     grep "|${2:-}" "$OUT.results" | awk -F'|' '$3 == 0' | sort -t'|' -k1,1nr -k4,4n | head -n "$1" | cut -d'|' -f5
 }
 
-POS_A="1 2 midsld sniext+1 1,midsld host+1"
+POS_A="1 2 midsld sniext+1 1,midsld host+1 1,host+1,midsld"
 FOOL_ALL="md5sig badseq badsum ts datanoack ttl3 ttl5 autottl"
 fool_arg() {
     case "$1" in
@@ -168,13 +217,65 @@ fool_arg() {
 }
 FAKE="--dpi-desync-fake-tls=@G"
 
+# --- сторож: текущая стратегия -> прежние из истории -> быстрый подбор ----
+WD=0
+if [ "$MODE" = "check" ]; then
+    WD=1
+    NB=$(echo $BLOCKED | wc -w)
+    # прошла: ничего не сломала и открыла все заблокированные (из 4+ — все, кроме одного)
+    passed() {
+        run_strat "$1" "$2"
+        tail -n 1 "$OUT.results" | awk -F'|' -v nb="$NB" \
+            '{ o = $1 - ($2 - nb); need = (nb >= 4) ? nb - 1 : nb; exit !($3 == 0 && o >= need) }'
+    }
+    # аргументы текущей — с пометками @G/@Q, как их хранит файл сетей
+    CUR=$(sh "$MODDIR/service.sh" --zapret-strategy "${NETID%%"|"*}" 2>/dev/null | \
+        sed "s#@$ZDIR/tls_clienthello_www_google_com.bin#@G#g; s#@$ZDIR/quic_initial_www_google_com.bin#@Q#g")
+    S_total=2
+    st stage="проверяю стратегию сети"
+    if [ -n "$CUR" ] && { passed "$CUR" "текущая" || passed "$CUR" "текущая"; }; then
+        last=$(awk -F'|' 'END {print $3}' "$EVENTS" 2>/dev/null)
+        [ "$last" = "сторож: стратегия работает" ] || event "сторож: стратегия работает"
+        wd_last "работает"
+        st state=done stage="готово" msg="текущая стратегия работает"
+        exit 0
+    fi
+    event "сторож: стратегия не открывает заблокированные ($(echo $BLOCKED)) — ищу замену"
+    # прежние стратегии этой сети, новые первыми (только свои параметры: custom)
+    K="${NETID%%"|"*}" awk -F'|' '$1 == ENVIRON["K"] && $2 == "custom" && $3 != "" { l[++n] = $3 } END { for (i = n; i >= 1; i--) print l[i] }' \
+        "$HIST" 2>/dev/null > "$TMP/hist"
+    S_total=$((S_done + $(wc -l < "$TMP/hist")))
+    st stage="пробую прежние стратегии"
+    while IFS= read -r a; do
+        [ -n "$a" ] && [ "$a" != "$CUR" ] || continue
+        if passed "$a" "история" && passed "$a" "история"; then
+            if [ "$(sh "$ZDIR/netid.sh" "$WAN" 2>/dev/null | head -1)" != "$NETID" ]; then
+                wd_last "сеть сменилась во время проверки"
+                st state=done stage="готово" msg="сеть сменилась во время проверки — не запоминаю"
+                exit 0
+            fi
+            r=$(sh "$MODDIR/webctl.sh" znet-set custom "$a" "сторож: прежняя рабочая" 2>/dev/null)
+            event "сторож: вернул прежнюю стратегию: $a"
+            wd_last "починил: прежняя стратегия"
+            st state=done stage="готово" msg="вернул прежнюю рабочую стратегию"
+            exit 0
+        fi
+    done < "$TMP/hist"
+    event "сторож: прежние не подошли — быстрый подбор"
+    MODE=quick
+fi
+
 if [ "$MODE" = "quick" ]; then
     # проверенные шаблоны (autottl убран: ломал обычные сайты во всех 6 проверенных сетях)
-    S_total=14
+    S_total=18
     st stage="быстрый подбор"
     while IFS= read -r a; do
         [ -n "$a" ] && run_strat "$a" "быстрый"
     done <<EOF
+--dpi-desync=multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1
+--dpi-desync=multidisorder --dpi-desync-split-pos=1,host+1,midsld
+--dpi-desync=multisplit --dpi-desync-split-pos=1,midsld --dpi-desync-split-seqovl=1
+--dpi-desync=fakedsplit --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=badseq
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld $FAKE
 --dpi-desync=fake,fakeddisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld $FAKE
@@ -191,7 +292,7 @@ if [ "$MODE" = "quick" ]; then
 --dpi-desync=multisplit --dpi-desync-split-seqovl=652 --dpi-desync-split-pos=2 --dpi-desync-split-seqovl-pattern=@G
 EOF
 else
-    S_total=$(( 12 + 8 + 26 + 9 ))
+    S_total=$(( 14 + 8 + 34 + 4 + 9 ))
     # A: только разрез, без подделок
     st stage="1/4 разрез без подделок"
     for m in multisplit multidisorder; do
@@ -208,11 +309,17 @@ else
     st stage="3/4 подделка + разрез ($(echo $F2))"
     for f in $F2; do
         for m in multisplit multidisorder fakedsplit fakeddisorder; do
-            for p in 1 midsld 1,midsld; do
+            for p in 1 midsld 1,midsld 1,host+1,midsld; do
                 run_strat "--dpi-desync=fake,$m $(fool_arg $f) --dpi-desync-split-pos=$p $FAKE" "3"
             done
         done
         run_strat "--dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=www.google.com $(fool_arg $f)" "3"
+    done
+    # C2: разрез с наложением 1 байта (seqovl) — 21.10 YOTA: только он и
+    # multidisorder с позиции 1 проходили с ClientHello Chrome/AdGuard
+    st stage="3/4 разрез с наложением"
+    for p in 1,midsld 1,host+1,midsld 2,midsld host+1,midsld; do
+        run_strat "--dpi-desync=multisplit --dpi-desync-split-pos=$p --dpi-desync-split-seqovl=1" "3"
     done
     # D: лучшие 3 — с другими вариантами поддельного ClientHello и повторами
     st stage="4/4 варианты подделки"
@@ -271,5 +378,11 @@ elif [ -z "$BEST" ]; then
     MSG="ни одна стратегия не открыла заблокированные сайты без поломок"
 fi
 
+if [ "$WD" = 1 ]; then
+    event "сторож: подбор — ${MSG:-готово}"
+    case "$MSG" in лучшая*) wd_last "починил: подбор" ;; *) wd_last "не починил: ${MSG:-нет стратегии}" ;; esac
+else
+    event "подбор ($MODE): ${MSG:-готово}"
+fi
 S_state=done
 st stage="готово" msg="$MSG"
