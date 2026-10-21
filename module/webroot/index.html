@@ -287,7 +287,7 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Отбивать мёртвые видеосерверы</div>
-      <div class="s">Если сервер YouTube принял соединение и молчит, его подсеть на 20 минут получает отказ, и плеер сразу берёт другой сервер, а не ждёт ~30 секунд. Список собирается сам.</div></div>
+      <div class="s">Если сервер YouTube принял соединение и молчит, он на 10 минут получает отказ (два мёртвых в одной подсети — вся подсеть), и плеер сразу берёт другой сервер, а не ждёт ~30 секунд. Раз в минуту отбитые перепроверяются: ожил — отбой снимается.</div></div>
     <label class="sw"><input type="checkbox" data-key="YT_DEAD_FAILFAST"><span></span></label>
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
@@ -600,7 +600,7 @@ function renderStatus(s) {
     if (s.ggc === 'on') h += kvRow('YouTube', 'мимо кэша оператора', 'green');
     if (s.yt_dead && s.yt_dead !== 'off') {
       const n = +s.yt_dead, hits = +s.yt_dead_hits || 0;
-      h += kvRow('Мёртвые серверы', (n ? 'отбиваю подсетей: ' + n : 'сейчас нет') + (hits ? ' · отбоев: ' + hits : ''), n ? 'amber' : 'green');
+      h += kvRow('Мёртвые серверы', (n ? 'в отбое: ' + n : 'сейчас нет') + (hits ? ' · отбоев: ' + hits : ''), n ? 'amber' : 'green');
     }
     if (s.zwd === '1') {
       const w = (s.zwd_last || '').split('|'), t = w[1] || '';

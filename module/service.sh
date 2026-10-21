@@ -307,6 +307,13 @@
 #   dns.semqka.xyz не взяли: по DoH отдаёт настоящие адреса, а обычный DNS
 #   ведёт на тот же прокси, что not-a-dns (не независимый запасной).
 # ============================================================================
+# v2.24 — мёртвые видеосерверы точнее (22.10, шортсы вставали посреди ролика):
+#   - отбой — конкретного сервера (/32); вся /24 — только когда в ней умерли
+#     два разных. 00:55: /24 74.125.110 отбита из-за мёртвого .7, а живой .10
+#     плеер штурмовал 58 раз за 30 с, пока ролик стоял;
+#   - раз в ~минуту отбитые перепроверяются в фоне (рукопожатие с нейтральным
+#     именем мимо обхода): ожил — отбой снимается сразу. Срок отбоя 20 -> 10 мин.
+# ============================================================================
 # ============================================================================
 
 umask 022
@@ -432,8 +439,8 @@ YT_GGC_BLOCK=0
 # на другой сервер. Только мимо VPN и пока zapret включён, только IPv4.
 YT_DEAD_FAILFAST=1
 YT_DEAD_AFTER=6         # сек без ответа сервера после ClientHello = мёртв
-YT_DEAD_TTL=1200        # сек держать подсеть в отбое
-YT_DEAD_MAX=16          # больше подсетей не держим
+YT_DEAD_TTL=600         # сек держать сервер/подсеть в отбое (ожил раньше — снимаем)
+YT_DEAD_MAX=16          # больше записей не держим
 # Сторож обхода (2.18): раз в ZAPRET_WATCHDOG_MIN минут (и сразу, если
 # видео-соединения стали застревать на ClientHello) zapret/scan.sh check
 # проверяет стратегию сети; сломалась — прежние рабочие, затем быстрый
@@ -862,6 +869,8 @@ YT_CTMARK=0x10000000
 YT_DEAD_FILE="/data/local/tmp/vpn_tether_ytdead"   # "подсеть/24 до_когда(epoch) ip"
 YT_SEEN_FILE="/data/local/tmp/vpn_tether_ytseen"   # кандидаты: "кортеж впервые вид учтён"
 YT_GRANGES="/data/local/tmp/vpn_tether_ytgr"       # сети Google числами: "начало конец"
+YT_RECHECK_FILE="/data/local/tmp/vpn_tether_ytrecheck"  # фоновая перепроверка отбитых
+YT_RECHECK_PID=""
 YT_DEAD_STATE=""        # "" | on
 YT_DEAD_SIG=""          # содержимое цепочки отбоя (чтобы не пересобирать зря)
 YT_DEAD_TICK=0
@@ -3077,7 +3086,8 @@ yt_dead_on() {
 yt_dead_off() {
     yt_dead_hooks_off
     $iptables -F "$CHAIN_YT_DEAD" 2>/dev/null; $iptables -X "$CHAIN_YT_DEAD" 2>/dev/null
-    rm -f "$YT_DEAD_FILE" "$YT_SEEN_FILE" "$YT_SEEN_FILE.new" "$YT_GRANGES"
+    [ -n "$YT_RECHECK_PID" ] && kill "$YT_RECHECK_PID" 2>/dev/null; YT_RECHECK_PID=""
+    rm -f "$YT_DEAD_FILE" "$YT_SEEN_FILE" "$YT_SEEN_FILE.new" "$YT_GRANGES" "$YT_RECHECK_FILE".*
     YT_DEAD_STATE=""; YT_DEAD_SIG=""; YT_STUCK=""
 }
 
@@ -3159,11 +3169,11 @@ yt_dead_scan() {
 
     for ip in $(printf '%s\n' "$out" | awk '$1 == "HIT" && $2 == "dead" {print $3}' | sort -u); do
         case "$ip" in *[!0-9.]*|'') continue ;; esac
-        net="${ip%.*}.0/24"
+        net="$ip/32"; n24="${ip%.*}.0/24"
         # уже открытые соединения телефона к нему — закрыть сразу: AdGuard и
         # приложение переподключатся (с раздачи соединение доживёт до таймаута)
         ss -K -tn dst "$ip" dport = :443 >/dev/null 2>&1
-        grep -q "^$net " "$YT_DEAD_FILE" 2>/dev/null && continue
+        grep -q -e "^$net " -e "^$n24 " "$YT_DEAD_FILE" 2>/dev/null && continue
         [ "$now" -lt "$YT_DEAD_PAUSE" ] && continue
         # лавина (>=6 подсетей за минуту) — не мёртвые серверы, а сломанный
         # обход или связь: отбив всё подряд, оставим плеер без серверов
@@ -3177,10 +3187,19 @@ yt_dead_scan() {
         fi
         nlist=$(awk 'END {print NR}' "$YT_DEAD_FILE" 2>/dev/null)
         [ "${nlist:-0}" -ge "$YT_DEAD_MAX" ] && continue
-        echo "$net $((now + YT_DEAD_TTL)) $ip" >> "$YT_DEAD_FILE"
+        # второй мёртвый в той же /24 — отбиваем подсеть целиком (в записи —
+        # все замеченные адреса: по ним перепроверка поймёт, ожила ли она)
+        sib=$(awk -v p="${ip%.*}." 'index($1, p) == 1 && $1 ~ /\/32$/ { sub(/\/32$/, "", $1); printf "%s,", $1 }' "$YT_DEAD_FILE" 2>/dev/null)
+        if [ -n "$sib" ]; then
+            awk -v p="${ip%.*}." '!(index($1, p) == 1 && $1 ~ /\/32$/)' "$YT_DEAD_FILE" > "$YT_DEAD_FILE.tmp" && mv -f "$YT_DEAD_FILE.tmp" "$YT_DEAD_FILE"
+            echo "$n24 $((now + YT_DEAD_TTL)) $sib$ip" >> "$YT_DEAD_FILE"
+            log "YouTube: видеосервер $ip молчит после ClientHello — в $n24 это уже второй (${sib%,}), отбиваю подсеть на $((YT_DEAD_TTL / 60)) мин"
+        else
+            echo "$net $((now + YT_DEAD_TTL)) $ip" >> "$YT_DEAD_FILE"
+            log "YouTube: видеосервер $ip принял ClientHello и молчит ${YT_DEAD_AFTER}с — отбиваю его на $((YT_DEAD_TTL / 60)) мин"
+        fi
         YT_DEAD_ADDS="$YT_DEAD_ADDS $now"
         changed=1
-        log "YouTube: видеосервер $ip принял ClientHello и молчит ${YT_DEAD_AFTER}с — отбиваю $net на $((YT_DEAD_TTL / 60)) мин"
     done
 
     # застрявшие на ClientHello — сигнал сторожу (держим последние 2 мин)
@@ -3194,6 +3213,47 @@ yt_dead_scan() {
         yt_dead_apply
         phone_status_refresh
     fi
+}
+
+# Раз в ~минуту: отбитые (старше минуты) перепроверяются в фоне — TLS-рукопожатие
+# с нейтральным именем (www.google.com) мимо обхода и AdGuard (группа dnsproxy):
+# жив ли сам адрес. Ожил (у подсети — хоть один из её адресов) — отбой снимаем,
+# не дожидаясь срока. Результат забираем на следующем вызове: цикл не ждёт curl.
+yt_dead_recheck() {
+    [ "$YT_DEAD_STATE" = "on" ] || return 0
+    local net res now changed=0
+    if [ -f "$YT_RECHECK_FILE.done" ]; then
+        while read -r net res; do
+            [ "$res" = ok ] || continue
+            case "$net" in *[!0-9./]*|'') continue ;; esac
+            grep -q "^$net " "$YT_DEAD_FILE" 2>/dev/null || continue
+            N="$net" awk '$1 != ENVIRON["N"]' "$YT_DEAD_FILE" > "$YT_DEAD_FILE.tmp" && mv -f "$YT_DEAD_FILE.tmp" "$YT_DEAD_FILE"
+            changed=1
+            log "YouTube: ${net%/32} снова отвечает — снимаю отбой"
+        done < "$YT_RECHECK_FILE.done"
+        rm -f "$YT_RECHECK_FILE.done"
+        if [ "$changed" = 1 ]; then yt_dead_apply; phone_status_refresh; fi
+    fi
+    [ -s "$YT_DEAD_FILE" ] && [ -n "$LAST_WAN_IFACE" ] || return 0
+    [ -n "$YT_RECHECK_PID" ] && kill -0 "$YT_RECHECK_PID" 2>/dev/null && return 0
+    now=$(date +%s)
+    # только добавленные больше минуты назад (свежие проверять рано)
+    awk -v now="$now" -v ttl="$YT_DEAD_TTL" '$2 - ttl + 60 <= now' "$YT_DEAD_FILE" > "$YT_RECHECK_FILE.in" 2>/dev/null
+    [ -s "$YT_RECHECK_FILE.in" ] || return 0
+    (
+        while read -r net _ ips; do
+            res=dead
+            for ip in $(echo "$ips" | tr ',' ' '); do
+                case "$ip" in *[!0-9.]*|'') continue ;; esac
+                cmd="curl -s -k -o /dev/null -m 3 --interface $LAST_WAN_IFACE --connect-to www.google.com:443:$ip:443 -w '%{http_code}' https://www.google.com/generate_204"
+                if [ "$DNSPROXY_SU_G" = "1" ]; then c=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else c=$(eval "$cmd" 2>/dev/null); fi
+                [ "$c" = 204 ] && { res=ok; break; }
+            done
+            echo "$net $res"
+        done < "$YT_RECHECK_FILE.in" > "$YT_RECHECK_FILE.tmp"
+        mv -f "$YT_RECHECK_FILE.tmp" "$YT_RECHECK_FILE.done"
+    ) </dev/null >/dev/null 2>&1 &
+    YT_RECHECK_PID=$!
 }
 
 # --- сторож обхода: zapret/scan.sh check в фоне --------------------------
@@ -4579,6 +4639,7 @@ monitor_loop() {
         fi
         zapret_reconcile
         [ $((_loop_count % 2)) -eq 1 ] && yt_dead_scan
+        [ $((_loop_count % 30)) -eq 17 ] && yt_dead_recheck
         zapret_watchdog
         _loop_count=$(( _loop_count + 1 ))
     done
@@ -4594,7 +4655,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.23 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.24 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
