@@ -62,7 +62,7 @@
 # ============================================================================
 # v3.9.6-hybrid.5 — свой DNS для раздачи через dnsproxy (AdGuard, bin/):
 #   - direct: DNS клиентов (любой :53) -> REDIRECT на локальный dnsproxy ->
-#     DoH/DoT (по умолчанию dns.comss.one), с кэшем и шифрованными фолбэками.
+#     DoH/DoT (по умолчанию dns.wlrus.cfd), с кэшем и шифрованными фолбэками.
 #     Оператор видит только TLS до DNS-сервера, а не сами запросы.
 #   - VPN: по умолчанию как раньше (DNAT в DNS VPN). Опционально cache/doh —
 #     только если трафик root реально идёт в tun (иначе DNS утёк бы мимо VPN).
@@ -300,6 +300,13 @@
 #   - WebUI: «Диагностика сети» — подмена DNS, обрыв на ~16 КБ у зарубежных
 #     хостингов, белые списки (SNI), Telegram.
 # ============================================================================
+# v2.23 — DNS по умолчанию: Wlrus -> not-a-dns.quic.best -> comss ->
+#   zapret.moe -> Google -> Cloudflare. 22.10 с YOTA все четыре первых отдают
+#   для ChatGPT/Gemini/Claude адреса СВОИХ прокси (отказ одного не тянет за
+#   собой остальные); Wlrus — самый быстрый (~360 мс), Instagram через Европу.
+#   dns.semqka.xyz не взяли: по DoH отдаёт настоящие адреса, а обычный DNS
+#   ведёт на тот же прокси, что not-a-dns (не независимый запасной).
+# ============================================================================
 # ============================================================================
 
 umask 022
@@ -343,16 +350,17 @@ DNS_VPN="dnat"         # VPN-режим:    dnat  = DNAT в DNS из VPN (как
                        #               doh   = DNS_VPN_UPSTREAMS через туннель + кэш
                        #                       (замер: ~200мс вместо ~550мс, кэш ~5мс)
 # Основные апстримы (DoH https://, DoT tls://, DoQ quic://, обычный ip:53)
-DNS_UPSTREAMS="https://dns.comss.one/dns-query"
+DNS_UPSTREAMS="https://dns.wlrus.cfd/dns-query"
 # Если основные недоступны. Только шифрованные — иначе запросы ушли бы
 # оператору открытым текстом.
-# Первый, которого нет среди основных, — замена основному: comss <-> zapret.moe
-# (тот же принцип); при сбое основным становится только он, остальные — его
-# запасные. Google/Cloudflare — последние: гео-блок они не обходят.
-DNS_FALLBACKS="https://dns.zapret.moe/dns-query https://dns.comss.one/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
+# Первый, которого нет среди основных, — замена основному; при сбое основным
+# становится только он, остальные — его запасные (по порядку). not-a-dns,
+# comss и zapret.moe, как и Wlrus, обходят гео-блок. Google/Cloudflare —
+# последние: гео-блок не обходят, но в крайнем случае DNS не уйдёт к оператору.
+DNS_FALLBACKS="https://not-a-dns.quic.best/dns-query https://dns.comss.one/dns-query https://dns.zapret.moe/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Апстримы для DNS_VPN=doh (идут через туннель)
 DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
-# Чем резолвить имена самих апстримов (dns.comss.one). Подмена тут не
+# Чем резолвить имена самих апстримов (dns.wlrus.cfd и т.д.). Подмена тут не
 # страшна: TLS-сертификат апстрима всё равно проверяется.
 DNS_BOOTSTRAP="77.88.8.8:53 1.1.1.1:53 8.8.8.8:53"
 DNSPROXY_PORT=5354
@@ -4586,7 +4594,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.22 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.23 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
