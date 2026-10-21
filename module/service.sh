@@ -273,6 +273,16 @@
 #   Другие модули, которые тоже трогают TTL/раздачу, ищутся по содержимому
 #   (не по имени) — WebUI и лог предлагают отключить/удалить лишний.
 # ============================================================================
+# v2.21 — DNS и умолчания:
+#   - comss молчит -> сначала dns.zapret.moe (тот же принцип: ChatGPT/Gemini/
+#     Claude отдаёт через свой прокси, 21.10: 83.217.211.149), и только он
+#     основным: несколько -u dnsproxy опрашивает по очереди (load balance), и
+#     часть ответов шла бы от Google без "разблокирующих" адресов. Google и
+#     Cloudflare — его запасные (-f).
+#   - По умолчанию: обход DPI включён, Meta "как из Европы" включено, строгий
+#     kill-switch выключен (VPN не поднят — раздача сама уходит напрямую).
+#   - play.google.com во встроенном списке zapret (без обхода TLS глохнет).
+# ============================================================================
 # ============================================================================
 
 umask 022
@@ -294,9 +304,10 @@ KILL_SWITCH=1          # 1 = fail-closed: если правила VPN не вс�
                        #     трафик клиентов ДРОПАЕТСЯ, а не уходит напрямую.
                        # 0 = старое поведение (при сбое клиент уходит в direct
                        #     мимо VPN — то самое, из-за чего ноут светил IP).
-KILL_SWITCH_STRICT=1   # 1 = выбран режим VPN, а VPN не поднят -> клиенты без сети
+KILL_SWITCH_STRICT=0   # 1 = выбран режим VPN, а VPN не поднят -> клиенты без сети
                        #     (до появления VPN или ручного переключения в direct).
-                       # 0 = как в 3.9.4: после 3 промахов уходим в direct.
+                       # 0 = как в 3.9.4: после 3 промахов уходим в direct
+                       #     (по умолчанию с 2.21).
 RULE_WATCHDOG=1        # 1 = каждые ~6с проверять, что ip rule/цепочки живы,
                        #     и пересобирать их, если netd их снёс.
 
@@ -318,7 +329,9 @@ DNS_VPN="dnat"         # VPN-режим:    dnat  = DNAT в DNS из VPN (как
 DNS_UPSTREAMS="https://dns.comss.one/dns-query"
 # Если основные недоступны. Только шифрованные — иначе запросы ушли бы
 # оператору открытым текстом.
-DNS_FALLBACKS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
+# Первый — замена comss (dns.zapret.moe, тот же принцип): при сбое comss
+# основным становится только он, остальные — его запасные.
+DNS_FALLBACKS="https://dns.zapret.moe/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Апстримы для DNS_VPN=doh (идут через туннель)
 DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Чем резолвить имена самих апстримов (dns.comss.one). Подмена тут не
@@ -369,7 +382,7 @@ NET_PROFILE_ADAPTIVE=0
 # приложения телефона, которые не идут в VPN. В туннель (tun*) и в сами
 # VPN-клиенты не вмешивается. Помогает против блокировок по имени сайта
 # (YouTube, Discord, X...), не помогает против блокировок по IP.
-ZAPRET_ENABLE=0
+ZAPRET_ENABLE=1         # по умолчанию с 2.21
 ZAPRET_MODE=list        # list = встроенный + свой + автосписок, all = все HTTPS
 ZAPRET_PHONE=1          # 1 = и приложения телефона (кроме VPN-клиентов)
 ZAPRET_STRATEGY=fakeddisorder  # fakeddisorder | md5sig | md5sig2 | badseq | disorder | seqovl | custom (ZAPRET_ARGS)
@@ -422,7 +435,7 @@ ZAPRET_PER_NET=1
 # отдаёт адреса европейских узлов Meta, они с обходом DPI открываются без
 # VPN (замер: ECS Амстердама -> 57.144.x). Только там, где DNS и так идёт
 # через DoH без VPN: раздача напрямую (DNS_DIRECT=doh) и DNS телефона.
-DNS_META_EU=0
+DNS_META_EU=1           # по умолчанию с 2.21
 DNS_META_ECS="185.15.56.0"                       # "откуда" спрашиваем (Амстердам, /24)
 DNS_META_UPSTREAMS="https://dns.google/dns-query" # должен учитывать ECS (Cloudflare — нет)
 # =====================================================================
@@ -2139,7 +2152,10 @@ dnsproxy_start() {
     args="-l 0.0.0.0 -p $DNSPROXY_PORT --cache --cache-optimistic --cache-max-ttl=600 --timeout=3s --refuse-any"
     for u in $ups; do args="$args -u $u"; done
     local fb="$DNS_FALLBACKS"
-    [ -n "$DNS_ALT_UPS" ] && [ "$ups" = "$DNS_ALT_UPS" ] && fb="$DNS_UPSTREAMS"
+    if [ -n "$DNS_ALT_UPS" ] && [ "$ups" = "$DNS_ALT_UPS" ]; then
+        # на запасном: остальные запасные и сам основной — его фолбэки
+        fb=$(set -- $DNS_FALLBACKS; shift; echo "$* $DNS_UPSTREAMS")
+    fi
     for u in $fb; do args="$args -f $u"; done
     for u in $DNS_BOOTSTRAP; do args="$args -b $u"; done
 
@@ -2464,7 +2480,10 @@ dns_try_alt() {     # 0 = перешли на запасные DoH и они о�
     [ -z "$DNS_ALT_UPS" ] || return 1
     [ -n "$DNS_FALLBACKS" ] || return 1
     case "$DNSPROXY_SIG" in "direct-doh|"*) ;; *) return 1 ;; esac
-    DNS_ALT_UPS="$DNS_FALLBACKS"
+    # основным — только первый запасной (dns.zapret.moe): несколько -u dnsproxy
+    # опрашивает по очереди, и часть ответов пришла бы от Google без
+    # "разблокирующих" адресов
+    DNS_ALT_UPS=$(set -- $DNS_FALLBACKS; echo "$1")
     if dnsproxy_start "direct-doh" $DNS_ALT_UPS && dnsproxy_probe_cold; then
         local now t keep="" hold="$DNS_ALT_HOLD"
         now=$(date +%s)
@@ -4515,7 +4534,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.20 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.21 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"

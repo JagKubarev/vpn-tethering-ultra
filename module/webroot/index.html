@@ -62,9 +62,17 @@ h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacin
 .hero-title { font-size: 18px; font-weight: 600; }
 .hero-sub { color: var(--muted); font-size: 14px; margin-top: 2px; }
 
-.kv { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; }
-.kv .k { color: var(--muted); white-space: nowrap; }
-.kv .v { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.kv { display: grid; grid-template-columns: fit-content(40%) minmax(0, 1fr); gap: 8px 14px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.kv .k { color: var(--muted); overflow-wrap: break-word; }
+.kv .v { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: break-word; }
+.kv .v > span:last-child { min-width: 0; }
+/* узкая карточка или крупный шрифт (em растёт вместе с ним): название над значением */
+#statusCard { container-type: inline-size; }
+@container (max-width: 21em) {
+  .kv { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .kv .k { font-size: 12.5px; margin-top: 10px; }
+  .kv .k:first-child { margin-top: 0; }
+}
 
 .btn { appearance: none; border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 10px; padding: 10px 14px; font: inherit; font-weight: 500; cursor: pointer; }
 .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
@@ -577,7 +585,7 @@ function renderStatus(s) {
     if (s.ggc === 'on') h += kvRow('YouTube', 'мимо кэша оператора', 'green');
     if (s.yt_dead && s.yt_dead !== 'off') {
       const n = +s.yt_dead, hits = +s.yt_dead_hits || 0;
-      h += kvRow('Мёртвые видеосерверы', (n ? 'отбиваю подсетей: ' + n : 'сейчас нет') + (hits ? ' · отбоев: ' + hits : ''), n ? 'amber' : 'green');
+      h += kvRow('Мёртвые серверы', (n ? 'отбиваю подсетей: ' + n : 'сейчас нет') + (hits ? ' · отбоев: ' + hits : ''), n ? 'amber' : 'green');
     }
     if (s.zwd === '1') {
       const w = (s.zwd_last || '').split('|'), t = w[1] || '';
@@ -1133,7 +1141,7 @@ function mockExec(cmd) {
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=v2.8 (предпросмотр)\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
     '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.comss.one/dns-query\nD DNS_FALLBACKS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=1\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=0\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=0\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\n' + M.conf };
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.comss.one/dns-query\nD DNS_FALLBACKS=https://dns.zapret.moe/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\n' + M.conf };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +
     'mobile:25002|md5sig||MegaFon|выбрана вручную|2026-10-19 18:40\n')).split('\n').filter(Boolean).map((l) => 'N ' + l).join('\n') };

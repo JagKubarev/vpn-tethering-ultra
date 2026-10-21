@@ -44,6 +44,7 @@ torproject.org
 proton.me
 protonmail.com
 googleusercontent.com
+play.google.com
 ampproject.org
 whatsapp.com
 whatsapp.net
