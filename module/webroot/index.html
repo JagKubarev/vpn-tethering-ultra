@@ -254,6 +254,20 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
     <label class="sw"><input type="checkbox" data-key="YT_GGC_BLOCK"><span></span></label>
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Отбивать мёртвые видеосерверы</div>
+      <div class="s">Если сервер YouTube принял соединение и молчит, его подсеть на 20 минут получает отказ, и плеер сразу берёт другой сервер, а не ждёт ~30 секунд. Список собирается сам.</div></div>
+    <label class="sw"><input type="checkbox" data-key="YT_DEAD_FAILFAST"><span></span></label>
+  </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Сторож обхода</div>
+      <div class="s">Раз в 15 минут (и сразу, если видео начало застревать) проверяет стратегию этой сети. Сломалась — пробует прежние рабочие, потом быстрый подбор. Нужна «своя стратегия для каждой сети»; при поднятом VPN не работает.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_WATCHDOG"><span></span></label>
+  </div>
+  <details id="zevBox" data-dep="ZAPRET_ENABLE">
+    <summary>Журнал сторожа и подбора</summary>
+    <pre class="log" id="zev" style="max-height:200px;border:1px solid var(--line);border-radius:10px;margin-top:8px"></pre>
+  </details>
+  <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Своя стратегия для каждой сети</div>
       <div class="s">Модуль запоминает стратегию для Wi-Fi (по названию) и мобильной сети (по оператору) и сам переключает её при смене сети. Подбор ниже запоминает лучшую для текущей сети.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_PER_NET"><span></span></label>
@@ -543,6 +557,15 @@ function renderStatus(s) {
     if (+s.zapret_auto > 0) zt += ' · найдено сайтов: ' + esc(s.zapret_auto);
     h += kvRow('Обход DPI', zt, 'green');
     if (s.ggc === 'on') h += kvRow('YouTube', 'мимо кэша оператора', 'green');
+    if (s.yt_dead && s.yt_dead !== 'off') {
+      const n = +s.yt_dead, hits = +s.yt_dead_hits || 0;
+      h += kvRow('Мёртвые видеосерверы', (n ? 'отбиваю подсетей: ' + n : 'сейчас нет') + (hits ? ' · отбоев: ' + hits : ''), n ? 'amber' : 'green');
+    }
+    if (s.zwd === '1') {
+      const w = (s.zwd_last || '').split('|'), t = w[1] || '';
+      h += kvRow('Сторож', s.zwd_last ? esc(w[0] + ' · ' + t) : 'ещё не проверял',
+        /^(работает|починил|ничего)/.test(t) ? 'green' : t ? 'red' : '');
+    }
   }
   else if (s.zapret === 'fail') h += kvRow('Обход DPI', 'nfqws не запустился, повтор через минуту', 'red');
   if (s.dnsproxy_enable === '1' && s.meta_eu === '1') {
@@ -568,7 +591,7 @@ let DEF = {}, USR = {}, CUR = {};   // умолчания, из файла, те
 const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAMS','DNS_FALLBACKS','DNS_VPN_UPSTREAMS',
   'DNS_BOOTSTRAP','DNS_HEALTH_INTERVAL','DNS_HEALTH_RECOVER','KILL_SWITCH','KILL_SWITCH_STRICT','NET_PROFILE_ADAPTIVE',
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK',
-  'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK'];
+  'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK','YT_DEAD_FAILFAST','ZAPRET_WATCHDOG'];
 const saved = (k) => (k in USR ? USR[k] : (DEF[k] || ''));
 
 async function loadConf() {
@@ -795,6 +818,13 @@ async function loadLog() {
   pre.scrollTop = pre.scrollHeight;
 }
 $('#logBox').addEventListener('toggle', () => { if ($('#logBox').open) loadLog(); });
+async function loadZev() {
+  const r = await ctl('zevents 40');
+  const lines = (r.out || '').split('\n').filter(Boolean).reverse()
+    .map((l) => { const f = l.split('|'); return f[0] + (f[1] ? ' · ' + f[1] : '') + '\n  ' + f.slice(2).join('|'); });
+  $('#zev').textContent = lines.length ? lines.join('\n') : 'Пока пусто: сторож пишет сюда поломки и починки, подбор — свои итоги.';
+}
+$('#zevBox').addEventListener('toggle', () => { if ($('#zevBox').open) loadZev(); });
 $('#logRefresh').addEventListener('click', loadLog);
 $('#logPrev').addEventListener('click', async () => {
   const r = await ctl('log-prev');
@@ -1084,8 +1114,8 @@ function mockExec(cmd) {
   });
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=v2.8 (предпросмотр)\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
-    '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.comss.one/dns-query\nD DNS_FALLBACKS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=1\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=0\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=0\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\n' + M.conf };
+    '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.comss.one/dns-query\nD DNS_FALLBACKS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=1\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=0\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=0\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\n' + M.conf };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +
     'mobile:25002|md5sig||MegaFon|выбрана вручную|2026-10-19 18:40\n')).split('\n').filter(Boolean).map((l) => 'N ' + l).join('\n') };
@@ -1102,6 +1132,7 @@ function mockExec(cmd) {
   if (a === 'zauto') return { errno: 0, out: 'example.org\nfoo.net\n' };
   if (/^zlist-set /.test(a)) return { errno: 0, out: 'OK 1' };
   if (a === 'zauto-clear') return { errno: 0, out: 'OK' };
+  if (/^zevents/.test(a)) return { errno: 0, out: '2026-10-21 12:40|YOTA|сторож: стратегия работает\n2026-10-21 13:44|YOTA|сторож: стратегия не открывает заблокированные (www.youtube.com discord.com) — ищу замену\n2026-10-21 13:45|YOTA|сторож: вернул прежнюю стратегию: --dpi-desync=multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1\n' };
   if (a === 'zscan-status') return { errno: 0, out: 'state=done\nmode=quick\ndone=21\ntotal=21\nstage=готово\nmsg=\nblocked=www.youtube.com i.ytimg.com discord.com gateway.discord.gg x.com www.facebook.com rutracker.org www.linkedin.com\nalive=0\n' };
   if (a === 'zscan-results') return { errno: 0, out:
     '10|10|0|980|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@G|быстрый|\n' +

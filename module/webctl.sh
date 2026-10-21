@@ -22,6 +22,8 @@
 #   webctl.sh znet                    текущая сеть + стратегии, запомненные для сетей
 #   webctl.sh znet-set СТР 'АРГ' [ЗАМЕТКА]   запомнить стратегию для текущей сети
 #   webctl.sh znet-del КЛЮЧ           забыть стратегию сети
+#   webctl.sh zevents [N]             журнал сторожа обхода (последние N)
+#   webctl.sh zhist                   прежние стратегии текущей сети (для сторожа)
 #   webctl.sh metatest                какие адреса Meta отдаёт DNS "как из Европы"
 # ============================================================================
 
@@ -42,6 +44,8 @@ ZLIST_USER=/data/adb/vpn_tether_zapret.txt
 ZLIST_AUTO=/data/adb/vpn_tether_zapret_auto.txt
 ZSCAN=/data/local/tmp/vpn_tether_zscan
 ZNETS=/data/adb/vpn_tether_zapret_nets
+ZHIST=/data/adb/vpn_tether_zapret_hist      # ключ|стратегия|аргументы|дата|заметка — прежние стратегии сетей
+ZEVENTS=/data/adb/vpn_tether_zapret_events  # дата|сеть|событие — журнал сторожа и подбора
 BB=/data/adb/ksu/bin/busybox
 [ -x "$BB" ] || BB=/data/adb/magisk/busybox
 [ -x "$BB" ] || BB=/data/adb/ap/bin/busybox
@@ -77,6 +81,9 @@ case "$1" in
         sed -n 's/^version=/module_version=/p' "$MODDIR/module.prop"
         # строки 1-2 — старый формат, страница читает только КЛЮЧ=значение
         sed '1,2d' "$STATUS_FILE" 2>/dev/null
+        # итог последней проверки сторожа (пишет zapret/scan.sh check)
+        w=$(head -n 1 "$ZSCAN.wd" 2>/dev/null | tr -d '\r')
+        [ -n "$w" ] && echo "zwd_last=$w"
         ;;
 
     conf)
@@ -361,7 +368,22 @@ case "$1" in
             [ -f "$ZNETS" ] && K="$k" awk -F'|' '$1 != ENVIRON["K"]' "$ZNETS"
             printf '%s|%s|%s|%s|%s|%s\n' "$k" "$st" "$a" "$l" "$note" "$(date '+%Y-%m-%d %H:%M')"
         } > "$ZNETS.tmp" && chmod 600 "$ZNETS.tmp" && mv -f "$ZNETS.tmp" "$ZNETS"
+        # история сети: сторож при поломке сначала пробует прежние стратегии
+        # (та же запись — переносим в конец, держим 8 последних на сеть)
+        {
+            [ -f "$ZHIST" ] && K="$k" S="$st" A="$a" awk -F'|' '!($1 == ENVIRON["K"] && $2 == ENVIRON["S"] && $3 == ENVIRON["A"])' "$ZHIST"
+            printf '%s|%s|%s|%s|%s\n' "$k" "$st" "$a" "$(date '+%Y-%m-%d %H:%M')" "$note"
+        } | K="$k" awk -F'|' '{ l[NR] = $0; key[NR] = $1 } END { for (i = NR; i >= 1; i--) if (key[i] != ENVIRON["K"] || ++n <= 8) keep[i] = 1; for (i = 1; i <= NR; i++) if (keep[i]) print l[i] }' > "$ZHIST.tmp" && \
+            chmod 600 "$ZHIST.tmp" && mv -f "$ZHIST.tmp" "$ZHIST"
         echo "OK $l"
+        ;;
+    zhist)
+        d=$(cur_net); k=${d%%"|"*}
+        [ -n "$k" ] && [ -f "$ZHIST" ] && K="$k" awk -F'|' '$1 == ENVIRON["K"]' "$ZHIST"
+        ;;
+    zevents)
+        n="${2:-30}"; case "$n" in ''|*[!0-9]*) n=30 ;; esac
+        [ -f "$ZEVENTS" ] && tail -n "$n" "$ZEVENTS"
         ;;
     znet-del)
         [ -n "$2" ] || { echo "ERR ключ"; exit 1; }
