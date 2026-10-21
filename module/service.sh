@@ -283,6 +283,11 @@
 #     kill-switch выключен (VPN не поднят — раздача сама уходит напрямую).
 #   - play.google.com во встроенном списке zapret (без обхода TLS глохнет).
 # ============================================================================
+# v2.21.1 — запасные DoH: zapret.moe, comss, Google, Cloudflare. При сбое
+#   основного основным становится первый из них, которого нет среди основных
+#   (выбран zapret.moe — замена comss, и наоборот); дубли основного в -f не
+#   передаются. В WebUI zapret.moe есть в списке DoH-серверов.
+# ============================================================================
 # ============================================================================
 
 umask 022
@@ -329,9 +334,10 @@ DNS_VPN="dnat"         # VPN-режим:    dnat  = DNAT в DNS из VPN (как
 DNS_UPSTREAMS="https://dns.comss.one/dns-query"
 # Если основные недоступны. Только шифрованные — иначе запросы ушли бы
 # оператору открытым текстом.
-# Первый — замена comss (dns.zapret.moe, тот же принцип): при сбое comss
-# основным становится только он, остальные — его запасные.
-DNS_FALLBACKS="https://dns.zapret.moe/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
+# Первый, которого нет среди основных, — замена основному: comss <-> zapret.moe
+# (тот же принцип); при сбое основным становится только он, остальные — его
+# запасные. Google/Cloudflare — последние: гео-блок они не обходят.
+DNS_FALLBACKS="https://dns.zapret.moe/dns-query https://dns.comss.one/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Апстримы для DNS_VPN=doh (идут через туннель)
 DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Чем резолвить имена самих апстримов (dns.comss.one). Подмена тут не
@@ -2154,9 +2160,11 @@ dnsproxy_start() {
     local fb="$DNS_FALLBACKS"
     if [ -n "$DNS_ALT_UPS" ] && [ "$ups" = "$DNS_ALT_UPS" ]; then
         # на запасном: остальные запасные и сам основной — его фолбэки
-        fb=$(set -- $DNS_FALLBACKS; shift; echo "$* $DNS_UPSTREAMS")
+        fb=$(for u in $DNS_FALLBACKS $DNS_UPSTREAMS; do [ "$u" = "$DNS_ALT_UPS" ] || echo "$u"; done | awk '!s[$0]++')
+        fb=$(echo $fb)
     fi
-    for u in $fb; do args="$args -f $u"; done
+    # фолбэком не повторяем то, что уже основное (comss есть и в DNS_FALLBACKS)
+    for u in $fb; do case " $ups " in *" $u "*) continue ;; esac; args="$args -f $u"; done
     for u in $DNS_BOOTSTRAP; do args="$args -b $u"; done
 
     : > "$DNSPROXY_LOG"
@@ -2483,7 +2491,10 @@ dns_try_alt() {     # 0 = перешли на запасные DoH и они о�
     # основным — только первый запасной (dns.zapret.moe): несколько -u dnsproxy
     # опрашивает по очереди, и часть ответов пришла бы от Google без
     # "разблокирующих" адресов
-    DNS_ALT_UPS=$(set -- $DNS_FALLBACKS; echo "$1")
+    # первый запасной, которого нет среди основных (выбран zapret.moe основным —
+    # тогда запасной не он же, а следующий)
+    DNS_ALT_UPS=$(for u in $DNS_FALLBACKS; do case " $DNS_UPSTREAMS " in *" $u "*) ;; *) echo "$u"; break ;; esac; done)
+    [ -n "$DNS_ALT_UPS" ] || return 1
     if dnsproxy_start "direct-doh" $DNS_ALT_UPS && dnsproxy_probe_cold; then
         local now t keep="" hold="$DNS_ALT_HOLD"
         now=$(date +%s)
@@ -4534,7 +4545,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.21 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.21.1 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
