@@ -318,6 +318,9 @@
 #   22.10 за 13 ч сторож 8 раз зря вставал по «застрявшим YouTube», а это были
 #   заблокированные сайты на Google Cloud (34.149.x, 34.160.x) и API Google.
 #   Застрявшие считаются только по помеченным googlevideo.com.
+# v2.24.2 — в запасных DNS dagami вместо zapret.moe (и выше comss): 22.10 zapret.moe перестал
+#   отвечать, а Gemini через него был недоступен и раньше; через dagami (как
+#   через Wlrus и not-a-dns) Gemini открывается.
 # ============================================================================
 # ============================================================================
 
@@ -367,9 +370,9 @@ DNS_UPSTREAMS="https://dns.wlrus.cfd/dns-query"
 # оператору открытым текстом.
 # Первый, которого нет среди основных, — замена основному; при сбое основным
 # становится только он, остальные — его запасные (по порядку). not-a-dns,
-# comss и zapret.moe, как и Wlrus, обходят гео-блок. Google/Cloudflare —
+# dagami и comss, как и Wlrus, обходят гео-блок. Google/Cloudflare —
 # последние: гео-блок не обходят, но в крайнем случае DNS не уйдёт к оператору.
-DNS_FALLBACKS="https://not-a-dns.quic.best/dns-query https://dns.comss.one/dns-query https://dns.zapret.moe/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
+DNS_FALLBACKS="https://not-a-dns.quic.best/dns-query https://dns.dagami.ru/dns-query https://dns.comss.one/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Апстримы для DNS_VPN=doh (идут через туннель)
 DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Чем резолвить имена самих апстримов (dns.wlrus.cfd и т.д.). Подмена тут не
@@ -4668,7 +4671,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.24.1 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.24.2 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
