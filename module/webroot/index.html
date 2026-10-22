@@ -295,6 +295,21 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
       <div class="s">Раз в 15 минут (и сразу, если видео начало застревать) проверяет стратегию этой сети. Сломалась — пробует прежние рабочие, потом быстрый подбор. Нужна «своя стратегия для каждой сети»; при поднятом VPN не работает.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_WATCHDOG"><span></span></label>
   </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Своя стратегия для отдельных сайтов</div>
+      <div class="s">Раз в 3 часа проверяет сайты из списков: если основная стратегия какой-то не открывает, подбирает ему другую (до трёх на сеть). Нужна «своя стратегия для каждой сети»; при поднятом VPN не работает.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_ALT"><span></span></label>
+  </div>
+  <details id="zaltBox" data-dep="ZAPRET_ENABLE">
+    <summary><span>Сайты со своей стратегией: <span id="zaltN">0</span></span></summary>
+    <div style="padding:0 16px 13px">
+      <div id="zalt"></div>
+      <div class="btn-row mt8">
+        <button class="btn small" id="zaltRun">Проверить сайты сейчас</button>
+        <button class="btn small" id="zaltClear">Сбросить</button>
+      </div>
+    </div>
+  </details>
   <details id="zevBox" data-dep="ZAPRET_ENABLE">
     <summary>Журнал сторожа и подбора</summary>
     <pre class="log" id="zev" style="max-height:200px;border:1px solid var(--line);border-radius:10px;margin-top:8px"></pre>
@@ -632,7 +647,7 @@ let DEF = {}, USR = {}, CUR = {};   // умолчания, из файла, те
 const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAMS','DNS_FALLBACKS','DNS_VPN_UPSTREAMS',
   'DNS_BOOTSTRAP','DNS_HEALTH_INTERVAL','DNS_HEALTH_RECOVER','KILL_SWITCH','KILL_SWITCH_STRICT','NET_PROFILE_ADAPTIVE',
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK',
-  'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK','YT_DEAD_FAILFAST','ZAPRET_WATCHDOG','TETHER_STEALTH','TETHER_TTL_STRICT'];
+  'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK','YT_DEAD_FAILFAST','ZAPRET_WATCHDOG','TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT'];
 const saved = (k) => (k in USR ? USR[k] : (DEF[k] || ''));
 
 async function loadConf() {
@@ -903,7 +918,31 @@ async function loadZ() {
   $('#zdef').textContent = dl.join('\n'); $('#zdefN').textContent = dl.length;
   $('#zauto').textContent = al.join('\n') || 'пока пусто'; $('#zautoN').textContent = al.length;
   renderBar();
+  loadZalt();
 }
+// сайты со своей стратегией (scan.sh sites): "сайт|аргументы|дата"
+async function loadZalt() {
+  const r = await ctl('zalt');
+  const rows = (r.out || '').split('\n').filter((l) => l.indexOf('|') > 0).map((l) => l.split('|'));
+  $('#zaltN').textContent = rows.length;
+  const by = {};
+  rows.forEach((f) => { (by[f[1]] = by[f[1]] || []).push(f[0]); });
+  $('#zalt').innerHTML = rows.length ? Object.keys(by).map((a) =>
+    '<div style="padding:6px 0"><div class="txt"><div class="t" style="font-size:14px">' + esc(stratLabel(a)) + '</div>' +
+    '<div class="s">' + esc(by[a].join(', ')) + '</div></div></div>').join('')
+    : '<div class="s muted" style="font-size:13px">Пока нет: основная стратегия открывает всё, что проверено (или проверки ещё не было).</div>';
+}
+async function zaltStart(host) {
+  const r = await ctl('zscan-start sites ' + q(host || ''));
+  if (!/^OK/.test(r.out.trim())) { toast(r.out.trim().replace(/^ERR /, '') || 'Не запустилось'); return; }
+  toast(host ? 'Подбираю для ' + host + ' — ход в «Подбор стратегии»' : 'Проверяю сайты — ход в «Подбор стратегии», это несколько минут');
+  $('#scRes').innerHTML = ''; setTimeout(scRefresh, 800);
+}
+$('#zaltRun').addEventListener('click', () => zaltStart(''));
+$('#zaltClear').addEventListener('click', async () => {
+  if (!confirm('Забыть свои стратегии сайтов в этой сети?')) return;
+  await ctl('zalt-clear'); await loadZalt(); toast('Сброшено');
+});
 $('#zautoClear').addEventListener('click', async () => {
   if (!confirm('Очистить список сайтов, найденных автоматически?')) return;
   await ctl('zauto-clear'); await loadZ(); toast('Автосписок очищен');
@@ -938,7 +977,9 @@ $('#stBtn').addEventListener('click', async () => {
     res.innerHTML = stLine('Без обхода', o.direct) + stLine('С обходом', o.zapret) +
       '<div class="muted mt8" style="font-size:13px">' + (dOk ? 'Сайт и так открывается, обход не нужен.'
         : zOk ? 'Обход помогает. В режиме «из списка» добавь сайт в свой список, если его нет во встроенном.'
-        : 'С этой стратегией не помогло. Попробуй другую; если ни одна не поможет — скорее всего, блок по IP, тут нужен VPN.') + '</div>';
+        : 'С этой стратегией не помогло. Можно подобрать сайту свою — остальные сайты останутся на прежней. Если не поможет ни одна — скорее всего, блок по IP, тут нужен VPN.') + '</div>' +
+      (!dOk && !zOk ? '<button class="btn small mt8" id="stAlt" data-host="' + esc(host) + '">Подобрать для этого сайта</button>' : '');
+    const sa = $('#stAlt'); if (sa) sa.addEventListener('click', () => { sa.disabled = true; zaltStart(sa.dataset.host); });
   } finally { btn.disabled = false; }
 });
 
@@ -982,6 +1023,9 @@ function stratLabel(a) {
   if (/sni=/.test(a)) ex.push('sni google');
   else if (/fake-tls-mod=rnd/.test(a)) ex.push('случайный ClientHello');
   const rep = g(/--dpi-desync-repeats=(\d+)/); if (rep) ex.push('×' + rep);
+  if (/--dup=/.test(a)) ex.push('дубли ' + (g(/--dup-fooling=(\S+)/) || (/--dup-autottl/.test(a) ? 'autottl' : '')));
+  if (/--orig-autottl/.test(a)) ex.push('TTL пакетов');
+  if (/--wssize=/.test(a)) ex.push('окно ' + g(/--wssize=(\S+)/));
   return [mode, fool, pos && 'разрез ' + pos].concat(ex).filter(Boolean).join(' · ');
 }
 
@@ -1018,10 +1062,12 @@ async function scRefresh() {
   } else if (s.state === 'stopped') {
     prog = '<div class="st-line"><span class="dot"></span>Остановлено</div>';
   }
-  if (blocked.length) prog += '<div class="muted" style="font-size:13px;margin-top:4px">Заблокировано без обхода: ' + esc(blocked.join(', ')) + '</div>';
+  const sites = s.mode === 'sites';
+  if (blocked.length && !sites) prog += '<div class="muted" style="font-size:13px;margin-top:4px">Заблокировано без обхода: ' + esc(blocked.join(', ')) + '</div>';
+  if (sites) prog += '<div class="muted" style="font-size:13px;margin-top:4px">Своя стратегия для отдельных сайтов: итог — в «Обход DPI → Сайты со своей стратегией».</div>';
   $('#scProg').innerHTML = prog;
 
-  const rows = scAggregate(rs.out, blocked.length).slice(0, 8);
+  const rows = sites ? [] : scAggregate(rs.out, blocked.length).slice(0, 8);
   $('#scRes').innerHTML = rows.length ? rows.map((r, i) => {
     const full = r.maxBrk === 0 && r.open === blocked.length && blocked.length > 0;
     const dot = r.maxBrk > 0 ? 'red' : full ? 'green' : r.open > 0 ? 'amber' : '';
@@ -1034,7 +1080,7 @@ async function scRefresh() {
 
   clearTimeout(scTimer);
   if (running) scTimer = setTimeout(scRefresh, 3000);
-  else if (scWasRunning) loadZnet();   // подбор закончился — мог запомнить стратегию сети
+  else if (scWasRunning) { loadZnet(); loadZalt(); }   // подбор закончился — мог запомнить стратегию сети / сайтов
   scWasRunning = running;
 }
 
@@ -1168,7 +1214,7 @@ function mockExec(cmd) {
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=v2.8 (предпросмотр)\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
     '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.wlrus.cfd/dns-query\nD DNS_FALLBACKS=https://not-a-dns.quic.best/dns-query https://dns.dagami.ru/dns-query https://dns.comss.one/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\n' + M.conf };
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.wlrus.cfd/dns-query\nD DNS_FALLBACKS=https://not-a-dns.quic.best/dns-query https://dns.dagami.ru/dns-query https://dns.comss.one/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=180\n' + M.conf };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +
     'mobile:25002|md5sig||MegaFon|выбрана вручную|2026-10-19 18:40\n')).split('\n').filter(Boolean).map((l) => 'N ' + l).join('\n') };
@@ -1185,6 +1231,8 @@ function mockExec(cmd) {
   if (a === 'zauto') return { errno: 0, out: 'example.org\nfoo.net\n' };
   if (/^zlist-set /.test(a)) return { errno: 0, out: 'OK 1' };
   if (a === 'zauto-clear') return { errno: 0, out: 'OK' };
+  if (a === 'zalt') return { errno: 0, out: 'rutracker.org|--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld|2026-10-22 18:00\nnnmclub.to|--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld|2026-10-22 18:00\n' };
+  if (a === 'zalt-clear') return { errno: 0, out: 'OK' };
   if (a === 'diag') return { errno: 0, out: 'R dns|warn|Подмена DNS|оператор подменяет ответы обычного DNS (2 из 3: rutracker.org:195.208.4.1) — без DoH заблокированные сайты получат заглушку\nR tcp16|ok|Обрыв на 16–64 КБ|нет: 128 КБ скачались (4 из 4)\nR wl|ok|Белые списки|нет: зарубежные сайты открываются (4 из 4)\nR tg|bad|Telegram|закрыт по IP: серверы (0 из 5) и веб-версия недоступны — только через VPN\n' };
   if (/^zevents/.test(a)) return { errno: 0, out: '2026-10-21 12:40|YOTA|сторож: стратегия работает\n2026-10-21 13:44|YOTA|сторож: стратегия не открывает заблокированные (www.youtube.com discord.com) — ищу замену\n2026-10-21 13:45|YOTA|сторож: вернул прежнюю стратегию: --dpi-desync=multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1\n' };
   if (a === 'zscan-status') return { errno: 0, out: 'state=done\nmode=quick\ndone=21\ntotal=21\nstage=готово\nmsg=\nblocked=www.youtube.com i.ytimg.com discord.com gateway.discord.gg x.com www.facebook.com rutracker.org www.linkedin.com\nalive=0\n' };

@@ -26,6 +26,9 @@
 #   webctl.sh zevents [N]             журнал сторожа обхода (последние N)
 #   webctl.sh zhist                   прежние стратегии текущей сети (для сторожа)
 #   webctl.sh metatest                какие адреса Meta отдаёт DNS "как из Европы"
+#   webctl.sh zalt                    сайты со своей стратегией в текущей сети: сайт|аргументы|дата
+#   webctl.sh zalt-clear              забыть их (и «не открылись ничем»)
+#   webctl.sh zscan-start sites ['сайты']  подобрать своё сайтам (без списка — из списков zapret)
 # ============================================================================
 
 MODDIR="${0%/*}"
@@ -47,6 +50,8 @@ ZSCAN=/data/local/tmp/vpn_tether_zscan
 ZNETS=/data/adb/vpn_tether_zapret_nets
 ZHIST=/data/adb/vpn_tether_zapret_hist      # ключ|стратегия|аргументы|дата|заметка|аргументы_YouTube — прежние стратегии сетей
 ZEVENTS=/data/adb/vpn_tether_zapret_events  # дата|сеть|событие — журнал сторожа и подбора
+ZALT=/data/adb/vpn_tether_zapret_alt        # ключ|название|сайт|аргументы|дата — своя стратегия сайтов
+ZSKIP=/data/adb/vpn_tether_zapret_altskip   # ключ|сайт|epoch — не открылись ничем
 BB=/data/adb/ksu/bin/busybox
 [ -x "$BB" ] || BB=/data/adb/magisk/busybox
 [ -x "$BB" ] || BB=/data/adb/ap/bin/busybox
@@ -235,7 +240,7 @@ case "$1" in
 
     # --- подбор стратегии (zapret/scan.sh в фоне) ----------------------------
     zscan-start)
-        mode="$2"; case "$mode" in quick|full) ;; *) echo "ERR режим"; exit 1 ;; esac
+        mode="$2"; case "$mode" in quick|full|sites) ;; *) echo "ERR режим"; exit 1 ;; esac
         sites=""
         for d in $(printf '%s' "$3" | tr 'A-Z' 'a-z' | tr ',;' '  '); do
             d=${d#http://}; d=${d#https://}; d=${d%%/*}
@@ -381,6 +386,23 @@ case "$1" in
             chmod 600 "$ZHIST.tmp" && mv -f "$ZHIST.tmp" "$ZHIST"
         echo "OK $l"
         ;;
+    zalt)
+        # своих записей у сети нет — как у демона, записи сети с тем же названием
+        d=$(cur_net); k=${d%%"|"*}; l=${d#*"|"}
+        [ -n "$k" ] && [ -f "$ZALT" ] && K="$k" L="$l" awk -F'|' '
+            $1 == ENVIRON["K"] { a[++n] = $3 "|" $4 "|" $5 }
+            ENVIRON["L"] != "" && $2 == ENVIRON["L"] { b[++m] = $3 "|" $4 "|" $5 }
+            END { if (n) { for (i = 1; i <= n; i++) print a[i] } else for (i = 1; i <= m; i++) print b[i] }' "$ZALT"
+        ;;
+    zalt-clear)
+        d=$(cur_net); k=${d%%"|"*}; l=${d#*"|"}
+        [ -n "$k" ] || { echo "ERR не понял, что за сеть"; exit 1; }
+        for f in "$ZALT" "$ZSKIP"; do
+            [ -f "$f" ] || continue
+            K="$k" L="$l" F="$f" awk -F'|' '!($1 == ENVIRON["K"] || (ENVIRON["F"] ~ /_alt$/ && ENVIRON["L"] != "" && $2 == ENVIRON["L"]))' "$f" > "$f.tmp" && \
+                chmod 600 "$f.tmp" && mv -f "$f.tmp" "$f"
+        done
+        echo "OK" ;;
     zhist)
         d=$(cur_net); k=${d%%"|"*}
         [ -n "$k" ] && [ -f "$ZHIST" ] && K="$k" awk -F'|' '$1 == ENVIRON["K"]' "$ZHIST"

@@ -321,6 +321,17 @@
 # v2.24.2 — в запасных DNS dagami вместо zapret.moe (и выше comss): 22.10 zapret.moe перестал
 #   отвечать, а Gemini через него был недоступен и раньше; через dagami (как
 #   через Wlrus и not-a-dns) Gemini открывается.
+# v2.25 — идеи byedpi --auto / zapret2 circular:
+#   - Своя стратегия для отдельных сайтов (ZAPRET_ALT). Автосписок nfqws
+#     считает сбои только у сайтов, которых в списке ещё нет: сайт из списка,
+#     который основная стратегия не открывает, так и не открывается. Теперь
+#     раз в ZAPRET_ALT_MIN минут scan.sh sites проверяет сайты из списков
+#     (мимо VPN), и тем, кого основная не открывает, подбирает другую
+#     (до 3 на сеть); nfqws получает для них профили перед основным.
+#     Хранится в ZALT_FILE: ключ сети|название|сайт|аргументы|дата.
+#   - Новые приёмы nfqws в подборе: --dup, --orig-autottl, --wssize,
+#     syndata. Для --wssize/autottl nfqws нужны первые ответы сервера —
+#     они теперь идут в nfqws в любом режиме, а не только «из списка».
 # ============================================================================
 # ============================================================================
 
@@ -455,6 +466,12 @@ YT_DEAD_MAX=16          # больше записей не держим
 # подбор. Только при своей стратегии для сети и без поднятого VPN.
 ZAPRET_WATCHDOG=1
 ZAPRET_WATCHDOG_MIN=15
+# Своя стратегия для отдельных сайтов (2.25): раз в ZAPRET_ALT_MIN минут
+# zapret/scan.sh sites проверяет сайты из списков; если основная стратегия
+# какой-то не открывает, подбирает для него другую (до 3 стратегий на сеть).
+# Только при своей стратегии для сети и без поднятого VPN.
+ZAPRET_ALT=1
+ZAPRET_ALT_MIN=180
 # Скрыть раздачу от оператора (2.20; раньше — модуль tether_unblock).
 #  - net.tethering.noprovisioning: Android не спрашивает оператора, можно ли
 #    раздавать (иначе оператор может не дать включить точку или оборвать);
@@ -503,7 +520,8 @@ zapret_args_valid() {
     local _t
     case "$1" in *[!A-Za-z0-9,.:+_@=\ -]*) return 1 ;; esac
     for _t in $1; do
-        case "$_t" in --dpi-desync|--dpi-desync=*|--dpi-desync-*) ;; *) return 1 ;; esac
+        # 2.25: и --dup*, --orig-*, --wssize* (новые приёмы подбора)
+        case "$_t" in --dpi-desync|--dpi-desync=*|--dpi-desync-*|--dup=*|--dup-*|--orig-*|--wssize=*|--wssize-*) ;; *) return 1 ;; esac
         case "$_t" in *@*) case "$_t" in *=@G|*=@Q) ;; *) return 1 ;; esac ;; esac
     done
     return 0
@@ -523,10 +541,12 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT)
+        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
+        ZAPRET_ALT_MIN)
+            case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 30 ] && [ "$val" -le 1440 ] || ok=0 ;; esac ;;
         ZAPRET_MODE)     case "$val" in list|all) ;; *) ok=0 ;; esac ;;
         ZAPRET_STRATEGY) zapret_strategy_valid "$val" || ok=0 ;;
         ZAPRET_ARGS)     zapret_args_valid "$val" || ok=0 ;;
@@ -569,7 +589,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -888,6 +908,10 @@ YT_STUCK=""             # время соединений, застрявших 
 ZWD_LAST=0              # когда последний раз запускали сторож
 ZWD_EVENTS="/data/adb/vpn_tether_zapret_events"
 ZSCAN_PID_FILE="/data/local/tmp/vpn_tether_zscan.pid"
+ZALT_FILE="/data/adb/vpn_tether_zapret_alt"   # своя стратегия сайтов: ключ|название|сайт|аргументы|дата
+ZALT_RUN="/data/local/tmp/vpn_tether_zalt"    # .lst + .1..3 — списки сайтов профилей nfqws
+ZAPRET_ALT_N=0          # сколько сайтов со своей стратегией у запущенного nfqws
+ZSITES_LAST=0           # когда последний раз проверяли сайты (scan.sh sites)
 ZAPRET_HOOK_TICK=0      # проверка хуков zapret — раз в ~10с, не каждый цикл
 ZAPRET_OWNER_TUN="-"    # для какого tun уже узнали владельца VPN
 # VPN-клиенты: их собственное соединение с сервером (часто TLS на 443) zapret
@@ -1094,6 +1118,7 @@ update_status() {
         echo "zapret_strategy=$ZAPRET_EFF_STRATEGY"
         echo "zapret_eff_args=$ZAPRET_EFF_ARGS"
         echo "zapret_eff_yt=$ZAPRET_EFF_YT"
+        echo "zapret_alt_n=$ZAPRET_ALT_N"
         echo "zapret_src=$ZAPRET_NET_SRC"
         echo "net_key=$NET_KEY"
         echo "net_label=$NET_LABEL"
@@ -2782,7 +2807,8 @@ quic_block_down() {
 #    Раздача (пакеты без сокета) обрабатывается всегда, телефон — если
 #    ZAPRET_PHONE=1.
 #  - mangle PREROUTING -> VPN_ZAPRET_IN: первые ответы — nfqws по ним видит
-#    обрывы/заглушки и пополняет автосписок (режим list).
+#    обрывы/заглушки и пополняет автосписок (режим list), а --wssize и
+#    autottl берут из них окно и TTL сервера (2.25: в любом режиме).
 #  - filter FORWARD -> VPN_ZAPRET_QUIC: QUIC раздачи мимо VPN -> REJECT.
 # Хуки ставятся В КОНЕЦ цепочек: вердикт NFQUEUE завершает обход таблицы,
 # а системные цепочки (учёт трафика, idletimer) должны отработать раньше.
@@ -2828,8 +2854,44 @@ zapret_learn_vpn_owner() {
     log "zapret: uid $u (владелец VPN) — в исключения"
 }
 
+# Профили nfqws для сайтов со своей стратегией (ZALT_FILE, пишет scan.sh
+# sites) — по профилю на стратегию, до 3. Своих записей у сети нет — берём
+# записи сети с тем же названием (YOTA = 25011 и 25002). Файлы списков
+# переписываются только при изменении: nfqws сам перечитывает их.
+zapret_alt_profiles() {
+    local ex="$1" i=0 a f out=""
+    if [ "$ZAPRET_ALT" = "1" ] && [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] && [ -f "$ZALT_FILE" ]; then
+        K="$NET_KEY" L="$NET_LABEL" awk -F'|' '
+            $1 == ENVIRON["K"] { k[++nk] = $4 "|" $3 }
+            ENVIRON["L"] != "" && $2 == ENVIRON["L"] { l[++nl] = $4 "|" $3 }
+            END { if (nk) { for (i = 1; i <= nk; i++) print k[i] } else for (i = 1; i <= nl; i++) print l[i] }' \
+            "$ZALT_FILE" 2>/dev/null > "$ZALT_RUN.lst"
+        cut -d'|' -f1 "$ZALT_RUN.lst" | awk '!s[$0]++' > "$ZALT_RUN.args"
+        while IFS= read -r a <&3; do
+            [ "$i" -lt 3 ] || break
+            zapret_args_valid "$a" || continue
+            i=$((i + 1)); f="$ZALT_RUN.$i"
+            A="$a" awk -F'|' '$1 == ENVIRON["A"] && $2 ~ /^[a-z0-9.-]+$/ { print $2 }' "$ZALT_RUN.lst" | sort -u > "$f.new"
+            if [ ! -s "$f.new" ]; then rm -f "$f.new"; i=$((i - 1)); continue; fi
+            if cmp -s "$f.new" "$f"; then rm -f "$f.new"; else mv -f "$f.new" "$f"; fi
+            out="$out--filter-tcp=443 $ex --hostlist=$f $(zapret_strategy_args "$ZAPRET_DIR" custom "$a") --new "
+        done 3< "$ZALT_RUN.args"
+    fi
+    i=$((i + 1))
+    while [ "$i" -le 3 ]; do rm -f "$ZALT_RUN.$i"; i=$((i + 1)); done
+    printf '%s' "$out"
+}
+# сколько сайтов в профилях запущенного nfqws (по его аргументам)
+zapret_alt_count() {
+    local i n=0
+    for i in 1 2 3; do
+        case "$1 " in *"--hostlist=$ZALT_RUN.$i "*) n=$((n + $(wc -l < "$ZALT_RUN.$i" 2>/dev/null || echo 0))) ;; esac
+    done
+    echo "$n"
+}
+
 zapret_args() {
-    local a="--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6" ex="" g
+    local a="--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6" ex="" g alt
     # банки и Госуслуги — мимо обхода в любом профиле (и в автосписок не попадут)
     grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
     g="--filter-tcp=443 $ex"
@@ -2840,11 +2902,13 @@ zapret_args() {
         g="$g --hostlist-auto=$ZAPRET_LIST_AUTO"
     fi
     g="$g $(zapret_strategy_args "$ZAPRET_DIR" "$ZAPRET_EFF_STRATEGY" "$ZAPRET_EFF_ARGS")"
-    # своя стратегия YouTube — первым профилем: nfqws берёт первый подходящий
+    # сайты со своей стратегией — самыми первыми профилями, затем YouTube:
+    # nfqws берёт первый подходящий
+    alt=$(zapret_alt_profiles "$ex")
     if [ -n "$ZAPRET_EFF_YT" ] && grep -q '[a-z0-9]' "$ZAPRET_LIST_YT" 2>/dev/null; then
-        echo "$a --filter-tcp=443 $ex --hostlist=$ZAPRET_LIST_YT $(zapret_strategy_args "$ZAPRET_DIR" custom "$ZAPRET_EFF_YT") --new $g"
+        echo "$a $alt--filter-tcp=443 $ex --hostlist=$ZAPRET_LIST_YT $(zapret_strategy_args "$ZAPRET_DIR" custom "$ZAPRET_EFF_YT") --new $g"
     else
-        echo "$a $g"
+        echo "$a $alt$g"
     fi
 }
 
@@ -2903,6 +2967,8 @@ net_identity_reconcile() {
     ZAPRET_NET_DIRTY=1
     # новая сеть — сторож проверит её стратегию через ~1.5 мин, а не через 15
     [ -n "$NET_KEY" ] && ZWD_LAST=$(( $(date +%s) - ZAPRET_WATCHDOG_MIN * 60 + 90 ))
+    # и сайты со своей стратегией — через ~10 мин (сеть успеет устояться)
+    [ -n "$NET_KEY" ] && ZSITES_LAST=$(( $(date +%s) - ZAPRET_ALT_MIN * 60 + 600 ))
     phone_status_refresh
 }
 
@@ -2917,6 +2983,8 @@ zapret_start() {
     sleep 0.5
     if kill -0 "$pid" 2>/dev/null; then
         echo "$pid" > "$ZAPRET_PID_FILE"
+        ZAPRET_ALT_N=$(zapret_alt_count "$1")
+        [ "$ZAPRET_ALT_N" -gt 0 ] && log "zapret: своя стратегия у $ZAPRET_ALT_N сайтов (их основная не открывала)"
         if [ "$ZAPRET_NET_SRC" = "net" ] || [ "$ZAPRET_NET_SRC" = "label" ]; then
             log "zapret: nfqws запущен (pid $pid, стратегия сети «$NET_LABEL»$([ "$ZAPRET_NET_SRC" = label ] && echo " — взята у сети с тем же названием, своей у $NET_KEY нет"): $ZAPRET_EFF_STRATEGY${ZAPRET_EFF_ARGS:+ [$ZAPRET_EFF_ARGS]}${ZAPRET_EFF_YT:+, YouTube: [$ZAPRET_EFF_YT]}, режим $ZAPRET_MODE)"
         else
@@ -2963,17 +3031,15 @@ zapret_rules_on() {
         $t -t mangle -C POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null || \
             $t -t mangle -A POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null
 
-        # ответы (для автосписка)
+        # ответы (автосписок, --wssize, autottl)
         $t -t mangle -N "$CHAIN_ZAPRET_IN" 2>/dev/null
         $t -t mangle -F "$CHAIN_ZAPRET_IN" 2>/dev/null
-        if [ "$ZAPRET_MODE" = "list" ]; then
-            $t -t mangle -A "$CHAIN_ZAPRET_IN" -i tun+ -j RETURN 2>/dev/null
-            $t -t mangle -A "$CHAIN_ZAPRET_IN" -i lo -j RETURN 2>/dev/null
-            $t -t mangle -A "$CHAIN_ZAPRET_IN" -s "$lan" -j RETURN 2>/dev/null
-            $t -t mangle -A "$CHAIN_ZAPRET_IN" -p tcp --sport 443 \
-                -m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3 \
-                -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
-        fi
+        $t -t mangle -A "$CHAIN_ZAPRET_IN" -i tun+ -j RETURN 2>/dev/null
+        $t -t mangle -A "$CHAIN_ZAPRET_IN" -i lo -j RETURN 2>/dev/null
+        $t -t mangle -A "$CHAIN_ZAPRET_IN" -s "$lan" -j RETURN 2>/dev/null
+        $t -t mangle -A "$CHAIN_ZAPRET_IN" -p tcp --sport 443 \
+            -m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3 \
+            -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
         $t -t mangle -C PREROUTING -j "$CHAIN_ZAPRET_IN" 2>/dev/null || \
             $t -t mangle -A PREROUTING -j "$CHAIN_ZAPRET_IN" 2>/dev/null
 
@@ -3294,6 +3360,22 @@ zapret_watchdog() {
     setsid sh "$ZAPRET_DIR/scan.sh" check </dev/null >/dev/null 2>&1 &
 }
 
+# --- сайты, которых основная стратегия не открывает: scan.sh sites в фоне ---
+zapret_sites_check() {
+    local now pid
+    [ "$ZAPRET_ALT" = "1" ] && [ "$ZAPRET_STATE" = "on" ] && [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] || return 0
+    now=$(date +%s)
+    # первая — через ~10 мин после старта
+    [ "$ZSITES_LAST" -eq 0 ] && { ZSITES_LAST=$((now - ZAPRET_ALT_MIN * 60 + 600)); return 0; }
+    [ "$now" -ge $((ZSITES_LAST + ZAPRET_ALT_MIN * 60)) ] || return 0
+    vpn_up_now && return 0
+    pid=$(cat "$ZSCAN_PID_FILE" 2>/dev/null)
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && return 0   # идёт подбор/сторож
+    ZSITES_LAST=$now
+    log "zapret: проверяю сайты из списков — кому нужна своя стратегия"
+    setsid sh "$ZAPRET_DIR/scan.sh" sites </dev/null >/dev/null 2>&1 &
+}
+
 zapret_rules_off() {
     local t _n
     for t in "$iptables" "$ip6tables"; do
@@ -3337,7 +3419,8 @@ zapret_reconcile() {
     net_identity_reconcile
     # файл стратегий сетей поменяли (WebUI, подбор) — подхватываем сразу
     local stamp=""
-    [ "$ZAPRET_PER_NET" = "1" ] && stamp=$(stat -c '%Y %s %i' "$ZAPRET_NETS_FILE" 2>/dev/null)
+    # (и файл своих стратегий сайтов — scan.sh sites)
+    [ "$ZAPRET_PER_NET" = "1" ] && stamp=$(stat -c '%Y %s %i' "$ZAPRET_NETS_FILE" "$ZALT_FILE" 2>/dev/null)
     [ "$stamp" != "$ZAPRET_NETS_STAMP" ] && ZAPRET_NET_DIRTY=1
     ZAPRET_TICK=$((ZAPRET_TICK + 1))
     if [ "$ZAPRET_TICK" -ge 15 ] || [ "$ZAPRET_STATE" != "on" ] || [ "$ZAPRET_NET_DIRTY" = "1" ]; then
@@ -4657,6 +4740,7 @@ monitor_loop() {
         [ $((_loop_count % 2)) -eq 1 ] && yt_dead_scan
         [ $((_loop_count % 30)) -eq 17 ] && yt_dead_recheck
         zapret_watchdog
+        zapret_sites_check
         _loop_count=$(( _loop_count + 1 ))
     done
 }
@@ -4671,7 +4755,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.24.2 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.25 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
