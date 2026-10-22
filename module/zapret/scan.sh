@@ -251,6 +251,8 @@ run_strat() {
     sleep 0.6
     if ! kill -0 "$NQPID" 2>/dev/null; then
         NQPID=""
+        # итоги прошлого прогона не должны сойти за итоги этого (opened/failed)
+        rm -f "$TMP"/r.* "$TMP"/b.*
         echo "0|$NS|0|0|$a|$stage|nfqws: $(tail -n 1 "$TMP/nq.log" | tr '|' ' ' | cut -c1-80)" >> "$OUT.results"
         return
     fi
@@ -325,8 +327,10 @@ if [ "$MODE" = "sites" ]; then
         NS=$(wc -l < "$TMP/ips")
     }
     # по последнему test_sites: какие открылись (opened) / нет (failed)
-    opened() { while read -r h ip; do read -r v _ < "$TMP/r.$h"; [ "$v" = ok ] && printf '%s ' "$h"; done < "$TMP/ips"; }
-    failed() { while read -r h ip; do read -r v _ < "$TMP/r.$h"; [ "$v" = ok ] || printf '%s ' "$h"; done < "$TMP/ips"; }
+    # нет файла (nfqws не запустился) — не открылся: read без файла оставлял
+    # в v значение от прошлого сайта
+    opened() { while read -r h ip; do v=""; read -r v _ < "$TMP/r.$h" 2>/dev/null; [ "$v" = ok ] && printf '%s ' "$h"; done < "$TMP/ips"; }
+    failed() { while read -r h ip; do v=""; read -r v _ < "$TMP/r.$h" 2>/dev/null; [ "$v" = ok ] || printf '%s ' "$h"; done < "$TMP/ips"; }
     minus() { for _h in $1; do case " $2 " in *" $_h "*) ;; *) printf '%s ' "$_h" ;; esac; done; }
     # заблокированные без контрольных
     BL=$(minus "$BLOCKED" "ya.ru www.google.com")
