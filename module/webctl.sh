@@ -292,7 +292,10 @@ case "$1" in
             iptables -w 2 -t mangle -D VPN_ZAPRET -m owner --uid-owner 0 -j RETURN 2>/dev/null
             iptables -w 2 -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
         }
-        trap st_cleanup EXIT INT TERM HUP
+        # по сигналу — выход (снимет EXIT): обработчик без exit продолжал
+        # проверку, и правила снимались второй раз — чужие (scan.sh) тоже
+        trap st_cleanup EXIT
+        trap 'exit 1' INT TERM HUP
         # мимо AdGuard (его прокси подменяет сертификаты) и мимо основного zapret
         iptables -w 2 -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
         iptables -w 2 -t mangle -I VPN_ZAPRET 1 -m owner --uid-owner 0 -j RETURN 2>/dev/null
@@ -339,7 +342,10 @@ case "$1" in
             iptables -w 2 -t mangle -D VPN_ZAPRET -m owner --uid-owner 0 -j RETURN 2>/dev/null
             iptables -w 2 -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
         }
-        trap yt_cleanup EXIT INT TERM HUP
+        # по сигналу — выход (снимет EXIT): обработчик без exit продолжал
+        # проверку, и правила снимались второй раз — чужие (scan.sh) тоже
+        trap yt_cleanup EXIT
+        trap 'exit 1' INT TERM HUP
         iptables -w 2 -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
         iptables -w 2 -t mangle -I VPN_ZAPRET 1 -m owner --uid-owner 0 -j RETURN 2>/dev/null
         ip=$(curl -s -m 6 --capath "$CA" -H 'accept: application/dns-json' \
@@ -518,7 +524,8 @@ case "$1" in
         [ -d "$CA" ] || CA=/system/etc/security/cacerts
         # мимо AdGuard: его прокси подменяет сертификаты (как в sitetest)
         iptables -w 2 -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
-        trap 'iptables -w 2 -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null' EXIT INT TERM HUP
+        trap 'iptables -w 2 -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null' EXIT
+        trap 'exit 1' INT TERM HUP
         a1() {
             curl -s -m 6 --capath "$CA" "https://dns.google/resolve?name=$1&type=A$2" 2>/dev/null | \
                 grep -oE '"data":"[0-9.]+"' | grep -oE '[0-9.]+' | head -1
