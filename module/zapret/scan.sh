@@ -590,7 +590,7 @@ st stage="перепроверяю лучшие"
 best 3 > "$TMP/top"
 # + 2 лучших именно для YouTube (могут не попасть в общие 3)
 if [ "$NBY" -gt 0 ]; then
-    awk -F'|' -v re="$YT_RE" '$3 == 0 && $5 !~ /--new/ { n = split($7, d, " "); f = 0; for (i = 1; i <= n; i++) if (d[i] ~ re) f++; print f "|" $4 "|" $5 }' "$OUT.results" | \
+    awk -F'|' -v re="$YT_RE" '$3 == 0 && $5 !~ /--new/ && $7 !~ /^nfqws: / { n = split($7, d, " "); f = 0; for (i = 1; i <= n; i++) if (d[i] ~ re) f++; print f "|" $4 "|" $5 }' "$OUT.results" | \
         sort -t'|' -k1,1n -k2,2n | cut -d'|' -f3 | head -n 2 >> "$TMP/top"
     awk '!s[$0]++' "$TMP/top" > "$TMP/top2" && mv -f "$TMP/top2" "$TMP/top"
 fi
@@ -611,6 +611,9 @@ NB=$(echo $BLOCKED | wc -w)
 pick() { # pick gen|yt
     awk -F'|' -v nb="$NB" -v nby="$NBY" -v re="$YT_RE" -v want="$1" '
     $5 ~ /--new/ { next }
+    # nfqws не запустился: в $7 текст ошибки, а не сайты — иначе такая
+    # стратегия считалась открывшей почти всё (и YouTube целиком)
+    $7 ~ /^nfqws: / { next }
     { a = $5; brk = $3 + 0; n = split($7, d, " "); fy = 0; fg = 0
       for (i = 1; i <= n; i++) { if (d[i] ~ re) fy++; else fg++ }
       og = (nb - nby) - fg; oy = nby - fy
