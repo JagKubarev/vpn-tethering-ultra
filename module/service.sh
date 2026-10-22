@@ -321,6 +321,11 @@
 # v2.24.2 — в запасных DNS dagami вместо zapret.moe (и выше comss): 22.10 zapret.moe перестал
 #   отвечать, а Gemini через него был недоступен и раньше; через dagami (как
 #   через Wlrus и not-a-dns) Gemini открывается.
+# v2.28 — .ru/.su/.рф мимо обхода и автосписка (zapret/list-rutld.txt): 22.10 в
+#   автосписке было 14 российских сервисов (yandex, vk, rustore, avito, magnit,
+#   mail.ru…) — nfqws добавлял их по случайным обрывам. Заблокированные .ru из
+#   встроенного/своего списка (novayagazeta.ru и т.п.) — отдельный профиль перед
+#   основным, с той же стратегией. Уже попавшие в автосписок — вычищаются.
 # v2.27 — ревью кода облачными сессиями (PR #1-3: README, WebUI, скрипты):
 #   подбор не выбирает стратегию, с которой nfqws не запустился; `local ip`
 #   в yt_dead_scan затирал $ip (адрес WAN не узнавался); проверки не снимают
@@ -904,6 +909,8 @@ ZAPRET_DIR="$MODULE_DIR/zapret"
 ZAPRET_LIST_DEFAULT="$ZAPRET_DIR/list-default.txt"
 ZAPRET_LIST_YT="$ZAPRET_DIR/list-youtube.txt"        # своя стратегия YouTube (2.22)
 ZAPRET_LIST_EXCL="$ZAPRET_DIR/list-exclude.txt"      # банки/Госуслуги — обход не трогает
+ZAPRET_LIST_RUTLD="$ZAPRET_DIR/list-rutld.txt"       # .ru/.su/.рф — мимо обхода (кроме списков)
+ZAPRET_RU_RUN="/data/local/tmp/vpn_tether_zru.txt"   # .ru-сайты из встроенного и своего списка
 ZAPRET_LIST_USER="/data/adb/vpn_tether_zapret.txt"        # свой список (WebUI)
 ZAPRET_LIST_AUTO="/data/adb/vpn_tether_zapret_auto.txt"   # nfqws пополняет сам
 ZAPRET_VPN_UIDS_FILE="/data/adb/vpn_tether_vpn_uids"      # uid VPN-клиентов, замеченных владельцами VPN
@@ -2934,11 +2941,36 @@ zapret_alt_count() {
     echo "$n"
 }
 
+# .ru/.su/.рф-сайты, которые явно есть во встроенном или своём списке —
+# им обход нужен (заблокированные СМИ); файл переписывается только при изменении
+zapret_ru_listed() {
+    { sed 's/#.*//' "$ZAPRET_LIST_DEFAULT"; sed 's/#.*//' "$ZAPRET_LIST_USER" 2>/dev/null; } | \
+        tr -d ' \r' | tr 'A-Z' 'a-z' | grep -E '(^|\.)(ru|su|xn--p1ai)$' | sort -u > "$ZAPRET_RU_RUN.new"
+    if cmp -s "$ZAPRET_RU_RUN.new" "$ZAPRET_RU_RUN"; then rm -f "$ZAPRET_RU_RUN.new"; else mv -f "$ZAPRET_RU_RUN.new" "$ZAPRET_RU_RUN"; fi
+}
+# российские зоны из автосписка — вон (попадали туда по случайным обрывам)
+zapret_auto_clean_ru() {
+    local n
+    [ -s "$ZAPRET_LIST_AUTO" ] && [ -s "$ZAPRET_LIST_RUTLD" ] || return 0
+    n=$(grep -cE '(^|\.)(ru|su|xn--p1ai)$' "$ZAPRET_LIST_AUTO")
+    [ "${n:-0}" -gt 0 ] || return 0
+    grep -vE '(^|\.)(ru|su|xn--p1ai)$' "$ZAPRET_LIST_AUTO" > "$ZAPRET_LIST_AUTO.tmp"
+    cat "$ZAPRET_LIST_AUTO.tmp" > "$ZAPRET_LIST_AUTO"; rm -f "$ZAPRET_LIST_AUTO.tmp"
+    log "zapret: из автосписка убраны российские сайты ($n): их обход не трогает"
+}
+
 zapret_args() {
-    local a="--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6" ex="" g alt
+    local a="--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6" ex="" g alt rup="" rux=""
     # банки и Госуслуги — мимо обхода в любом профиле (и в автосписок не попадут)
     grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
-    g="--filter-tcp=443 $ex"
+    # .ru/.su/.рф: основной профиль их не трогает и в автосписок не берёт;
+    # такие сайты из списков — своим профилем перед ним, с той же стратегией
+    if grep -q '^[a-z]' "$ZAPRET_LIST_RUTLD" 2>/dev/null; then
+        rux="--hostlist-exclude=$ZAPRET_LIST_RUTLD"
+        zapret_ru_listed
+        [ -s "$ZAPRET_RU_RUN" ] && rup="--filter-tcp=443 $ex --hostlist=$ZAPRET_RU_RUN $(zapret_strategy_args "$ZAPRET_DIR" "$ZAPRET_EFF_STRATEGY" "$ZAPRET_EFF_ARGS") --new "
+    fi
+    g="--filter-tcp=443 $ex $rux"
     if [ "$ZAPRET_MODE" = "list" ]; then
         g="$g --hostlist=$ZAPRET_LIST_DEFAULT"
         # пустой список не передаём: не полагаемся на то, как nfqws его трактует
@@ -2950,9 +2982,9 @@ zapret_args() {
     # nfqws берёт первый подходящий
     alt=$(zapret_alt_profiles "$ex")
     if [ -n "$ZAPRET_EFF_YT" ] && grep -q '[a-z0-9]' "$ZAPRET_LIST_YT" 2>/dev/null; then
-        echo "$a $alt--filter-tcp=443 $ex --hostlist=$ZAPRET_LIST_YT $(zapret_strategy_args "$ZAPRET_DIR" custom "$ZAPRET_EFF_YT") --new $g"
+        echo "$a $alt--filter-tcp=443 $ex --hostlist=$ZAPRET_LIST_YT $(zapret_strategy_args "$ZAPRET_DIR" custom "$ZAPRET_EFF_YT") --new $rup$g"
     else
-        echo "$a $alt$g"
+        echo "$a $alt$rup$g"
     fi
 }
 
@@ -3020,6 +3052,7 @@ zapret_start() {
     local pid
     zapret_kill_all
     [ -f "$ZAPRET_LIST_AUTO" ] || { : > "$ZAPRET_LIST_AUTO"; chmod 600 "$ZAPRET_LIST_AUTO"; }
+    zapret_auto_clean_ru
     : > "$ZAPRET_LOG"
     # $1 без кавычек: это список аргументов, собранный zapret_args
     "$NFQWS_BIN" $1 >> "$ZAPRET_LOG" 2>&1 &
@@ -4830,7 +4863,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.27 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.28 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
