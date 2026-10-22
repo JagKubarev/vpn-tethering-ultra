@@ -313,6 +313,11 @@
 #     плеер штурмовал 58 раз за 30 с, пока ролик стоял;
 #   - раз в ~минуту отбитые перепроверяются в фоне (рукопожатие с нейтральным
 #     именем мимо обхода): ожил — отбой снимается сразу. Срок отбоя 20 -> 10 мин.
+# v2.24.1 — «по сетям Google» (без пометки googlevideo) — только соединения
+#   раздачи; у телефона пометка не стирается (tether_unblock больше не нужен).
+#   22.10 за 13 ч сторож 8 раз зря вставал по «застрявшим YouTube», а это были
+#   заблокированные сайты на Google Cloud (34.149.x, 34.160.x) и API Google.
+#   Застрявшие считаются только по помеченным googlevideo.com.
 # ============================================================================
 # ============================================================================
 
@@ -3130,7 +3135,11 @@ yt_dead_scan() {
         [ "$(awk 'END {print NR}' "$YT_DEAD_FILE")" != "$n" ] && changed=1
     fi
     [ -f "$YT_SEEN_FILE" ] || : > "$YT_SEEN_FILE"
-    out=$($CONNTRACK_BIN -L -p tcp --dport 443 2>/dev/null | awk -v now="$now" -v after="$YT_DEAD_AFTER" -v sf="$YT_SEEN_FILE" -v gr="$YT_GRANGES" '
+    # адрес телефона в мобильной сети: его соединения помечены надёжно,
+    # подстраховка "по сетям Google" — только для раздачи
+    local wip="$LAST_WAN_IP"
+    [ -n "$wip" ] || wip=$($ip -4 addr show "$LAST_WAN_IFACE" 2>/dev/null | awk '/inet / {sub(/\/.*/, "", $2); print $2; exit}')
+    out=$($CONNTRACK_BIN -L -p tcp --dport 443 2>/dev/null | awk -v now="$now" -v after="$YT_DEAD_AFTER" -v sf="$YT_SEEN_FILE" -v gr="$YT_GRANGES" -v wip="$wip" '
         FILENAME == gr { gs[++ng] = $1; ge[ng] = $2; next }
         FILENAME == sf { seen[$1] = $2; rep[$1] = $4; next }
         / ESTABLISHED / {
@@ -3147,7 +3156,9 @@ yt_dead_scan() {
             # приложение -> AdGuard (REDIRECT): отвечает сам AdGuard, о сервере это ничего не говорит
             if (rsrc != dst) next
             # не помечено как googlevideo — тогда только если сервер в сетях Google
-            if (int(mk / 268435456) % 2 == 0) {
+            marked = (int(mk / 268435456) % 2 == 1)
+            if (!marked) {
+                if (src == wip) next
                 split(dst, o, "."); n = ((o[1] * 256 + o[2]) * 256 + o[3]) * 256 + o[4]; g = 0
                 for (j = 1; j <= ng; j++) if (n >= gs[j] && n <= ge[j]) { g = 1; break }
                 if (!g) next
@@ -3158,6 +3169,8 @@ yt_dead_scan() {
             if (bo < 600 || pr < 1 || br > 60 * pr) next
             k = src ":" sp ">" dst
             kind = (pr <= 1) ? "stuck" : "dead"
+            # застрявшие (сигнал сторожу) — только точно googlevideo.com
+            if (kind == "stuck" && !marked) next
             t0 = (k in seen) ? seen[k] : now
             d = (k in rep) ? rep[k] : 0
             if (now - t0 >= after && d == 0) { print "HIT", kind, dst; d = 1 }
@@ -4655,7 +4668,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.24 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.24.1 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
