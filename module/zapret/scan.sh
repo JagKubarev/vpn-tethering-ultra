@@ -65,7 +65,9 @@ event() {
     chmod 600 "$EVENTS" 2>/dev/null
 }
 
-RULE="-o $WAN -m owner --uid-owner 0 -p tcp --dport 443 -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
+# ! --gid-owner 3999: DoH dnsproxy (root, группа 3999) тестовые стратегии не
+# трогают — иначе его новые соединения во время подбора резались/ломались
+RULE="-o $WAN -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
 # первые ответы сервера на запросы сканера — тоже в nfqws: без них не
 # работают --wssize и autottl (2.25). Соединения сканера — по биту connmark.
 SCMARK=0x08000000

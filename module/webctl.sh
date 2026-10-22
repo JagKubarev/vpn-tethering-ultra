@@ -285,7 +285,7 @@ case "$1" in
         CA=/apex/com.android.conscrypt/cacerts
         [ -d "$CA" ] || CA=/system/etc/security/cacerts
         Q=202
-        RULE_NFQ="-o $wan -m owner --uid-owner 0 -p tcp --dport 443 -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
+        RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
         st_cleanup() {
             [ -n "$nqpid" ] && kill "$nqpid" 2>/dev/null
             iptables -w 2 -t mangle -D POSTROUTING $RULE_NFQ 2>/dev/null
@@ -335,7 +335,7 @@ case "$1" in
         CA=/apex/com.android.conscrypt/cacerts
         [ -d "$CA" ] || CA=/system/etc/security/cacerts
         Q=202
-        RULE_NFQ="-o $wan -m owner --uid-owner 0 -p tcp --dport 443 -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
+        RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
         yt_cleanup() {
             [ -n "$nqpid" ] && kill "$nqpid" 2>/dev/null
             iptables -w 2 -t mangle -D POSTROUTING $RULE_NFQ 2>/dev/null
@@ -375,6 +375,9 @@ case "$1" in
         ;;
     znet-set)
         st="$2"; a="$3"; yt="$5"
+        # WebUI зовёт без 5-го аргумента — своя стратегия YouTube сети
+        # остаётся прежней (раньше молча стиралась); подбор передаёт его всегда
+        keep_yt=0; [ $# -lt 5 ] && keep_yt=1
         note=$(printf '%s' "$4" | tr -d '\r\n|' | cut -c1-120)
         [ -z "$yt" ] || sh "$MODDIR/service.sh" --check ZAPRET_ARGS "$yt" 2>/dev/null || { echo "ERR недопустимые параметры YouTube"; exit 1; }
         [ "$yt" = "$a" ] && yt=""
@@ -383,6 +386,10 @@ case "$1" in
         if [ "$st" = custom ]; then [ -n "$a" ] || { echo "ERR нет параметров"; exit 1; }; else a=""; fi
         d=$(cur_net); k=${d%%"|"*}; l=${d#*"|"}
         [ -n "$k" ] || { echo "ERR не понял, что за сеть (нет Wi-Fi/мобильной сети или модуль её ещё не видел)"; exit 1; }
+        if [ "$keep_yt" = 1 ] && [ -f "$ZNETS" ]; then
+            yt=$(K="$k" awk -F'|' '$1 == ENVIRON["K"] { y = $7 } END { print y }' "$ZNETS")
+            [ "$yt" = "$a" ] && yt=""
+        fi
         {
             [ -f "$ZNETS" ] && K="$k" awk -F'|' '$1 != ENVIRON["K"]' "$ZNETS"
             printf '%s|%s|%s|%s|%s|%s|%s\n' "$k" "$st" "$a" "$l" "$note" "$(date '+%Y-%m-%d %H:%M')" "$yt"

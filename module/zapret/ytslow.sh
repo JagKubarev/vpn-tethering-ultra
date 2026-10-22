@@ -24,12 +24,14 @@
 # Предохранитель: за 10 мин >= 30 обрывов и ни одного быстрого — режут всё
 # подряд, обрывы только мешают: пауза 10 мин.
 #
-#   ytslow.sh PID_ДЕМОНА
+#   ytslow.sh PID_ДЕМОНА [CONNTRACK]
 # ============================================================================
 DPID="$1"
 MODDIR="${0%/*}/.."
 [ -f "$MODDIR/service.sh" ] || MODDIR=/data/adb/modules/vpn-to-hotspot-usb
 case "$(uname -m)" in aarch64|arm64) CT="$MODDIR/bin/conntrack-arm64" ;; *) CT="$MODDIR/bin/conntrack-arm" ;; esac
+# демон передаёт свой (бывает системный conntrack — тогда в bin/ его нет)
+[ -n "$2" ] && CT="$2"
 LOG_FILE=/data/local/tmp/vpn_tether.log
 D=/data/local/tmp/vpn_tether_ytslow     # .state .rj .act .stat
 AGE_MAX=15
@@ -43,7 +45,7 @@ cleanup() {
 }
 trap 'exit 0' INT TERM HUP
 trap cleanup EXIT
-[ -x "$CT" ] || exit 1
+[ -x "$CT" ] || command -v "$CT" >/dev/null 2>&1 || exit 1
 # REJECT прошлого экземпляра (убит без уборки, kill -9) — снять, а не
 # потерять их список: иначе висят в FORWARD до перезагрузки
 cleanup
