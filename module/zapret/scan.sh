@@ -137,17 +137,24 @@ $IPT -t mangle -I VPN_ZAPRET 1 -m owner --uid-owner 0 -j RETURN 2>/dev/null
 st stage="узнаю адреса"
 : > "$TMP/ips"
 # по 16 сразу: в режиме sites сайтов сотни
-n=0; pids=""
-for h in $SITES; do
-    (
-        ip=$(curl -s -m 6 --capath "$CA" -H 'accept: application/dns-json' \
-            "https://1.1.1.1/dns-query?name=$h&type=A" 2>/dev/null | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')
-        [ -n "$ip" ] && echo "$h $ip" > "$TMP/a.$h"
-    ) &
-    pids="$pids $!"; n=$((n + 1))
-    [ $((n % 16)) -eq 0 ] && { wait $pids; pids=""; }
-done
-[ -n "$pids" ] && wait $pids
+# не узнали с первого раза (телефон под нагрузкой, 22.10 после загрузки
+# узнались 56 из ~210) — второй заход по оставшимся, по 8 и с запасом времени
+resolve() { # resolve ПАРАЛЛЕЛЬНО ТАЙМАУТ
+    local n=0 pids="" h
+    for h in $SITES; do
+        [ -s "$TMP/a.$h" ] && continue
+        (
+            ip=$(curl -s -m "$2" --capath "$CA" -H 'accept: application/dns-json' \
+                "https://1.1.1.1/dns-query?name=$h&type=A" 2>/dev/null | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')
+            [ -n "$ip" ] && echo "$h $ip" > "$TMP/a.$h"
+        ) &
+        pids="$pids $!"; n=$((n + 1))
+        [ $((n % $1)) -eq 0 ] && { wait $pids; pids=""; }
+    done
+    [ -n "$pids" ] && wait $pids
+}
+resolve 16 6
+resolve 8 10
 for h in $SITES; do cat "$TMP/a.$h" 2>/dev/null; done | awk '!s[$1]++' > "$TMP/ips"
 rm -f "$TMP"/a.*
 [ -s "$TMP/ips" ] || { st state=error msg="не удалось узнать адреса сайтов"; exit 1; }
@@ -211,6 +218,16 @@ while read -r h ip; do
     if [ "$v" = ok ]; then BASE_OK="$BASE_OK $h"; else BLOCKED="$BLOCKED $h"; fi
 done < "$TMP/ips"
 st blocked="$(echo $BLOCKED)"
+# Плановая проверка сайтов: адресов узнали < 60% или «заблокировано» > 90% —
+# телефон/сеть не успевали (22.10 19:57: 56 из ~210, из них 54 «закрыты»),
+# итог был бы мусором. Ничего не пишем, демон повторит через ~15 мин.
+if [ "$MODE" = sites ] && [ -z "$SITES_ARG" ]; then
+    _req=$(echo $SITES | wc -w); _got=$(wc -l < "$TMP/ips"); _nb=$(echo $BLOCKED | wc -w)
+    if [ $((_got * 10)) -lt $((_req * 6)) ] || { [ "$_got" -ge 20 ] && [ $((_nb * 10)) -gt $((_got * 9)) ]; }; then
+        st state=error msg="сеть или телефон не успевали (адресов $_got из $_req, закрыто $_nb) — повторю позже"
+        exit 1
+    fi
+fi
 [ -n "$BASE_OK" ] || { st state=error msg="через $WAN не открылся ни один сайт, даже без блокировок — нет интернета или сеть сменилась"; exit 1; }
 if [ -z "$BLOCKED" ]; then
     [ "$MODE" = check ] && wd_last "ничего не заблокировано"
