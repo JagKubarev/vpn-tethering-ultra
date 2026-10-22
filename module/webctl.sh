@@ -87,6 +87,10 @@ case "$1" in
         sed -n 's/^version=/module_version=/p' "$MODDIR/module.prop"
         # строки 1-2 — старый формат, страница читает только КЛЮЧ=значение
         sed '1,2d' "$STATUS_FILE" 2>/dev/null
+        # счётчики обрыва медленных видео — свежие (статус демон пишет только при событиях)
+        if ! grep -q '^yt_slow=off' "$STATUS_FILE" 2>/dev/null && [ -f /data/local/tmp/vpn_tether_ytslow.stat ]; then
+            sed -n 's/^state=/yt_slow=/p; s/^kills=/yt_slow_kills=/p; s/^fast=/yt_slow_fast=/p; s/^degr=/yt_slow_degr=/p' /data/local/tmp/vpn_tether_ytslow.stat
+        fi
         # итог последней проверки сторожа (пишет zapret/scan.sh check)
         w=$(head -n 1 "$ZSCAN.wd" 2>/dev/null | tr -d '\r')
         [ -n "$w" ] && echo "zwd_last=$w"
