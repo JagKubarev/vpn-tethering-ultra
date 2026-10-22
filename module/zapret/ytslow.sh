@@ -44,6 +44,9 @@ cleanup() {
 trap 'exit 0' INT TERM HUP
 trap cleanup EXIT
 [ -x "$CT" ] || exit 1
+# REJECT прошлого экземпляра (убит без уборки, kill -9) — снять, а не
+# потерять их список: иначе висят в FORWARD до перезагрузки
+cleanup
 : > "$D.state"; : > "$D.rj"; : > "$D.ev"
 WIP=""; tick=0; pause_until=0; kills=0; fasts=0; degr=0; sum_t=$(date +%s); sum_k=0; sum_f=0
 

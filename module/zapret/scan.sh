@@ -72,13 +72,18 @@ SCMARK=0x08000000
 RULE_MK="-o $WAN -m owner --uid-owner 0 -p tcp --dport 443 -j CONNMARK --set-xmark $SCMARK/$SCMARK"
 RULE_IN="-i $WAN -p tcp --sport 443 -m connmark --mark $SCMARK/$SCMARK -m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3 -j NFQUEUE --queue-num $Q --queue-bypass"
 NQPID=""
+BYPASS=0    # 1 = исключения uid 0 (nat OUTPUT, VPN_ZAPRET) поставлены нами
 cleanup() {
     [ -n "$NQPID" ] && kill "$NQPID" 2>/dev/null
     $IPT -t mangle -D POSTROUTING $RULE 2>/dev/null
     $IPT -t mangle -D OUTPUT $RULE_MK 2>/dev/null
     $IPT -t mangle -D PREROUTING $RULE_IN 2>/dev/null
-    $IPT -t mangle -D VPN_ZAPRET -m owner --uid-owner 0 -j RETURN 2>/dev/null
-    $IPT -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
+    # такие же ставят проверки WebUI (webctl.sh sitetest и др.): выход до
+    # установки своих не должен снимать чужие
+    if [ "$BYPASS" = 1 ]; then
+        $IPT -t mangle -D VPN_ZAPRET -m owner --uid-owner 0 -j RETURN 2>/dev/null
+        $IPT -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
+    fi
     rm -rf "$TMP"
     rm -f "$OUT.pid"
 }
@@ -130,6 +135,7 @@ if [ "$MODE" = sites ]; then
 fi
 
 # мимо AdGuard; основной zapret не трогает запросы сканера
+BYPASS=1
 $IPT -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
 $IPT -t mangle -I VPN_ZAPRET 1 -m owner --uid-owner 0 -j RETURN 2>/dev/null
 
@@ -251,6 +257,8 @@ run_strat() {
     sleep 0.6
     if ! kill -0 "$NQPID" 2>/dev/null; then
         NQPID=""
+        # итоги прошлого прогона не должны сойти за итоги этого (opened/failed)
+        rm -f "$TMP"/r.* "$TMP"/b.*
         echo "0|$NS|0|0|$a|$stage|nfqws: $(tail -n 1 "$TMP/nq.log" | tr '|' ' ' | cut -c1-80)" >> "$OUT.results"
         return
     fi
@@ -325,8 +333,10 @@ if [ "$MODE" = "sites" ]; then
         NS=$(wc -l < "$TMP/ips")
     }
     # по последнему test_sites: какие открылись (opened) / нет (failed)
-    opened() { while read -r h ip; do read -r v _ < "$TMP/r.$h"; [ "$v" = ok ] && printf '%s ' "$h"; done < "$TMP/ips"; }
-    failed() { while read -r h ip; do read -r v _ < "$TMP/r.$h"; [ "$v" = ok ] || printf '%s ' "$h"; done < "$TMP/ips"; }
+    # нет файла (nfqws не запустился) — не открылся: read без файла оставлял
+    # в v значение от прошлого сайта
+    opened() { while read -r h ip; do v=""; read -r v _ < "$TMP/r.$h" 2>/dev/null; [ "$v" = ok ] && printf '%s ' "$h"; done < "$TMP/ips"; }
+    failed() { while read -r h ip; do v=""; read -r v _ < "$TMP/r.$h" 2>/dev/null; [ "$v" = ok ] || printf '%s ' "$h"; done < "$TMP/ips"; }
     minus() { for _h in $1; do case " $2 " in *" $_h "*) ;; *) printf '%s ' "$_h" ;; esac; done; }
     # заблокированные без контрольных
     BL=$(minus "$BLOCKED" "ya.ru www.google.com")
@@ -590,7 +600,7 @@ st stage="перепроверяю лучшие"
 best 3 > "$TMP/top"
 # + 2 лучших именно для YouTube (могут не попасть в общие 3)
 if [ "$NBY" -gt 0 ]; then
-    awk -F'|' -v re="$YT_RE" '$3 == 0 && $5 !~ /--new/ { n = split($7, d, " "); f = 0; for (i = 1; i <= n; i++) if (d[i] ~ re) f++; print f "|" $4 "|" $5 }' "$OUT.results" | \
+    awk -F'|' -v re="$YT_RE" '$3 == 0 && $5 !~ /--new/ && $7 !~ /^nfqws: / { n = split($7, d, " "); f = 0; for (i = 1; i <= n; i++) if (d[i] ~ re) f++; print f "|" $4 "|" $5 }' "$OUT.results" | \
         sort -t'|' -k1,1n -k2,2n | cut -d'|' -f3 | head -n 2 >> "$TMP/top"
     awk '!s[$0]++' "$TMP/top" > "$TMP/top2" && mv -f "$TMP/top2" "$TMP/top"
 fi
@@ -611,6 +621,9 @@ NB=$(echo $BLOCKED | wc -w)
 pick() { # pick gen|yt
     awk -F'|' -v nb="$NB" -v nby="$NBY" -v re="$YT_RE" -v want="$1" '
     $5 ~ /--new/ { next }
+    # nfqws не запустился: в $7 текст ошибки, а не сайты — иначе такая
+    # стратегия считалась открывшей почти всё (и YouTube целиком)
+    $7 ~ /^nfqws: / { next }
     { a = $5; brk = $3 + 0; n = split($7, d, " "); fy = 0; fg = 0
       for (i = 1; i <= n; i++) { if (d[i] ~ re) fy++; else fg++ }
       og = (nb - nby) - fg; oy = nby - fy

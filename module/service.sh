@@ -3257,7 +3257,8 @@ yt_dead_hits() {
 #   1 (только SYN-ACK) — ClientHello не дошёл: это DPI, а не сервер -> сторожу.
 yt_dead_scan() {
     [ "$YT_DEAD_STATE" = "on" ] || return 0
-    local now out ip net n t keep="" changed=0 nlist
+    local now out dip net n t keep="" changed=0 nlist
+    # не ip: локальная ip затирала бы $ip (/system/bin/ip) — адрес WAN ниже не узнавался
     now=$(date +%s)
     if [ -s "$YT_DEAD_FILE" ]; then
         n=$(awk 'END {print NR}' "$YT_DEAD_FILE")
@@ -3310,12 +3311,12 @@ yt_dead_scan() {
     ' "$YT_GRANGES" "$YT_SEEN_FILE" - 2>/dev/null)
     if [ -f "$YT_SEEN_FILE.new" ]; then mv -f "$YT_SEEN_FILE.new" "$YT_SEEN_FILE"; else : > "$YT_SEEN_FILE"; fi
 
-    for ip in $(printf '%s\n' "$out" | awk '$1 == "HIT" && $2 == "dead" {print $3}' | sort -u); do
-        case "$ip" in *[!0-9.]*|'') continue ;; esac
-        net="$ip/32"; n24="${ip%.*}.0/24"
+    for dip in $(printf '%s\n' "$out" | awk '$1 == "HIT" && $2 == "dead" {print $3}' | sort -u); do
+        case "$dip" in *[!0-9.]*|'') continue ;; esac
+        net="$dip/32"; n24="${dip%.*}.0/24"
         # уже открытые соединения телефона к нему — закрыть сразу: AdGuard и
         # приложение переподключатся (с раздачи соединение доживёт до таймаута)
-        ss -K -tn dst "$ip" dport = :443 >/dev/null 2>&1
+        ss -K -tn dst "$dip" dport = :443 >/dev/null 2>&1
         grep -q -e "^$net " -e "^$n24 " "$YT_DEAD_FILE" 2>/dev/null && continue
         [ "$now" -lt "$YT_DEAD_PAUSE" ] && continue
         # лавина (>=6 подсетей за минуту) — не мёртвые серверы, а сломанный
@@ -3332,14 +3333,14 @@ yt_dead_scan() {
         [ "${nlist:-0}" -ge "$YT_DEAD_MAX" ] && continue
         # второй мёртвый в той же /24 — отбиваем подсеть целиком (в записи —
         # все замеченные адреса: по ним перепроверка поймёт, ожила ли она)
-        sib=$(awk -v p="${ip%.*}." 'index($1, p) == 1 && $1 ~ /\/32$/ { sub(/\/32$/, "", $1); printf "%s,", $1 }' "$YT_DEAD_FILE" 2>/dev/null)
+        sib=$(awk -v p="${dip%.*}." 'index($1, p) == 1 && $1 ~ /\/32$/ { sub(/\/32$/, "", $1); printf "%s,", $1 }' "$YT_DEAD_FILE" 2>/dev/null)
         if [ -n "$sib" ]; then
-            awk -v p="${ip%.*}." '!(index($1, p) == 1 && $1 ~ /\/32$/)' "$YT_DEAD_FILE" > "$YT_DEAD_FILE.tmp" && mv -f "$YT_DEAD_FILE.tmp" "$YT_DEAD_FILE"
-            echo "$n24 $((now + YT_DEAD_TTL)) $sib$ip" >> "$YT_DEAD_FILE"
-            log "YouTube: видеосервер $ip молчит после ClientHello — в $n24 это уже второй (${sib%,}), отбиваю подсеть на $((YT_DEAD_TTL / 60)) мин"
+            awk -v p="${dip%.*}." '!(index($1, p) == 1 && $1 ~ /\/32$/)' "$YT_DEAD_FILE" > "$YT_DEAD_FILE.tmp" && mv -f "$YT_DEAD_FILE.tmp" "$YT_DEAD_FILE"
+            echo "$n24 $((now + YT_DEAD_TTL)) $sib$dip" >> "$YT_DEAD_FILE"
+            log "YouTube: видеосервер $dip молчит после ClientHello — в $n24 это уже второй (${sib%,}), отбиваю подсеть на $((YT_DEAD_TTL / 60)) мин"
         else
-            echo "$net $((now + YT_DEAD_TTL)) $ip" >> "$YT_DEAD_FILE"
-            log "YouTube: видеосервер $ip принял ClientHello и молчит ${YT_DEAD_AFTER}с — отбиваю его на $((YT_DEAD_TTL / 60)) мин"
+            echo "$net $((now + YT_DEAD_TTL)) $dip" >> "$YT_DEAD_FILE"
+            log "YouTube: видеосервер $dip принял ClientHello и молчит ${YT_DEAD_AFTER}с — отбиваю его на $((YT_DEAD_TTL / 60)) мин"
         fi
         YT_DEAD_ADDS="$YT_DEAD_ADDS $now"
         changed=1
