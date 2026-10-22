@@ -321,6 +321,14 @@
 # v2.24.2 — в запасных DNS dagami вместо zapret.moe (и выше comss): 22.10 zapret.moe перестал
 #   отвечать, а Gemini через него был недоступен и раньше; через dagami (как
 #   через Wlrus и not-a-dns) Gemini открывается.
+# v2.26 — обрыв медленных видеосоединений (YT_SLOW_RETRY, zapret/ytslow.sh).
+#   22.10 замеры на YOTA: ТСПУ режет ~85-90% соединений с Google до ~1 Мбит/с
+#   по адресам (имя сайта не важно; QUIC глушится совсем), а остальные идут
+#   20-60 Мбит/с и такими остаются — это видно по первым 2-3 секундам.
+#   Медленное молодое видеосоединение рвём, плеер переподключается и иногда
+#   попадает на быстрое. Прототип 15 мин: 43 обрыва, 5 быстрых, «скорее
+#   лучше»; обрыв служебных соединений YouTube (адреса .4) вешал ролик —
+#   их не трогаем, как и соединения старше 15 с.
 # v2.25.2 — подбор своей стратегии для сайтов: переданные вручную подбираются
 #   всегда (раньше «основная не открыла ни одного из 3» останавливала и их);
 #   у доменов YouTube в кандидатах и основная стратегия сети. 22.10:
@@ -467,6 +475,11 @@ YT_DEAD_FAILFAST=1
 YT_DEAD_AFTER=6         # сек без ответа сервера после ClientHello = мёртв
 YT_DEAD_TTL=600         # сек держать сервер/подсеть в отбое (ожил раньше — снимаем)
 YT_DEAD_MAX=16          # больше записей не держим
+# Обрыв медленных видеосоединений (2.26): ТСПУ режет большую часть
+# соединений с Google до ~1 Мбит/с, но не все. Медленное молодое соединение
+# с видеосервером рвём — плеер переподключается и иногда попадает на быстрое.
+# Работает вместе с отбоем мёртвых серверов (их пометка соединений).
+YT_SLOW_RETRY=1
 # Сторож обхода (2.18): раз в ZAPRET_WATCHDOG_MIN минут (и сразу, если
 # видео-соединения стали застревать на ClientHello) zapret/scan.sh check
 # проверяет стратегию сети; сломалась — прежние рабочие, затем быстрый
@@ -548,7 +561,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT)
+        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
@@ -596,7 +609,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -906,6 +919,8 @@ YT_SEEN_FILE="/data/local/tmp/vpn_tether_ytseen"   # кандидаты: "кор
 YT_GRANGES="/data/local/tmp/vpn_tether_ytgr"       # сети Google числами: "начало конец"
 YT_RECHECK_FILE="/data/local/tmp/vpn_tether_ytrecheck"  # фоновая перепроверка отбитых
 YT_RECHECK_PID=""
+YT_SLOW_PID=""          # zapret/ytslow.sh — обрыв медленных видеосоединений
+YT_SLOW_STAT="/data/local/tmp/vpn_tether_ytslow.stat"
 YT_DEAD_STATE=""        # "" | on
 YT_DEAD_SIG=""          # содержимое цепочки отбоя (чтобы не пересобирать зря)
 YT_DEAD_TICK=0
@@ -1105,6 +1120,13 @@ update_status() {
         echo "ggc=$([ -n "$GGC_STATE" ] && echo on || echo off)"
         echo "yt_dead=$([ "$YT_DEAD_STATE" = on ] && awk 'END {print NR}' "$YT_DEAD_FILE" 2>/dev/null || echo off)"
         echo "yt_dead_hits=$(yt_dead_hits)"
+        if [ -n "$YT_SLOW_PID" ]; then
+            echo "yt_slow=$(sed -n 's/^state=//p' "$YT_SLOW_STAT" 2>/dev/null || echo on)"
+            echo "yt_slow_kills=$(sed -n 's/^kills=//p' "$YT_SLOW_STAT" 2>/dev/null)"
+            echo "yt_slow_fast=$(sed -n 's/^fast=//p' "$YT_SLOW_STAT" 2>/dev/null)"
+        else
+            echo "yt_slow=off"
+        fi
         echo "zwd=$ZAPRET_WATCHDOG"
         echo "stealth=$([ "$STEALTH_STATE" = on ] && echo on || echo off)"
         echo "stealth_strict=$TETHER_TTL_STRICT"
@@ -3168,6 +3190,7 @@ yt_dead_off() {
     yt_dead_hooks_off
     $iptables -F "$CHAIN_YT_DEAD" 2>/dev/null; $iptables -X "$CHAIN_YT_DEAD" 2>/dev/null
     [ -n "$YT_RECHECK_PID" ] && kill "$YT_RECHECK_PID" 2>/dev/null; YT_RECHECK_PID=""
+    yt_slow_stop
     rm -f "$YT_DEAD_FILE" "$YT_SEEN_FILE" "$YT_SEEN_FILE.new" "$YT_GRANGES" "$YT_RECHECK_FILE".*
     YT_DEAD_STATE=""; YT_DEAD_SIG=""; YT_STUCK=""
 }
@@ -3189,6 +3212,28 @@ yt_dead_apply() {
             log "WARNING: YouTube: не удалось поставить отбой для $net"
     done
     YT_DEAD_SIG="$sig"
+}
+
+# --- YT_SLOW_RETRY: фоновый zapret/ytslow.sh, пока работает отбой мёртвых
+# (он помечает видеосоединения). Сам выходит, когда демона нет.
+yt_slow_reconcile() {
+    local p
+    if [ "$YT_SLOW_RETRY" = "1" ] && [ "$YT_DEAD_STATE" = "on" ]; then
+        [ -n "$YT_SLOW_PID" ] && kill -0 "$YT_SLOW_PID" 2>/dev/null && return 0
+        # чужой/оставшийся экземпляр (демон перезапускали) — убрать
+        for p in $(pgrep -f "zapret/ytslow.sh" 2>/dev/null); do kill "$p" 2>/dev/null; done
+        [ -n "$YT_SLOW_PID" ] || log "YouTube: обрыв медленных видеосоединений включён — плеер переподключится и иногда попадёт на быстрое"
+        setsid sh "$ZAPRET_DIR/ytslow.sh" "$$" </dev/null >/dev/null 2>&1 &
+        YT_SLOW_PID=$!
+    else
+        [ -n "$YT_SLOW_PID" ] && log "YouTube: обрыв медленных видеосоединений выключен"
+        yt_slow_stop
+    fi
+}
+yt_slow_stop() {
+    [ -n "$YT_SLOW_PID" ] && kill "$YT_SLOW_PID" 2>/dev/null
+    YT_SLOW_PID=""
+    rm -f "$YT_SLOW_STAT"
 }
 
 yt_dead_hits() {
@@ -4752,6 +4797,7 @@ monitor_loop() {
         zapret_reconcile
         [ $((_loop_count % 2)) -eq 1 ] && yt_dead_scan
         [ $((_loop_count % 30)) -eq 17 ] && yt_dead_recheck
+        [ $((_loop_count % 5)) -eq 4 ] && yt_slow_reconcile
         zapret_watchdog
         zapret_sites_check
         _loop_count=$(( _loop_count + 1 ))
@@ -4768,11 +4814,11 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.25.2 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.26 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
-log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/per_net=$ZAPRET_PER_NET YT_DEAD=$YT_DEAD_FAILFAST WATCHDOG=$ZAPRET_WATCHDOG/${ZAPRET_WATCHDOG_MIN}m META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
+log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/per_net=$ZAPRET_PER_NET YT_DEAD=$YT_DEAD_FAILFAST YT_SLOW=$YT_SLOW_RETRY WATCHDOG=$ZAPRET_WATCHDOG/${ZAPRET_WATCHDOG_MIN}m META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
 
 disable_hw_offload
 stealth_apply
