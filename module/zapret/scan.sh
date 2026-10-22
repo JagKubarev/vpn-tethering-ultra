@@ -86,6 +86,12 @@ on_exit() {
     cleanup
     [ "$S_state" = "running" ] && st state=stopped msg="остановлено"
     [ "$MODE0" = check ] && [ "$S_state" != done ] && wd_last "не проверил: ${S_msg:-$S_state}"
+    # проверка сайтов сорвалась (смена сети, VPN, нет адреса) — в журнал, и
+    # метка демону: повторить через ~15 мин, а не через ZAPRET_ALT_MIN
+    if [ "$MODE0" = sites ] && [ "$S_state" != done ]; then
+        event "сайты: не проверил — ${S_msg:-$S_state}"
+        : > "$OUT.sitesfail"
+    fi
 }
 trap on_exit EXIT
 trap 'exit 0' INT TERM
@@ -352,7 +358,7 @@ EOF
         done 3< "$TMP/cands"
     fi
     if [ "$(sh "$ZDIR/netid.sh" "$WAN" 2>/dev/null | head -1)" != "$NETID" ]; then
-        st state=done stage="готово" msg="сеть сменилась во время проверки — не запоминаю"
+        st state=stopped stage="готово" msg="сеть сменилась во время проверки — не запоминаю"
         exit 0
     fi
     # проверенные сайты теряют прежние записи, закреплённые получают новые;

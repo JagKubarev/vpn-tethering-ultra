@@ -321,6 +321,8 @@
 # v2.24.2 — в запасных DNS dagami вместо zapret.moe (и выше comss): 22.10 zapret.moe перестал
 #   отвечать, а Gemini через него был недоступен и раньше; через dagami (как
 #   через Wlrus и not-a-dns) Gemini открывается.
+# v2.25.1 — сорвавшаяся проверка сайтов (сменилась сеть / упал VPN) пишет
+#   причину в журнал и повторяется через ~15 мин, а не через 3 ч.
 # v2.25 — идеи byedpi --auto / zapret2 circular:
 #   - Своя стратегия для отдельных сайтов (ZAPRET_ALT). Автосписок nfqws
 #     считает сбои только у сайтов, которых в списке ещё нет: сайт из списка,
@@ -3365,6 +3367,12 @@ zapret_sites_check() {
     local now pid
     [ "$ZAPRET_ALT" = "1" ] && [ "$ZAPRET_STATE" = "on" ] && [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] || return 0
     now=$(date +%s)
+    # прошлая сорвалась (scan.sh оставил метку) — повтор через ~15 мин
+    if [ -f "${ZSCAN_PID_FILE%.pid}.sitesfail" ]; then
+        rm -f "${ZSCAN_PID_FILE%.pid}.sitesfail"
+        ZSITES_LAST=$((now - ZAPRET_ALT_MIN * 60 + 900))
+        log "zapret: проверка сайтов сорвалась — повторю через ~15 мин"
+    fi
     # первая — через ~10 мин после старта
     [ "$ZSITES_LAST" -eq 0 ] && { ZSITES_LAST=$((now - ZAPRET_ALT_MIN * 60 + 600)); return 0; }
     [ "$now" -ge $((ZSITES_LAST + ZAPRET_ALT_MIN * 60)) ] || return 0
@@ -4755,7 +4763,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.25 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.25.1 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
