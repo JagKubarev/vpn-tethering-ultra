@@ -297,6 +297,11 @@ if [ "$MODE" = "sites" ]; then
     GEN=$(sh "$MODDIR/service.sh" --zapret-strategy "$KEY" "${NETID#*"|"}" 2>/dev/null | \
         sed "s#@$ZDIR/tls_clienthello_www_google_com.bin#@G#g; s#@$ZDIR/quic_initial_www_google_com.bin#@Q#g")
     [ -n "$CUR" ] || { st state=error msg="не узнал стратегию сети"; exit 1; }
+    # У YouTube своя стратегия — основная для его доменов тоже кандидат (22.10:
+    # yt3.ggpht.com, логотипы каналов, открывался только основной); иначе
+    # основную все сайты уже не прошли — её не повторяем
+    GEN_X="$GEN"
+    case "$CUR" in *" --new "*) GEN_X="" ;; esac
     cp -f "$TMP/ips" "$TMP/ips.all"
     use_ips() { # use_ips "h1 h2 ..." -> $TMP/ips, $NS
         L=" $1 " awk 'index(ENVIRON["L"], " " $1 " ")' "$TMP/ips.all" > "$TMP/ips"
@@ -318,7 +323,8 @@ if [ "$MODE" = "sites" ]; then
         [ -n "$F" ] && { use_ips "$F"; run_strat "$CUR" "основная"; F=$(failed); }
     fi
     NF=$(echo $F | wc -w)
-    if [ "$NB" -ge 3 ] && [ "$NF" -ge "$NB" ]; then
+    # (только при плановой: сайты, переданные вручную, подбираем всегда)
+    if [ -z "$SITES_ARG" ] && [ "$NB" -ge 3 ] && [ "$NF" -ge "$NB" ]; then
         event "сайты: основная стратегия не открыла ни одного из $NB — это поломка самой стратегии (её чинит сторож), сайты не трогаю"
         st state=done stage="готово" msg="основная стратегия не открыла ни одного заблокированного — её чинит сторож"
         exit 0
@@ -341,7 +347,7 @@ if [ "$MODE" = "sites" ]; then
 --dpi-desync=syndata,multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1
 --dpi-desync=fakedsplit --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=badseq
 EOF
-        } | G="$GEN" awk 'NF && $0 != ENVIRON["G"] && !s[$0]++' | head -n 10 > "$TMP/cands"
+        } | G="$GEN_X" awk 'NF && $0 != ENVIRON["G"] && !s[$0]++' | head -n 10 > "$TMP/cands"
         S_total=$((S_done + $(wc -l < "$TMP/cands") * 2))
         NUSED=0
         while IFS= read -r a <&3; do
