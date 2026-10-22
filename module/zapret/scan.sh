@@ -72,13 +72,18 @@ SCMARK=0x08000000
 RULE_MK="-o $WAN -m owner --uid-owner 0 -p tcp --dport 443 -j CONNMARK --set-xmark $SCMARK/$SCMARK"
 RULE_IN="-i $WAN -p tcp --sport 443 -m connmark --mark $SCMARK/$SCMARK -m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3 -j NFQUEUE --queue-num $Q --queue-bypass"
 NQPID=""
+BYPASS=0    # 1 = исключения uid 0 (nat OUTPUT, VPN_ZAPRET) поставлены нами
 cleanup() {
     [ -n "$NQPID" ] && kill "$NQPID" 2>/dev/null
     $IPT -t mangle -D POSTROUTING $RULE 2>/dev/null
     $IPT -t mangle -D OUTPUT $RULE_MK 2>/dev/null
     $IPT -t mangle -D PREROUTING $RULE_IN 2>/dev/null
-    $IPT -t mangle -D VPN_ZAPRET -m owner --uid-owner 0 -j RETURN 2>/dev/null
-    $IPT -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
+    # такие же ставят проверки WebUI (webctl.sh sitetest и др.): выход до
+    # установки своих не должен снимать чужие
+    if [ "$BYPASS" = 1 ]; then
+        $IPT -t mangle -D VPN_ZAPRET -m owner --uid-owner 0 -j RETURN 2>/dev/null
+        $IPT -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
+    fi
     rm -rf "$TMP"
     rm -f "$OUT.pid"
 }
@@ -130,6 +135,7 @@ if [ "$MODE" = sites ]; then
 fi
 
 # мимо AdGuard; основной zapret не трогает запросы сканера
+BYPASS=1
 $IPT -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
 $IPT -t mangle -I VPN_ZAPRET 1 -m owner --uid-owner 0 -j RETURN 2>/dev/null
 
