@@ -321,6 +321,11 @@
 # v2.24.2 — в запасных DNS dagami вместо zapret.moe (и выше comss): 22.10 zapret.moe перестал
 #   отвечать, а Gemini через него был недоступен и раньше; через dagami (как
 #   через Wlrus и not-a-dns) Gemini открывается.
+# v2.25.2 — подбор своей стратегии для сайтов: переданные вручную подбираются
+#   всегда (раньше «основная не открыла ни одного из 3» останавливала и их);
+#   у доменов YouTube в кандидатах и основная стратегия сети. 22.10:
+#   логотипы каналов и картинки сообщества (yt3.ggpht.com) стратегия YouTube
+#   не открывала, а основная (hostfakesplit) и fake+md5sig — открывали.
 # v2.25.1 — сорвавшаяся проверка сайтов (сменилась сеть / упал VPN) пишет
 #   причину в журнал и повторяется через ~15 мин, а не через 3 ч.
 # v2.25 — идеи byedpi --auto / zapret2 circular:
@@ -4763,7 +4768,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v2.25.1 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v2.25.2 (3.10.0-hybrid.22) Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
