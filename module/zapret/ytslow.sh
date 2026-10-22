@@ -16,7 +16,9 @@
 #     трогаем: у него прироста нет);
 #   - рвём только молодые (до 15 с) и не адреса на .4 — это www.youtube.com /
 #     API YouTube, а не видеосерверы (22.10 обрыв такого = ролик висел 1.5 мин);
-#   - когда-то было быстро (> 1 МБ за секунду) — не трогаем никогда.
+#   - когда-то было быстро (> 1 МБ за секунду) — не трогаем, пока ТСПУ его не
+#     «догонит»: 5 с подряд непрерывно качает медленнее ~3 Мбит/с (у плеера,
+#     который просто отдыхает, прироста нет вовсе) — тогда рвём, в журнал.
 # Телефон (сокет на самом телефоне, в т.ч. AdGuard) — ss -K; раздача —
 # REJECT tcp-reset на 15 с для этого соединения.
 # Предохранитель: за 10 мин >= 30 обрывов и ни одного быстрого — режут всё
@@ -43,7 +45,7 @@ trap 'exit 0' INT TERM HUP
 trap cleanup EXIT
 [ -x "$CT" ] || exit 1
 : > "$D.state"; : > "$D.rj"; : > "$D.ev"
-WIP=""; tick=0; pause_until=0; kills=0; fasts=0; sum_t=$(date +%s); sum_k=0; sum_f=0
+WIP=""; tick=0; pause_until=0; kills=0; fasts=0; degr=0; sum_t=$(date +%s); sum_k=0; sum_f=0
 
 while kill -0 "$DPID" 2>/dev/null; do
     now=$(date +%s)
@@ -75,21 +77,31 @@ while kill -0 "$DPID" 2>/dev/null; do
             k = s ":" sp ">" d
             if (!(k in first)) { first[k] = now; h[k] = rb; kd[k] = 0; fast[k] = 0 }
             m = split(h[k], v, ",")
-            nh = rb; for (i = m; i >= 1 && i > m - 3; i--) nh = v[i] "," nh
+            nh = rb; for (i = m; i >= 1 && i > m - 5; i--) nh = v[i] "," nh
             if (m >= 1 && rb - v[m] > 1000000 && !fast[k]) { fast[k] = 1; print "FAST", s, sp, d }
             m2 = split(nh, w, ",")
             if (m2 >= 4 && !kd[k] && !fast[k] && now - first[k] <= amax && d !~ /\.4$/) {
                 g1 = w[m2] - w[m2 - 1]; g2 = w[m2 - 1] - w[m2 - 2]; g3 = w[m2 - 2] - w[m2 - 3]; g = w[m2] - w[m2 - 3]
                 if (g1 > 2000 && g2 > 2000 && g3 > 2000 && g >= 40000 && g <= 1200000) { kd[k] = 1; print "SLOW", s, sp, d, g }
             }
+            # было быстрым, а теперь 5 с непрерывно медленно — догнали
+            if (m2 >= 6 && !kd[k] && fast[k] && d !~ /\.4$/) {
+                ok = 1; for (i = m2; i > m2 - 5; i--) if (w[i] - w[i - 1] <= 2000) ok = 0
+                g = w[m2] - w[m2 - 5]
+                if (ok && g >= 60000 && g <= 2000000) { kd[k] = 1; print "DEGR", s, sp, d, g, now - first[k] }
+            }
             print k, first[k], nh, kd[k], fast[k] > (sf ".n")
         }' > "$D.act"
     mv -f "$D.state.n" "$D.state"
-    while read -r tag s sp d g; do
+    while read -r tag s sp d g age; do
         case "$tag" in
             FAST) fasts=$((fasts + 1)); echo "$now f" >> "$D.ev" ;;
-            SLOW)
+            SLOW|DEGR)
                 [ "$now" -lt "$pause_until" ] && continue
+                if [ "$tag" = DEGR ]; then
+                    degr=$((degr + 1))
+                    log "YouTube: быстрое соединение с $d через ${age:-?}с стало медленным (~$((g * 8 / 5000)) кбит/с) — рву"
+                fi
                 if [ -n "$WIP" ] && [ "$s" = "$WIP" ]; then
                     ss -K -tn src "$s" sport = ":$sp" dst "$d" dport = :443 >/dev/null 2>&1
                 else
@@ -109,7 +121,7 @@ while kill -0 "$DPID" 2>/dev/null; do
             : > "$D.ev"
         fi
         st="on"; [ "$now" -lt "$pause_until" ] && st="pause"
-        printf 'state=%s\nkills=%s\nfast=%s\n' "$st" "$kills" "$fasts" > "$D.stat.t" && mv -f "$D.stat.t" "$D.stat"
+        printf 'state=%s\nkills=%s\nfast=%s\ndegr=%s\n' "$st" "$kills" "$fasts" "$degr" > "$D.stat.t" && mv -f "$D.stat.t" "$D.stat"
         if [ $((now - sum_t)) -ge 600 ]; then
             [ $((kills - sum_k)) -gt 0 ] && log "YouTube: за 10 мин оборвано медленных соединений: $((kills - sum_k)), быстрых поймано: $((fasts - sum_f))"
             sum_t=$now; sum_k=$kills; sum_f=$fasts

@@ -623,8 +623,8 @@ function renderStatus(s) {
       h += kvRow('Мёртвые серверы', (n ? 'в отбое: ' + n : 'сейчас нет') + (hits ? ' · отбоев: ' + hits : ''), n ? 'amber' : 'green');
     }
     if (s.yt_slow && s.yt_slow !== 'off') {
-      const k = +s.yt_slow_kills || 0, f = +s.yt_slow_fast || 0;
-      h += kvRow('Медленные видео', (s.yt_slow === 'pause' ? 'пауза: быстрых не попадается' : 'оборвано: ' + k + ' · быстрых: ' + f), s.yt_slow === 'pause' ? 'amber' : 'green');
+      const k = +s.yt_slow_kills || 0, f = +s.yt_slow_fast || 0, dg = +s.yt_slow_degr || 0;
+      h += kvRow('Медленные видео', (s.yt_slow === 'pause' ? 'пауза: быстрых не попадается' : 'оборвано: ' + k + ' · быстрых: ' + f + (dg ? ' · догнали быстрых: ' + dg : '')), s.yt_slow === 'pause' ? 'amber' : 'green');
     }
     if (s.zwd === '1') {
       const w = (s.zwd_last || '').split('|'), t = w[1] || '';
