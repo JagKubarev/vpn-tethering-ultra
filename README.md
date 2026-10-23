@@ -1,6 +1,6 @@
 # VPN Tethering Ultra
 
-Модуль KernelSU/Magisk для Android (id `vpn-to-hotspot-usb`, текущая версия — **v3.9**).
+Модуль KernelSU/Magisk для Android (id `vpn-to-hotspot-usb`, текущая версия — **v3.10**).
 Раздаёт интернет по Wi-Fi и USB **через VPN** телефона или **напрямую**. Есть kill-switch,
 свой DNS через DoH (dnsproxy) и обход DPI российского ТСПУ (zapret/nfqws) с автоподбором
 стратегий. Для YouTube на мобильном интернете добавлены отдельные приёмы.
@@ -353,7 +353,7 @@ ClientHello, но не присылает ни байта, и плеер ждё�
 Нумерация `X.Y.Z`: **X** — этап, **Y** — заметная функция, **Z** — исправления.
 `versionCode` = X·10000 + Y·100 + Z (3.8.1 → 30801). До 23.10.2026 у модуля было две
 нумерации (внешняя 2.x и внутренняя 3.x-hybrid) — таблица соответствия в `CHANGELOG.md`.
-Теги `v1.0` … `v3.9`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
+Теги `v1.0` … `v3.10`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
 
 **0.x — до репозитория (апрель–август 2026):** прототип и первые сборки на 4PDA (0.1–0.5),
 ветка 0.6–0.7.3, стабильная база hybrid 0.8 и kill-switch 0.9.
@@ -392,6 +392,7 @@ ClientHello, но не присылает ни байта, и плеер ждё�
 | 3.7 | Обрыв медленных видеосоединений (`YT_SLOW_RETRY`, `ytslow.sh`); 3.7.1–3.7.3 — обрыв «догнанных» быстрых соединений, надёжнее плановая проверка сайтов; 3.7.4 — исправления по ревью облачных сессий. |
 | 3.8 | Зоны `.ru`/`.su`/`.рф` мимо обхода и автосписка, кроме сайтов из встроенного и своего списка; 3.8.1 — одна нумерация версий, лицензии. |
 | 3.9 | Видно, почему сайт попал в автосписок (дата, сбросы/зависания/редирект, телефон или раздача), удаление одного домена, порог `ZAPRET_AUTO_FAIL`. |
+| 3.10 | WebUI по вкладкам: главные выключатели на Главной, «Отправить логи», доводка оформления; функции `service.sh` вынесены в `module/lib/` без изменения поведения. |
 
 ## Сторонние компоненты и лицензии
 
@@ -418,7 +419,7 @@ ClientHello, но не присылает ни байта, и плеер ждё�
 
 ## English summary
 
-**VPN Tethering Ultra** (`vpn-to-hotspot-usb`, v3.9) is a KernelSU/Magisk module for rooted
+**VPN Tethering Ultra** (`vpn-to-hotspot-usb`, v3.10) is a KernelSU/Magisk module for rooted
 Android (arm64/armv7) that shares the phone's connection over Wi-Fi hotspot and USB tethering
 either **through the phone's VPN** (NAT into `tun*`) or **directly**. Features:
 
