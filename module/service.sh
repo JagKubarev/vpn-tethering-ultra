@@ -757,6 +757,10 @@ if command -v timeout >/dev/null 2>&1; then
     if timeout --help 2>&1 | grep -q -- '-k'; then
         TIMEOUT_CMD="timeout -k 5 3"
     fi
+else
+    # нет timeout (урезанная прошивка) — без обёртки, а не "timeout: not found"
+    # на каждом вызове (из ветки A, 3.9.4 по старой нумерации)
+    TIMEOUT_CMD=""
 fi
 
 PID_FILE="/data/local/tmp/vpn_tether.pid"
