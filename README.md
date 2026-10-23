@@ -378,7 +378,7 @@ ClientHello, но не присылает ни байта, и плеер ждё�
 |---|---|---|---|
 | `nfqws` | из zapret v72.13 | [bol-van/zapret](https://github.com/bol-van/zapret) | MIT (`bin/nfqws.LICENSE`) |
 | `dnsproxy` | v0.86.0 | [AdguardTeam/dnsproxy](https://github.com/AdguardTeam/dnsproxy) | Apache-2.0 (`bin/dnsproxy.LICENSE`) |
-| `conntrack` | v1.4.8 (статическая сборка) | conntrack-tools, [netfilter.org](https://www.netfilter.org/projects/conntrack-tools/) | GPL-2.0 (файлов лицензии/источника в `bin/` для него пока нет) |
+| `conntrack` | v1.4.8 (статическая сборка) | conntrack-tools, [netfilter.org](https://www.netfilter.org/projects/conntrack-tools/) | GPL-2.0 (`bin/conntrack.LICENSE`, исходники и сборка — `bin/conntrack.SOURCE`) |
 
 Спасибо авторам zapret (bol-van), dnsproxy (AdGuard) и netfilter. Некоторые идеи подбора
 взяты из ZDT-D, byedpi (`--auto`) и zapret2 (circular), как указано в журнале изменений.
