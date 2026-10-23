@@ -1,7 +1,7 @@
 # VPN Tethering Ultra — контекст для сессий Codex
 
 KernelSU/Magisk-модуль (id `vpn-to-hotspot-usb`, автор Kubarev, тема на 4PDA
-`showtopic=1097835`). Раздаёт Wi-Fi/USB через VPN телефона или напрямую: kill-switch,
+`showtopic=1097835`, канал t.me/kubarev_mods). Раздаёт Wi-Fi/USB через VPN телефона или напрямую: kill-switch,
 свой DNS через dnsproxy (DoH), обход DPI ТСПУ через zapret/nfqws, приёмы для YouTube.
 Лицензия кода — GPL-3.0 (`LICENSE`, копия в `module/LICENSE`).
 

@@ -1,0 +1,50 @@
+name: Ошибка
+description: Модуль работает не так, как ожидается
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        С вопросами по настройке — в [чат](https://t.me/+LyVq9jqT-802MGIy): там ответят быстрее.
+  - type: input
+    id: version
+    attributes:
+      label: Версия модуля
+      placeholder: v3.12
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Телефон и Android
+      placeholder: OnePlus 13T, Android 15
+    validations:
+      required: true
+  - type: dropdown
+    id: manager
+    attributes:
+      label: Менеджер
+      options: [KernelSU, KernelSU Next, Magisk, APatch, другой]
+    validations:
+      required: true
+  - type: input
+    id: vpn
+    attributes:
+      label: VPN-клиент (если используется)
+      placeholder: AmneziaWG, v2rayNG, sing-box…
+  - type: textarea
+    id: what
+    attributes:
+      label: Что происходит
+      description: Что делали, что ожидали, что получилось. Время, когда это было, — по нему ищется место в логе.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Логи
+      description: |
+        WebUI → Инструменты → «Отправить логи»: файл `vpn_tether_logs_*.txt` из «Загрузок» — перетащите его сюда.
+        Перед отправкой при желании уберите из файла то, что не хотите публиковать.
+    validations:
+      required: true
