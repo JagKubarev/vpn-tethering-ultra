@@ -1123,10 +1123,11 @@ $('#logCopy').addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------- zapret: списки и проверка
-async function loadZ() {
+// keepList — не трогать поле «Дополнительные сайты»: правки в нём могут быть ещё не применены
+async function loadZ(keepList) {
   const [u, d, a] = await Promise.all([ctl('zlist'), ctl('zdefault'), ctl('zauto-info')]);
   ZL_SAVED = normList(u.out);
-  $('#zlist').value = ZL_SAVED;
+  if (!keepList) $('#zlist').value = ZL_SAVED;
   const dl = d.out.split('\n').filter(Boolean), al = a.out.split('\n').filter((l) => l.indexOf('|') > 0).map((l) => l.split('|'));
   $('#zdef').textContent = dl.join('\n'); $('#zdefN').textContent = dl.length;
   $('#zauto').innerHTML = al.length ? al.map(zautoRow).join('') : '<div class="s muted" style="padding:10px 0">Пока пусто.</div>';
@@ -1154,7 +1155,7 @@ $('#zauto').addEventListener('click', async (e) => {
   const h = e.target.dataset && e.target.dataset.zdel; if (!h) return;
   e.target.disabled = true;
   const r = await ctl('zauto-del ' + q(h));
-  toast(isOk(r) ? 'Убрано: ' + h : errText(r, 'Не получилось')); await loadZ();
+  toast(isOk(r) ? 'Убрано: ' + h : errText(r, 'Не получилось')); await loadZ(true);
 });
 // сайты со своей стратегией (scan.sh sites): "сайт|аргументы|дата"
 async function loadZalt() {
@@ -1183,7 +1184,7 @@ $('#zaltClear').addEventListener('click', async () => {
 $('#zautoClear').addEventListener('click', async () => {
   if (!confirm('Очистить список сайтов, найденных автоматически?')) return;
   const r = await ctl('zauto-clear');
-  toast(isOk(r) ? 'Автосписок очищен' : errText(r, 'Не получилось')); await loadZ();
+  toast(isOk(r) ? 'Автосписок очищен' : errText(r, 'Не получилось')); await loadZ(true);
 });
 
 const ST_RC = { '28': 'нет ответа (молча режут)', '35': 'обрыв при установке HTTPS', '7': 'не подключается (блок по IP?)',
