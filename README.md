@@ -1,6 +1,6 @@
 # VPN Tethering Ultra
 
-Модуль KernelSU/Magisk для Android (id `vpn-to-hotspot-usb`, текущая версия — **v2.26.3**).
+Модуль KernelSU/Magisk для Android (id `vpn-to-hotspot-usb`, текущая версия — **v2.28**).
 Раздаёт интернет по Wi-Fi и USB **через VPN** телефона или **напрямую**. Есть kill-switch,
 свой DNS через DoH (dnsproxy) и обход DPI российского ТСПУ (zapret/nfqws) с автоподбором
 стратегий. Для YouTube на мобильном интернете добавлены отдельные приёмы.
@@ -340,7 +340,7 @@ ClientHello, но не присылает ни байта, и плеер ждё�
 
 ## Версии
 
-Теги `v2.2` … `v2.26.3`. Ниже одна строка на минорную версию; подробности — в начале
+Теги `v2.2` … `v2.28`. Ниже одна строка на минорную версию; подробности — в начале
 `module/service.sh`.
 
 | Версия | Главное |
@@ -370,6 +370,8 @@ ClientHello, но не присылает ни байта, и плеер ждё�
 | 2.24 | Отбой мёртвых серверов точнее (/32, /24 только при двух), фоновая перепроверка; срок 20 → 10 мин. |
 | 2.25 | Своя стратегия для отдельных сайтов (`ZAPRET_ALT`), новые приёмы nfqws в подборе (`--dup`, `--orig-autottl`, `--wssize`, syndata). |
 | 2.26 | Обрыв медленных видеосоединений (`YT_SLOW_RETRY`, `ytslow.sh`); в 2.26.x — обрыв «догнанных» быстрых соединений и надёжнее плановая проверка сайтов. |
+| 2.27 | Исправления по ревью облачных сессий: подбор не берёт стратегию, с которой nfqws не запустился; адрес WAN в отбое мёртвых серверов; WebUI не стирает стратегию YouTube; README, `tools/`. |
+| 2.28 | Зоны `.ru`/`.su`/`.рф` мимо обхода и автосписка, кроме сайтов из встроенного и своего списка. |
 
 ## Сторонние компоненты и лицензии
 
@@ -396,7 +398,7 @@ ClientHello, но не присылает ни байта, и плеер ждё�
 
 ## English summary
 
-**VPN Tethering Ultra** (`vpn-to-hotspot-usb`, v2.26.3) is a KernelSU/Magisk module for rooted
+**VPN Tethering Ultra** (`vpn-to-hotspot-usb`, v2.28) is a KernelSU/Magisk module for rooted
 Android (arm64/armv7) that shares the phone's connection over Wi-Fi hotspot and USB tethering
 either **through the phone's VPN** (NAT into `tun*`) or **directly**. Features:
 
