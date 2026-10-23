@@ -34,43 +34,13 @@
 
 ## Скриншоты
 
-<table>
-  <tr>
-    <th>Главная</th>
-    <th>Обход</th>
-    <th>Сеть</th>
-    <th>Инструменты</th>
-  </tr>
-  <tr>
-    <td>
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/home-dark.png">
-        <img src="docs/screenshots/home-light.png" width="200" alt="Главная: режим раздачи и основные выключатели">
-      </picture>
-    </td>
-    <td>
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/bypass-dark.png">
-        <img src="docs/screenshots/bypass-light.png" width="200" alt="Обход: стратегия для каждой сети">
-      </picture>
-    </td>
-    <td>
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/net-dark.png">
-        <img src="docs/screenshots/net-light.png" width="200" alt="Сеть: DNS-сервер и приложения без QUIC">
-      </picture>
-    </td>
-    <td>
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/tools-dark.png">
-        <img src="docs/screenshots/tools-light.png" width="200" alt="Инструменты: диагностика сети и проверки">
-      </picture>
-    </td>
-  </tr>
-</table>
-
-Полные снимки всех вкладок в светлой и тёмной теме — в [`docs/webui/`](docs/webui/)
-(`after-*`; `before-*` — вид до v3.10).
+<p align="center">
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/home-dark.png"><img src="docs/screenshots/home-light.png" width="24%" alt="Главная: режим раздачи и основные выключатели"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/bypass-dark.png"><img src="docs/screenshots/bypass-light.png" width="24%" alt="Обход: стратегия для каждой сети"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/net-dark.png"><img src="docs/screenshots/net-light.png" width="24%" alt="Сеть: DNS-сервер и приложения без QUIC"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/tools-dark.png"><img src="docs/screenshots/tools-light.png" width="24%" alt="Инструменты: диагностика сети и проверки"></picture>
+</p>
+<p align="center"><sub>Главная · Обход · Сеть · Инструменты</sub></p>
 
 ## Возможности
 
