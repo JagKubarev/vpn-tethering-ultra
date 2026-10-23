@@ -69,7 +69,7 @@ event() {
 # трогают — иначе его новые соединения во время подбора резались/ломались
 RULE="-o $WAN -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
 # первые ответы сервера на запросы сканера — тоже в nfqws: без них не
-# работают --wssize и autottl (2.25). Соединения сканера — по биту connmark.
+# работают --wssize и autottl (3.6). Соединения сканера — по биту connmark.
 SCMARK=0x08000000
 RULE_MK="-o $WAN -m owner --uid-owner 0 -p tcp --dport 443 -j CONNMARK --set-xmark $SCMARK/$SCMARK"
 RULE_IN="-i $WAN -p tcp --sport 443 -m connmark --mark $SCMARK/$SCMARK -m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3 -j NFQUEUE --queue-num $Q --queue-bypass"
@@ -298,7 +298,7 @@ fool_arg() {
 }
 FAKE="--dpi-desync-fake-tls=@G"
 
-# Сайты YouTube в наборе — у них может быть своя стратегия (2.22: второй
+# Сайты YouTube в наборе — у них может быть своя стратегия (3.4: второй
 # профиль nfqws по zapret/list-youtube.txt)
 YT_RE='youtube|ytimg|ggpht|googlevideo'
 NBY=$(echo $BLOCKED | tr ' ' '\n' | grep -cE "$YT_RE")
@@ -311,7 +311,7 @@ composite() { # composite ОБЩАЯ [YOUTUBE]
     fi
 }
 
-# --- сайты со своей стратегией (2.25, идея byedpi --auto) ------------------
+# --- сайты со своей стратегией (3.6, идея byedpi --auto) ------------------
 # Сайты из списков (или переданные), которых основная стратегия сети не
 # открывает, получают другую: кандидаты — их прежние стратегии, история сети
 # и набор проверенных; сайт закрепляется за первой, открывшей его дважды.
@@ -583,7 +583,7 @@ else
         run_strat "$b --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com" "4"
         run_strat "$a --dpi-desync-repeats=6" "4"
     done < "$TMP/top3"
-    # E (2.25): новые приёмы nfqws к двум лучшим — дубли пакетов с порчей,
+    # E (3.6): новые приёмы nfqws к двум лучшим — дубли пакетов с порчей,
     # TTL настоящих пакетов, маленькое окно сервера, данные в SYN
     st stage="5/5 новые приёмы"
     best 2 > "$TMP/top2e"
