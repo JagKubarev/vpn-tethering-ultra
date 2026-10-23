@@ -420,14 +420,14 @@ details.more > summary { color: var(--muted); }
   <div class="offnote" data-offnote="DNSPROXY_ENABLE" role="button">Зашифрованный DNS выключен — включается на Главной.</div>
   <div class="row col" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Сервер DNS (DoH)</div>
-      <div class="s">Wlrus, not-a-dns, dagami и comss также открывают сервисы с гео-блокировкой (ChatGPT, Gemini, Claude). При недоступности сервера используется запасной.</div></div>
+      <div class="s">Wlrus, dagami, not-a-dns и comss также открывают сервисы с гео-блокировкой (ChatGPT, Gemini, Claude). При недоступности сервера — «Запасные DoH-серверы» по порядку (в «Дополнительно»).</div></div>
     <select id="upSelect">
       <option value="https://dns.wlrus.cfd/dns-query">wlrus.cfd</option>
-      <option value="https://not-a-dns.quic.best/dns-query">not-a-dns.quic.best</option>
       <option value="https://dns.dagami.ru/dns-query">dagami.ru</option>
+      <option value="https://not-a-dns.quic.best/dns-query">not-a-dns.quic.best</option>
       <option value="https://dns.comss.one/dns-query">comss.one</option>
-      <option value="https://cloudflare-dns.com/dns-query">Cloudflare</option>
       <option value="https://dns.google/dns-query">Google</option>
+      <option value="https://cloudflare-dns.com/dns-query">Cloudflare</option>
       <option value="https://dns.adguard-dns.com/dns-query">AdGuard</option>
       <option value="https://dns.quad9.net/dns-query">Quad9</option>
       <option value="custom">Свой адрес…</option>
