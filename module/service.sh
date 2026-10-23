@@ -1173,6 +1173,9 @@ refresh_tether_ifaces
 tether_ifaces="$TETHER_NOW"
 log "Initial: tun_idx=$tun_idx tether=[$tether_ifaces]"
 apply_state "$tun_idx" $tether_ifaces || log "ERROR: Initial apply_state failed"
+# Без раздачи и VPN apply_state ничего не пересобирает и статус не пишет:
+# описание оставалось «запускается» (post-fs-data.sh), status — с прошлой загрузки
+[ -n "$LAST_STATUS_MODE" ] || update_status "direct" "no-tether" "$CURRENT_NET_PROFILE"
 
 set +e
 monitor_loop

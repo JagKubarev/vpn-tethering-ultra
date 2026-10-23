@@ -124,7 +124,7 @@ update_status() {
         echo "mss=$CURRENT_MSS"
         echo "quic_uids=$QUIC_UIDS"
         echo "zapret=$ZAPRET_STATE"
-        echo "zapret_auto=$(grep -c '[a-z0-9]' "$ZAPRET_LIST_AUTO" 2>/dev/null || echo 0)"
+        echo "zapret_auto=$(cat "$ZAPRET_LIST_AUTO" 2>/dev/null | grep -c '[a-z0-9]')"
         echo "zapret_per_net=$ZAPRET_PER_NET"
         echo "zapret_strategy=$ZAPRET_EFF_STRATEGY"
         echo "zapret_eff_args=$ZAPRET_EFF_ARGS"
