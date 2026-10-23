@@ -397,6 +397,11 @@
 #   ✕ в автосписке стирал неприменённые «Дополнительные сайты»; pid демона с
 #   прошлой загрузки сбрасывается в post-fs-data.sh; список приложений в WebUI
 #   не тянет страницу у края.
+# v3.11.2 — DNS: первый запасной DoH — dagami (not-a-dns отвечал 1-2.6с и не
+#   укладывался в 4с проверки); в откате после запасных проверяется и
+#   основной — раньше ждали, пока оживут запасные (23.10 22:55-23:03 DNS был
+#   у оператора). Тест на телефоне: wlrus и dagami молчат (DROP) -> оператор,
+#   wlrus ожил -> обратно на него через 22с при всё ещё молчащем dagami.
 # ============================================================================
 # ============================================================================
 
@@ -445,10 +450,12 @@ DNS_UPSTREAMS="https://dns.wlrus.cfd/dns-query"
 # Если основные недоступны. Только шифрованные — иначе запросы ушли бы
 # оператору открытым текстом.
 # Первый, которого нет среди основных, — замена основному; при сбое основным
-# становится только он, остальные — его запасные (по порядку). not-a-dns,
-# dagami и comss, как и Wlrus, обходят гео-блок. Google/Cloudflare —
+# становится только он, остальные — его запасные (по порядку). dagami,
+# not-a-dns и comss, как и Wlrus, обходят гео-блок. Первым — dagami: 23.10
+# с YOTA 0.26-0.40с против 1.0-2.6с у not-a-dns (тот не укладывался в 4с
+# проверки, и DNS уходил к оператору). Google/Cloudflare —
 # последние: гео-блок не обходят, но в крайнем случае DNS не уйдёт к оператору.
-DNS_FALLBACKS="https://not-a-dns.quic.best/dns-query https://dns.dagami.ru/dns-query https://dns.comss.one/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
+DNS_FALLBACKS="https://dns.dagami.ru/dns-query https://not-a-dns.quic.best/dns-query https://dns.comss.one/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Апстримы для DNS_VPN=doh (идут через туннель)
 DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Чем резолвить имена самих апстримов (dns.wlrus.cfd и т.д.). Подмена тут не
@@ -1119,7 +1126,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.11.1 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.11.2 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное

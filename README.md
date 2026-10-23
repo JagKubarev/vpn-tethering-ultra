@@ -1,6 +1,6 @@
 # VPN Tethering Ultra
 
-Модуль KernelSU/Magisk для Android (id `vpn-to-hotspot-usb`, текущая версия — **v3.11.1**).
+Модуль KernelSU/Magisk для Android (id `vpn-to-hotspot-usb`, текущая версия — **v3.11.2**).
 Раздаёт интернет по Wi-Fi и USB **через VPN** телефона или **напрямую**. Есть kill-switch,
 свой DNS через DoH (dnsproxy) и обход DPI российского ТСПУ (zapret/nfqws) с автоподбором
 стратегий. Для YouTube на мобильном интернете добавлены отдельные приёмы.
@@ -139,7 +139,7 @@
 | `DNS_VPN` | `dnat` | `dnat` / `cache` / `doh` | Режим VPN: `dnat` — DNS VPN-клиента (нужен, если клиент маршрутизирует по доменам/fakeip); `cache` — DNS VPN через dnsproxy с кэшем; `doh` — `DNS_VPN_UPSTREAMS` через туннель с кэшем (замер: ~200 мс вместо ~550 мс, из кэша ~5 мс). |
 | `DNS_PHONE` | `1` | 0/1 | DNS-запросы приложений телефона (:53) идут через dnsproxy, пока VPN не поднят. |
 | `DNS_UPSTREAMS` | `https://dns.wlrus.cfd/dns-query` | адреса через пробел | Основные апстримы: DoH `https://`, DoT `tls://`, DoQ `quic://`, обычный `ip:53`. |
-| `DNS_FALLBACKS` | `https://not-a-dns.quic.best/dns-query https://dns.dagami.ru/dns-query https://dns.comss.one/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query` | адреса через пробел | Запасные, только шифрованные. При сбое основным становится первый из них, которого нет среди основных; остальные — его запасные по порядку. |
+| `DNS_FALLBACKS` | `https://dns.dagami.ru/dns-query https://not-a-dns.quic.best/dns-query https://dns.comss.one/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query` | адреса через пробел | Запасные, только шифрованные. При сбое основным становится первый из них, которого нет среди основных; остальные — его запасные по порядку. |
 | `DNS_VPN_UPSTREAMS` | `https://dns.google/dns-query https://cloudflare-dns.com/dns-query` | адреса через пробел | Апстримы для `DNS_VPN=doh`, идут через туннель. |
 | `DNS_BOOTSTRAP` | `77.88.8.8:53 1.1.1.1:53 8.8.8.8:53` | `IP:порт` через пробел | Чем резолвить имена самих DoH-серверов. Подмена здесь не опасна: сертификат апстрима всё равно проверяется. |
 | `DNS_HEALTH_INTERVAL` | `5` | 2–600 с | Как часто проверять DoH. Проверки идут только при реальном использовании DNS. |
@@ -353,7 +353,7 @@ ClientHello, но не присылает ни байта, и плеер ждё�
 Нумерация `X.Y.Z`: **X** — этап, **Y** — заметная функция, **Z** — исправления.
 `versionCode` = X·10000 + Y·100 + Z (3.8.1 → 30801). До 23.10.2026 у модуля было две
 нумерации (внешняя 2.x и внутренняя 3.x-hybrid) — таблица соответствия в `CHANGELOG.md`.
-Теги `v1.0` … `v3.11.1`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
+Теги `v1.0` … `v3.11.2`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
 
 **0.x — до репозитория (апрель–август 2026):** прототип и первые сборки на 4PDA (0.1–0.5),
 ветка 0.6–0.7.3, стабильная база hybrid 0.8 и kill-switch 0.9.
@@ -396,6 +396,7 @@ ClientHello, но не присылает ни байта, и плеер ждё�
 | 3.10.1 | WebUI: проверки в фоне без зависаний, без растягивания при прокрутке; «Отправить логи» работает с Telegram, в подписи время. |
 | 3.11 | Обновление через менеджер модулей (`update.json`, релизы на GitHub), тексты Action без эмодзи, «Модуль запускается» при загрузке, нижняя панель WebUI как в MAX. |
 | 3.11.1 | Исправления: статус при загрузке без раздачи и VPN, автосписок не стирает неприменённые сайты, сброс pid при загрузке. |
+| 3.11.2 | DNS: первый запасной DoH — dagami; в откате проверяется и основной DoH — возврат на него без ожидания запасных. |
 
 ## Сторонние компоненты и лицензии
 
@@ -422,7 +423,7 @@ ClientHello, но не присылает ни байта, и плеер ждё�
 
 ## English summary
 
-**VPN Tethering Ultra** (`vpn-to-hotspot-usb`, v3.11.1) is a KernelSU/Magisk module for rooted
+**VPN Tethering Ultra** (`vpn-to-hotspot-usb`, v3.11.2) is a KernelSU/Magisk module for rooted
 Android (arm64/armv7) that shares the phone's connection over Wi-Fi hotspot and USB tethering
 either **through the phone's VPN** (NAT into `tun*`) or **directly**. Features:
 

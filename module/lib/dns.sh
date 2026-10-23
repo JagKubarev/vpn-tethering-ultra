@@ -797,7 +797,16 @@ dns_health() {
     # получала "context deadline", и возврат на DoH опаздывал на целый цикл
     # (тест на демоне: 60с вместо ≤30с). Свежий экземпляр — свежее соединение.
     if [ "$DNS_DEGRADED" = "1" ]; then
-        dnsproxy_restart "проверка восстановления" quiet
+        # Откат после запасных: перезапуск шёл бы снова на запасных, и основной
+        # не проверялся бы вовсе, пока не оживут они (23.10: оператор 22:55-23:03,
+        # wlrus мог ожить раньше). Основной отвечает (curl) — пробуем через него.
+        if [ -n "$DNS_ALT_UPS" ] && case "$DNSPROXY_SIG" in "direct-doh|"*) true ;; *) false ;; esac && dns_primary_alive; then
+            DNS_ALT_UPS=""
+            DNS_ALT_OKS=0
+            dnsproxy_start "direct-doh" $DNS_UPSTREAMS
+        else
+            dnsproxy_restart "проверка восстановления" quiet
+        fi
         dnsproxy_alive || { DNS_HEALTH_LAST=$(date +%s); return 0; }
     fi
 
