@@ -205,10 +205,19 @@ case "$1" in
         chmod 644 "$F" 2>/dev/null
         content call --uri content://media --method scan_file --arg "$F" >/dev/null 2>&1
         id=$(content query --uri content://media/external/file --projection _id --where "_data='$F'" 2>/dev/null | grep -oE '_id=[0-9]+' | head -1 | cut -d= -f2)
-        if [ -n "$id" ] && am start -a android.intent.action.SEND -t text/plain \
-                --eu android.intent.extra.STREAM "content://media/external/file/$id" \
-                --es android.intent.extra.SUBJECT "VPN Tethering Ultra: логи" \
-                --grant-read-uri-permission -f 0x10000000 >/dev/null 2>&1; then
+        # am — от uid 2000 (shell): разрешение на чтение, выданное от root,
+        # система отбрасывает («the system cannot issue a Uri permission grant»),
+        # и мессенджер пишет «вложение не поддерживается». Ссылка ещё и в -d:
+        # am не переносит EXTRA_STREAM в ClipData, разрешение выдаётся только на
+        # данные интента. Флаги одним -f: он заменяет, а не дополняет
+        # --grant-read-uri-permission (0x1 = FLAG_GRANT_READ_URI_PERMISSION).
+        U="content://media/external/file/$id"
+        # подпись к файлу в мессенджере: версия и время сбора логов
+        V=$(sed -n 's/^version=//p' "$MODDIR/module.prop"); T=$(date '+%d.%m.%Y %H:%M')
+        if [ -n "$id" ] && su 2000 -c "am start -a android.intent.action.SEND -t text/plain -d '$U' \
+                --eu android.intent.extra.STREAM '$U' \
+                --es android.intent.extra.SUBJECT 'VPN Tethering Ultra $V: логи от $T' \
+                -f 0x10000001" >/dev/null 2>&1; then
             echo "OK $F"
         else
             echo "OK $F nosend"

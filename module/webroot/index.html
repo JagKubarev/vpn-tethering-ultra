@@ -48,10 +48,14 @@
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
+/* Прокручивается body, а не вся страница: у страницы WebView на Android
+   растягивает при прокрутке до края всё вместе с нижней панелью. */
+html { height: 100%; overflow: hidden; }
 body {
   font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   padding: calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 150px);
   max-width: 640px; margin: 0 auto;
+  height: 100%; overflow-y: auto; overscroll-behavior: none;
 }
 h1 { font-size: 20px; font-weight: 600; margin: 4px 2px 14px; display: flex; align-items: center; gap: 10px; }
 h1 .logo { width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; flex: none; }
@@ -627,6 +631,24 @@ function exec(cmd) {
   });
 }
 const ctl = (args) => exec(CTL + ' ' + args);
+// Долгие проверки — в фоне. KernelSU выполняет ksu.exec синхронно: пока команда
+// не закончится, страница не отвечает. Поэтому команда пишет вывод в файл, а
+// страница забирает его короткими запросами раз в 0.5 с.
+async function ctlBg(args) {
+  if (!HAS_KSU) return ctl(args);
+  const f = '/data/local/tmp/vpn_tether_webjob_' + Date.now() + '_' + (cbSeq++);
+  const st = await exec('(' + CTL + ' ' + args + ' >' + f + '.out 2>' + f + '.err; echo $? >' + f + '.rc) </dev/null >/dev/null 2>&1 &');
+  if (st.errno) return st;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 500));
+    // без exit: оболочка KernelSU от него падает, и ответ приходит пустым
+    const r = await exec('if [ -s ' + f + '.rc ]; then cat ' + f + '.rc ' + f + '.out; rm -f ' + f + '.rc ' + f + '.out ' + f + '.err; else echo WAIT; fi');
+    if (r.out.trim() === 'WAIT') continue;
+    if (r.errno) return r;
+    const i = r.out.indexOf('\n');
+    return { errno: parseInt(r.out.slice(0, i), 10) || 0, out: r.out.slice(i + 1), err: '' };
+  }
+}
 
 function toast(msg) {
   const t = $('#toast');
@@ -870,8 +892,8 @@ function showTab(t) {
   $$('#tabbar button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
   try { localStorage.setItem('vtTab', t); } catch (e) { /* без хранилища — просто не запоминаем */ }
 }
-$$('#tabbar button').forEach((b) => b.addEventListener('click', () => { showTab(b.dataset.tab); window.scrollTo(0, 0); }));
-$$('[data-offnote]').forEach((n) => n.addEventListener('click', () => { showTab('home'); window.scrollTo(0, 0); }));
+$$('#tabbar button').forEach((b) => b.addEventListener('click', () => { showTab(b.dataset.tab); document.body.scrollTo(0, 0); }));
+$$('[data-offnote]').forEach((n) => n.addEventListener('click', () => { showTab('home'); document.body.scrollTo(0, 0); }));
 let _tab0 = 'home';
 try { _tab0 = localStorage.getItem('vtTab') || 'home'; } catch (e) { /* по умолчанию — Главная */ }
 showTab(_tab0);
@@ -1033,7 +1055,7 @@ $('#toggleBtn').addEventListener('click', async () => {
 // ---------------------------------------------------------------- диагностика
 $('#dohBtn').addEventListener('click', async () => {
   const el = $('#dohRes'); el.textContent = 'Проверяю…';
-  const r = (await ctl('doh')).out.trim();
+  const r = (await ctlBg('doh')).out.trim();
   if (r === 'off') el.innerHTML = '<span class="dot"></span> dnsproxy сейчас не нужен (VPN или DoH выключен)';
   else if (/^ok /.test(r)) el.innerHTML = '<span class="dot green"></span> Отвечает, ' + esc(r.slice(3)) + ' мс';
   else el.innerHTML = '<span class="dot red"></span> ' + esc(r.replace(/^fail /, ''));
@@ -1057,7 +1079,7 @@ $('#diagBtn').addEventListener('click', async () => {
   b.disabled = true; b.textContent = 'Проверяю… (~1 мин)';
   o.style.display = ''; o.innerHTML = kvRow('Идёт проверка', 'DNS, хостинги, белые списки, Telegram…', '');
   try {
-    const r = await ctl('diag');
+    const r = await ctlBg('diag');
     const rows = (r.out || '').split('\n').filter((l) => l.indexOf('R ') === 0).map((l) => l.slice(2).split('|'));
     const col = { ok: 'green', warn: 'amber', bad: 'red', info: '' };
     o.innerHTML = rows.length ? rows.map((f) => kvRow(esc(f[2] || f[0]), esc(f.slice(3).join('|')), col[f[1]] || '')).join('')
@@ -1069,7 +1091,7 @@ $('#logSend').addEventListener('click', async () => {
   const b = $('#logSend'), res = $('#logSendRes');
   b.disabled = true; b.textContent = 'Собираю…';
   try {
-    const r = await ctl('logs-send');
+    const r = await ctlBg('logs-send');
     const m = /^OK (\S+)( nosend)?/m.exec(r.out || '');
     if (!m) { toast(errText(r, 'Не получилось собрать логи')); return; }
     const name = m[1].split('/').pop();
@@ -1177,7 +1199,7 @@ $('#stBtn').addEventListener('click', async () => {
   const res = $('#stRes');
   stLock(true); res.innerHTML = '<span class="muted">Проверяю, до 20 секунд…</span>';
   try {
-    const r = await ctl('sitetest ' + q(host));
+    const r = await ctlBg('sitetest ' + q(host));
     const out = r.out.trim();
     if (/^ERR/m.test(out)) {
       res.innerHTML = '<div class="st-line"><span class="dot red"></span>' + esc(out.replace(/^[\s\S]*?ERR /, '')) + '</div>';
@@ -1207,7 +1229,7 @@ $('#ytBtn').addEventListener('click', async () => {
   const res = $('#stRes');
   stLock(true); res.innerHTML = '<span class="muted">Меряю скорость, ~15 секунд…</span>';
   try {
-    const r = await ctl('ytspeed');
+    const r = await ctlBg('ytspeed');
     const out = r.out.trim();
     if (/^ERR/m.test(out)) {
       res.innerHTML = '<div class="st-line"><span class="dot red"></span>' + esc(out.replace(/^[\s\S]*?ERR /, '')) + '</div>';
@@ -1398,7 +1420,7 @@ $('#metaBtn').addEventListener('click', async () => {
   const btn = $('#metaBtn'), res = $('#metaRes');
   btn.disabled = true; res.innerHTML = '<div class="muted mt8">Спрашиваю Google, до 30 секунд…</div>';
   try {
-    const out = (await ctl('metatest')).out.trim();
+    const out = (await ctlBg('metatest')).out.trim();
     if (/^ERR/m.test(out)) { res.innerHTML = '<div class="st-line"><span class="dot red"></span>' + esc(out.replace(/^[\s\S]*?ERR /, '')) + '</div>'; return; }
     let ecs = '', h = '';
     out.split('\n').forEach((l) => {
