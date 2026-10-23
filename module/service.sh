@@ -372,6 +372,13 @@
 #   автоподстройка; Y — функция, Z — исправления. versionCode = X*10000+Y*100+Z.
 #   Старые номера в журнале и комментариях переписаны (таблица — CHANGELOG.md).
 #   Плюс: set_sysctl без bash-подстановки, лицензии (GPL-3.0, conntrack GPL-2).
+# v3.9 — видно, почему сайт попал в автосписок: nfqws пишет причины
+#   (--hostlist-auto-debug) в ZAPRET_AUTO_LOG, WebUI показывает у каждого
+#   домена дату, сбои (сброс / зависание / редирект) и кто открывал (телефон
+#   или раздача) и даёт убрать один домен. 22.10 в автосписке были трекеры
+#   рекламы и российские сервисы, попавшие туда по случайным обрывам.
+#   ZAPRET_AUTO_FAIL — сколько сбоев за минуту нужно для добавления (было 3).
+#   Плюс: без timeout в системе TIMEOUT_CMD пустой (из ветки A).
 # ============================================================================
 # ============================================================================
 
@@ -517,6 +524,9 @@ ZAPRET_WATCHDOG_MIN=15
 # Только при своей стратегии для сети и без поднятого VPN.
 ZAPRET_ALT=1
 ZAPRET_ALT_MIN=180
+# Автосписок (режим «из списка»): после скольких сбоев за минуту nfqws
+# добавляет сайт. Причины пишутся в ZAPRET_AUTO_LOG, WebUI их показывает (3.9).
+ZAPRET_AUTO_FAIL=3
 # Скрыть раздачу от оператора (3.2; раньше — модуль tether_unblock).
 #  - net.tethering.noprovisioning: Android не спрашивает оператора, можно ли
 #    раздавать (иначе оператор может не дать включить точку или оборвать);
@@ -592,6 +602,8 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
         ZAPRET_ALT_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 30 ] && [ "$val" -le 1440 ] || ok=0 ;; esac ;;
+        ZAPRET_AUTO_FAIL)
+            case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 2 ] && [ "$val" -le 10 ] || ok=0 ;; esac ;;
         ZAPRET_MODE)     case "$val" in list|all) ;; *) ok=0 ;; esac ;;
         ZAPRET_STRATEGY) zapret_strategy_valid "$val" || ok=0 ;;
         ZAPRET_ARGS)     zapret_args_valid "$val" || ok=0 ;;
@@ -634,7 +646,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -923,6 +935,7 @@ ZAPRET_LIST_RUTLD="$ZAPRET_DIR/list-rutld.txt"       # .ru/.su/.рф — мим�
 ZAPRET_RU_RUN="/data/local/tmp/vpn_tether_zru.txt"   # .ru-сайты из встроенного и своего списка
 ZAPRET_LIST_USER="/data/adb/vpn_tether_zapret.txt"        # свой список (WebUI)
 ZAPRET_LIST_AUTO="/data/adb/vpn_tether_zapret_auto.txt"   # nfqws пополняет сам
+ZAPRET_AUTO_LOG="/data/adb/vpn_tether_zapret_auto.log"    # почему nfqws добавил сайт (--hostlist-auto-debug)
 ZAPRET_VPN_UIDS_FILE="/data/adb/vpn_tether_vpn_uids"      # uid VPN-клиентов, замеченных владельцами VPN
 ZAPRET_PID_FILE="/data/local/tmp/vpn_tether_nfqws.pid"
 ZAPRET_LOG="/data/local/tmp/vpn_tether_nfqws.log"
@@ -2969,6 +2982,16 @@ zapret_auto_clean_ru() {
     log "zapret: из автосписка убраны российские сайты ($n): их обход не трогает"
 }
 
+# журнал причин автосписка — не больше ~256 КБ (nfqws открывает файл на каждую
+# запись, так что обрезать можно на ходу; тот же inode — cat, а не mv)
+zapret_auto_log_trim() {
+    local s
+    s=$(wc -c < "$ZAPRET_AUTO_LOG" 2>/dev/null) || return 0
+    [ "${s:-0}" -gt 262144 ] || return 0
+    tail -n 1500 "$ZAPRET_AUTO_LOG" > "$ZAPRET_AUTO_LOG.tmp" && cat "$ZAPRET_AUTO_LOG.tmp" > "$ZAPRET_AUTO_LOG"
+    rm -f "$ZAPRET_AUTO_LOG.tmp"
+}
+
 zapret_args() {
     local a="--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6" ex="" g alt rup="" rux=""
     # банки и Госуслуги — мимо обхода в любом профиле (и в автосписок не попадут)
@@ -2985,7 +3008,7 @@ zapret_args() {
         g="$g --hostlist=$ZAPRET_LIST_DEFAULT"
         # пустой список не передаём: не полагаемся на то, как nfqws его трактует
         grep -q '[a-z0-9]' "$ZAPRET_LIST_USER" 2>/dev/null && g="$g --hostlist=$ZAPRET_LIST_USER"
-        g="$g --hostlist-auto=$ZAPRET_LIST_AUTO"
+        g="$g --hostlist-auto=$ZAPRET_LIST_AUTO --hostlist-auto-fail-threshold=$ZAPRET_AUTO_FAIL --hostlist-auto-debug=$ZAPRET_AUTO_LOG"
     fi
     g="$g $(zapret_strategy_args "$ZAPRET_DIR" "$ZAPRET_EFF_STRATEGY" "$ZAPRET_EFF_ARGS")"
     # сайты со своей стратегией — самыми первыми профилями, затем YouTube:
@@ -3062,6 +3085,7 @@ zapret_start() {
     local pid
     zapret_kill_all
     [ -f "$ZAPRET_LIST_AUTO" ] || { : > "$ZAPRET_LIST_AUTO"; chmod 600 "$ZAPRET_LIST_AUTO"; }
+    [ -f "$ZAPRET_AUTO_LOG" ] || { : > "$ZAPRET_AUTO_LOG"; chmod 600 "$ZAPRET_AUTO_LOG"; }
     zapret_auto_clean_ru
     : > "$ZAPRET_LOG"
     # $1 без кавычек: это список аргументов, собранный zapret_args
@@ -3543,6 +3567,7 @@ zapret_reconcile() {
     if [ "$ZAPRET_TICK" -ge 15 ] || [ "$ZAPRET_STATE" != "on" ] || [ "$ZAPRET_NET_DIRTY" = "1" ]; then
         ZAPRET_TICK=0
         ZAPRET_NET_DIRTY=0
+        zapret_auto_log_trim
         ZAPRET_NETS_STAMP="$stamp"
         # dumpsys connectivity тяжёлый (system_server) — раз на каждый tun, а
         # не каждые 30с: владелец VPN за сессию не меняется
@@ -4873,7 +4898,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.8.1 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.9 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"

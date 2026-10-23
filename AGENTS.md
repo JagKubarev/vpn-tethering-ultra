@@ -34,7 +34,7 @@ KernelSU/Magisk-модуль (id `vpn-to-hotspot-usb`, автор Kubarev, те�
 
 На каждый релиз меняются **три места** и ставится тег `vX.Y.Z`:
 1. `module/module.prop`: `version=vX.Y.Z` и `versionCode` = X·10000 + Y·100 + Z
-   (сейчас 30801 у v3.8.1).
+   (сейчас 30900 у v3.9).
 2. Баннер в `service.sh`: `=== VPN Tether vX.Y.Z Started ...`.
 3. Запись в шапке `service.sh` (по хронологии: новая — в конец журнала, перед строкой `# ====`) **и** в `CHANGELOG.md`.
 

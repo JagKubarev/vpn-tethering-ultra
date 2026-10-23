@@ -17,6 +17,8 @@
 #   webctl.sh zlist|zdefault|zauto    списки zapret: свой / встроенный / авто
 #   webctl.sh zlist-set 'д1 д2'       записать свой список (с проверкой)
 #   webctl.sh zauto-clear             очистить автосписок
+#   webctl.sh zauto-info              автосписок с причинами: домен|когда|сбросы/зависания/редиректы|phone/tether
+#   webctl.sh zauto-del ДОМЕН         убрать один домен из автосписка
 #   webctl.sh sitetest ДОМЕН          открывается ли сайт мимо VPN без/с обходом
 #   webctl.sh ytspeed                 скорость "видео YouTube" мимо VPN без/с обходом
 #   webctl.sh znet                    текущая сеть + стратегии, запомненные для сетей
@@ -46,6 +48,7 @@ DNSPROXY_PID_FILE=/data/local/tmp/vpn_tether_dnsproxy.pid
 DNSPROXY_PORT=5354
 ZLIST_USER=/data/adb/vpn_tether_zapret.txt
 ZLIST_AUTO=/data/adb/vpn_tether_zapret_auto.txt
+ZAUTO_LOG=/data/adb/vpn_tether_zapret_auto.log   # причины (nfqws --hostlist-auto-debug)
 ZSCAN=/data/local/tmp/vpn_tether_zscan
 ZNETS=/data/adb/vpn_tether_zapret_nets
 ZHIST=/data/adb/vpn_tether_zapret_hist      # ключ|стратегия|аргументы|дата|заметка|аргументы_YouTube — прежние стратегии сетей
@@ -223,6 +226,39 @@ case "$1" in
     zlist)      cat "$ZLIST_USER" 2>/dev/null ;;
     zdefault)   cat "$MODDIR/zapret/list-default.txt" 2>/dev/null ;;
     zauto)      cat "$ZLIST_AUTO" 2>/dev/null ;;
+    zauto-info)
+        # строки журнала: "ДД.ММ.ГГГГ ЧЧ:ММ:СС : домен : profile N : client IP:порт : proto P : событие".
+        # Сбои считаем с последнего «website is working» до «adding to»; клиент —
+        # адрес телефона в сети оператора (в т.ч. через AdGuard) или раздача.
+        [ -f "$ZLIST_AUTO" ] || exit 0
+        wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
+        wip=$(ip -4 addr show "$wan" 2>/dev/null | awk '/inet / {sub(/\/.*/, "", $2); print $2; exit}')
+        lg="$ZAUTO_LOG"; [ -f "$lg" ] || lg=/dev/null
+        W="$wip" awk -F' : ' '
+            FILENAME == ARGV[1] {
+                if (NF < 6) next
+                h = $2; ev = $6; split($4, c, " "); cl = c[2]; sub(/:[0-9]+$/, "", cl)
+                if (ev ~ /^incoming RST/) rst[h]++
+                else if (ev ~ /^retrans/) rt[h]++
+                else if (ev ~ /^redirect/) rd[h]++
+                else if (ev ~ /website is working/) { rst[h] = 0; rt[h] = 0; rd[h] = 0 }
+                else if (ev ~ /^adding to/) {
+                    when[h] = $1; who[h] = (cl == ENVIRON["W"]) ? "phone" : "tether"
+                    n[h] = (rst[h] + 0) "/" (rt[h] + 0) "/" (rd[h] + 0); rst[h] = 0; rt[h] = 0; rd[h] = 0
+                }
+                next
+            }
+            { h = $1; sub(/\r$/, "", h); if (h == "" || (h in seen)) next; seen[h] = 1
+              if (h in when) print h "|" when[h] "|" n[h] "|" who[h]; else print h "|||" }
+        ' "$lg" "$ZLIST_AUTO"
+        ;;
+    zauto-del)
+        d=$(printf '%s' "$2" | tr 'A-Z' 'a-z')
+        case "$d" in ''|*[!a-z0-9.-]*|*..*|.*|*.|-*) echo "ERR неверный домен"; exit 1 ;; esac
+        [ -f "$ZLIST_AUTO" ] || { echo "OK"; exit 0; }
+        # тот же файл (cat, а не mv): nfqws сам перечитает изменившийся список
+        grep -vxF "$d" "$ZLIST_AUTO" > "$ZLIST_AUTO.tmp"; cat "$ZLIST_AUTO.tmp" > "$ZLIST_AUTO"; rm -f "$ZLIST_AUTO.tmp"
+        echo "OK" ;;
     zauto-clear)
         [ -f "$ZLIST_AUTO" ] && : > "$ZLIST_AUTO"
         echo "OK" ;;
