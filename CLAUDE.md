@@ -3,6 +3,7 @@
 KernelSU/Magisk-модуль (id `vpn-to-hotspot-usb`, автор Kubarev, тема на 4PDA
 `showtopic=915158`). Раздаёт Wi-Fi/USB через VPN телефона или напрямую: kill-switch,
 свой DNS через dnsproxy (DoH), обход DPI ТСПУ через zapret/nfqws, приёмы для YouTube.
+Лицензия кода — GPL-3.0 (`LICENSE`, копия в `module/LICENSE`).
 
 - **Что умеет и все настройки** — `README.md`.
 - **Вся история с апреля, соответствие нумераций, что откатывали** — `CHANGELOG.md`.
@@ -65,6 +66,5 @@ KernelSU/Magisk-модуль (id `vpn-to-hotspot-usb`, автор Kubarev, те�
 
 - README говорит «v2.26.3», таблица версий кончается на 2.26.
 - В шапке `service.sh` 2.28 и 2.27 стоят перед 2.26 — порядок сбит.
-- У модуля нет своей лицензии.
 - Хвосты из июля: IPv6 для клиентов (NDP proxy), ConnectivityManager вместо опроса
   `dumpsys`, фейловер двух аплинков, сторож апстрима с перезапуском VPN-клиента.

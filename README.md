@@ -21,6 +21,7 @@
 - [Структура репозитория](#структура-репозитория)
 - [Версии](#версии)
 - [Сторонние компоненты и лицензии](#сторонние-компоненты-и-лицензии)
+- [Лицензия](#лицензия)
 - [English summary](#english-summary)
 
 ## Что умеет
@@ -384,7 +385,12 @@ ClientHello, но не присылает ни байта, и плеер ждё�
 Спасибо авторам zapret (bol-van), dnsproxy (AdGuard) и netfilter. Некоторые идеи подбора
 взяты из ZDT-D, byedpi (`--auto`) и zapret2 (circular), как указано в журнале изменений.
 
-Своей лицензии у кода модуля в репозитории пока нет.
+## Лицензия
+
+Код модуля (скрипты, WebUI, списки, `tools/`) — **GPL-3.0**, © Kubarev, текст в `LICENSE`
+(копия — `module/LICENSE`, попадает в zip). Изменённые версии можно распространять только
+под той же лицензией, с исходниками и с сохранением авторства. Сторонние бинарники в
+`module/bin/` идут под своими лицензиями (см. таблицу выше).
 
 ---
 
@@ -413,3 +419,5 @@ logcat tag `vpn_tether`).
 Third-party binaries: `nfqws` from [zapret](https://github.com/bol-van/zapret) v72.13 (MIT),
 [dnsproxy](https://github.com/AdguardTeam/dnsproxy) v0.86.0 (Apache-2.0), `conntrack` v1.4.8
 from conntrack-tools (GPL-2.0).
+
+The module's own code is licensed under **GPL-3.0** (`LICENSE`, also shipped as `module/LICENSE`).
