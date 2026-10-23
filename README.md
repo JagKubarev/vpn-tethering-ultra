@@ -1,359 +1,196 @@
+<div align="center">
+
 # VPN Tethering Ultra
 
-Модуль KernelSU/Magisk для Android (id `vpn-to-hotspot-usb`, текущая версия — **v3.11.2**).
-Раздаёт интернет по Wi-Fi и USB **через VPN** телефона или **напрямую**. Есть kill-switch,
-свой DNS через DoH (dnsproxy) и обход DPI российского ТСПУ (zapret/nfqws) с автоподбором
-стратегий. Для YouTube на мобильном интернете добавлены отдельные приёмы.
+**Раздача Wi-Fi и USB через VPN телефона или напрямую — с защитой от утечек,
+зашифрованным DNS и обходом блокировок.**
 
-> Документация собрана по коду и комментариям в `module/*.sh`. Подробный журнал изменений
-> по версиям лежит в начале `module/service.sh`.
+Модуль для KernelSU, Magisk и APatch.
 
-## Содержание
+[![Версия](https://img.shields.io/github/v/release/JagKubarev/vpn-tethering-ultra?label=%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F&color=2563eb)](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest)
+[![Лицензия: GPL-3.0](https://img.shields.io/badge/%D0%BB%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%8F-GPL--3.0-blue)](LICENSE)
+[![KernelSU](https://img.shields.io/badge/KernelSU-%D0%BF%D0%BE%D0%B4%D0%B4%D0%B5%D1%80%D0%B6%D0%B8%D0%B2%D0%B0%D0%B5%D1%82%D1%81%D1%8F-green)](https://kernelsu.org/)
+[![Magisk](https://img.shields.io/badge/Magisk-%D0%BF%D0%BE%D0%B4%D0%B4%D0%B5%D1%80%D0%B6%D0%B8%D0%B2%D0%B0%D0%B5%D1%82%D1%81%D1%8F-green)](https://github.com/topjohnwu/Magisk)
+[![APatch](https://img.shields.io/badge/APatch-%D0%BF%D0%BE%D0%B4%D0%B4%D0%B5%D1%80%D0%B6%D0%B8%D0%B2%D0%B0%D0%B5%D1%82%D1%81%D1%8F-green)](https://github.com/bmax121/APatch)
+[![Android](https://img.shields.io/badge/Android-arm64%20%7C%20armv7-3ddc84?logo=android&logoColor=white)](#совместимость)
 
-- [Что умеет](#что-умеет)
-- [Требования](#требования)
-- [Установка](#установка)
-- [Управление: Action и WebUI](#управление-action-и-webui)
-- [Настройки: /data/adb/vpn_tether.conf](#настройки-dataadbvpn_tetherconf)
-- [Как устроен обход DPI](#как-устроен-обход-dpi)
-- [DNS](#dns)
-- [Файлы на устройстве и логи](#файлы-на-устройстве-и-логи)
-- [Структура репозитория](#структура-репозитория)
-- [Версии](#версии)
-- [Сторонние компоненты и лицензии](#сторонние-компоненты-и-лицензии)
-- [Лицензия](#лицензия)
-- [English summary](#english-summary)
+[Скачать](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest) ·
+[Тема на 4PDA](https://4pda.to/forum/index.php?showtopic=915158) ·
+[Все настройки](docs/settings.md) ·
+[История изменений](CHANGELOG.md) ·
+[English](#english)
 
-## Что умеет
+</div>
+
+---
+
+Модуль `vpn-to-hotspot-usb` раздаёт интернет телефона по Wi-Fi-точке и USB-модему так, чтобы
+подключённые устройства выходили в сеть **через VPN-клиент телефона** или **напрямую через
+оператора** — по выбору, одной кнопкой. Если VPN отключился, трафик раздачи не уходит мимо него.
+В режиме «напрямую» DNS шифруется (DoH), а сайты, заблокированные через DPI, открываются
+с помощью zapret/nfqws. Всё настраивается в WebUI, без правки файлов.
+
+## Скриншоты
+
+<table>
+  <tr>
+    <th>Главная</th>
+    <th>Обход</th>
+    <th>Сеть</th>
+    <th>Инструменты</th>
+  </tr>
+  <tr>
+    <td>
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/home-dark.png">
+        <img src="docs/screenshots/home-light.png" width="200" alt="Главная: режим раздачи и основные выключатели">
+      </picture>
+    </td>
+    <td>
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/bypass-dark.png">
+        <img src="docs/screenshots/bypass-light.png" width="200" alt="Обход: стратегия для каждой сети">
+      </picture>
+    </td>
+    <td>
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/net-dark.png">
+        <img src="docs/screenshots/net-light.png" width="200" alt="Сеть: DNS-сервер и приложения без QUIC">
+      </picture>
+    </td>
+    <td>
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/tools-dark.png">
+        <img src="docs/screenshots/tools-light.png" width="200" alt="Инструменты: диагностика сети и проверки">
+      </picture>
+    </td>
+  </tr>
+</table>
+
+Полные снимки всех вкладок в светлой и тёмной теме — в [`docs/webui/`](docs/webui/)
+(`after-*`; `before-*` — вид до v3.10).
+
+## Возможности
 
 - **Раздача через VPN или напрямую.** Клиенты Wi-Fi-точки и USB-модема выходят в интернет
-  через туннель VPN-клиента телефона (NAT в `tun*`) или напрямую через оператора.
-  Переключение — кнопкой Action или из WebUI. После перезагрузки включён режим VPN.
-- **Kill-switch** (`KILL_SWITCH`, fail-closed). Если правила VPN не встали или их снёс
-  netd/Tethering, трафик клиентов отбрасывается, а не уходит напрямую с реальным IP. Сторож
-  правил раз в ~6 с проверяет `ip rule` и хуки цепочек и пересобирает их.
-  С `KILL_SWITCH_STRICT=1` раздача стоит на паузе, пока в режиме VPN сам VPN не поднят.
-  Без него (по умолчанию) после 3 промахов раздача уходит напрямую.
-- **Защита от утечек мимо netfilter.** Модуль выключает аппаратный tethering offload и снимает
-  tc-фильтры BPF offload (Android 13+), через которые старые соединения клиента шли мимо VPN.
-  При смене режима делается адресный сброс conntrack (только подсети раздачи, через `bin/conntrack`).
-- **Свой DNS (dnsproxy).** В режиме «напрямую» DNS клиентов раздачи и самого телефона идёт
-  через DoH-серверы, которые обходят гео-блокировки (ChatGPT, Gemini, Claude и т. п.).
-  Есть проверка здоровья и цепочка запасных серверов. Домены Meta можно резолвить
-  «как из Европы» (EDNS Client Subnet).
-- **Обход DPI (zapret/nfqws)** для трафика мимо VPN: раздача напрямую и приложения телефона,
-  которые не идут в VPN. Работает против блокировок по имени сайта (SNI), против блокировок по
-  IP не помогает. Стратегия своя для каждой сети, подбор в WebUI, сторож и отдельные стратегии
-  для отдельных сайтов. Банки и Госуслуги (`zapret/list-exclude.txt`) обход не трогает никогда.
-- **YouTube:** отбой мёртвых видеосерверов, обрыв медленных видеосоединений, отдельная
-  стратегия для доменов YouTube, отбой кэшей оператора (GGC, по умолчанию выключен),
-  замер «Скорость YouTube».
-- **Скрытие раздачи от оператора** (`TETHER_STEALTH`): `net.tethering.noprovisioning`,
-  TTL телефона 63, учёт (и по желанию отбой) пакетов раздачи с «чужим» TTL.
-- **QUIC:** закрыть HTTP/3 выбранным приложениям телефона (`QUIC_BLOCK_APPS`) и раздаче
-  (`ZAPRET_QUIC_BLOCK`), чтобы они сразу шли по TCP, где работает обход.
-- **Состояние в описании модуля** в списке модулей KernelSU/Magisk (`STATUS_IN_DESCRIPTION`).
+  через туннель VPN-клиента телефона (NAT в `tun*`) или напрямую. Переключение — кнопкой
+  Action или из WebUI; после перезагрузки включён режим VPN.
+- **Защита от утечек.** Kill-switch по принципу fail-closed: если правила VPN не встали или
+  их снесла система, трафик клиентов отбрасывается, а не уходит с реальным IP. Сторож правил
+  восстанавливает их, аппаратный и BPF tethering offload отключается, при смене режима
+  сбрасываются только соединения раздачи.
+- **Зашифрованный DNS.** В режиме «напрямую» DNS клиентов и самого телефона идёт через
+  dnsproxy по DoH — без подмены ответов оператором и с доступом к сервисам с гео-блокировкой
+  (ChatGPT, Gemini, Claude и т. п.).
+  Проверка здоровья, цепочка запасных серверов, адреса Instagram и Facebook «как из Европы» (ECS).
+- **Обход блокировок (zapret/nfqws)** для трафика мимо VPN — раздачи напрямую и приложений
+  телефона. Своя стратегия для каждой сети, подбор в WebUI (~2 или ~7 мин), сторож, который
+  сам чинит сломавшуюся стратегию, отдельные стратегии для отдельных сайтов. Банки и Госуслуги
+  обход не трогает никогда.
+- **YouTube на мобильном интернете.** Отбой «молчащих» видеосерверов, обрыв медленных
+  видеосоединений, чтобы плеер ушёл на быстрый сервер, отдельная стратегия для YouTube,
+  по желанию — отбой кэшей оператора (GGC), замер «Скорость YouTube».
+- **Скрытие раздачи и удобство.** `noprovisioning` и TTL 63, закрытие QUIC выбранным
+  приложениям, состояние модуля прямо в списке модулей, WebUI с проверками и журналами,
+  обновление через менеджер модулей.
 
-## Требования
+Подробно о каждой функции и все ключи конфига — в [справочнике](docs/settings.md).
 
-- Android с root через **KernelSU** или **Magisk**. Скрипты знают и пути APatch (`/data/adb/ap`).
-- Архитектура arm64 или armv7: при установке остаются бинарники под устройство.
-- Ядро с `iptables`/`ip6tables`, NFQUEUE (для обхода DPI) и conntrack. IPv6 NAT не обязателен:
-  без него DNS телефона перехватывается только по IPv4.
-- Для режима VPN — любой VPN-клиент, который поднимает `tun*`. Соединения известных VPN-клиентов
-  (список `VPN_CLIENT_PKGS` в `service.sh`) обход DPI не трогает, чтобы не ломать переподключение.
-- Если на телефоне стоит AdGuard с HTTPS-фильтром, модуль исключает трафик dnsproxy из его
-  перехвата (по GID). DNS-защиту AdGuard вместе с `DNS_PHONE=1` не включайте: они будут
-  перехватывать DNS друг у друга.
+## Совместимость
+
+| | |
+|---|---|
+| Root | **KernelSU**, **Magisk**, **APatch** (учтены пути модулей `/data/adb/modules` и `/data/adb/ap`) |
+| Архитектура | arm64 или armv7 — при установке остаются бинарники под устройство |
+| Ядро | `iptables`/`ip6tables`, NFQUEUE (для обхода DPI) и conntrack; IPv6 NAT не обязателен — без него DNS телефона перехватывается только по IPv4 |
+| VPN | любой VPN-клиент, который поднимает `tun*` (проверялись AmneziaWG/WARP, VLESS-клиенты на sing-box, в том числе два tun одновременно) |
+| Раздача | Wi-Fi-точка и USB-модем (в том числе CDC-NCM); клиенты — ноутбуки и ПК (Windows 7/10/11 и др.), другие телефоны |
+| Проверено | Snapdragon (SM8750, Android 15), MediaTek; у пользователей — MTK (`ccmni*`), Samsung Exynos (`swlan0`) |
+
+Соединения известных VPN-клиентов (список `VPN_CLIENT_PKGS` в `service.sh`) обход DPI не трогает,
+чтобы не ломать переподключение. Если на телефоне стоит AdGuard с HTTPS-фильтром, модуль
+исключает трафик dnsproxy из его перехвата (по GID). DNS-защиту AdGuard вместе с `DNS_PHONE=1`
+не включайте: они будут перехватывать DNS друг у друга.
 
 ## Установка
 
-1. Соберите zip из содержимого папки `module/` (в корне архива: `module.prop`, `service.sh`,
-   `META-INF/`, `lib/`, `bin/`, `zapret/`, `webroot/` …):
-   ```sh
-   cd module && zip -r ../vpn-tethering-ultra.zip .
-   ```
-2. Установите zip через менеджер KernelSU или Magisk и перезагрузитесь.
-3. При первой установке создаётся `/data/adb/vpn_tether.conf` с закомментированными
-   примерами. При обновлении модуля этот файл не трогается.
+1. Скачайте `VPN_Tethering_Ultra_vX.Y.Z.zip` со страницы
+   [последнего релиза](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest).
+2. Установите zip через менеджер KernelSU, Magisk или APatch и перезагрузите телефон.
+3. Включите раздачу Wi-Fi или USB как обычно. Режим переключается кнопкой **Action** у модуля,
+   настройки — в **WebUI**. В KernelSU и APatch WebUI открывается из менеджера, в Magisk —
+   через отдельное приложение для WebUI модулей (например, WebUI X).
 
-Демон (`service.sh`) стартует после загрузки. `post-fs-data.sh` на раннем этапе ставит
-`net.tethering.noprovisioning`, если `TETHER_STEALTH` не выключен.
+При первой установке создаётся `/data/adb/vpn_tether.conf` с закомментированными примерами.
+При обновлении модуля этот файл не трогается — настройки сохраняются.
 
-## Управление: Action и WebUI
+### Обновление
 
-**Action** (кнопка ▶ у модуля в менеджере) переключает режим VPN ↔ напрямую. Демон
-подтверждает переключение, и Action показывает понятный статус: где идёт раздача
-(Wi-Fi/USB/…), режим, DNS раздачи и телефона, kill-switch.
+Модуль поддерживает обновление через менеджер модулей: в `module.prop` указан `updateJson`,
+и менеджер сам покажет новую версию со списком изменений
+([`update-changelog.md`](update-changelog.md)). Можно и вручную — установить zip новой версии
+поверх старой.
 
-**WebUI** (`webroot/index.html`, открывается из менеджера KernelSU) — основное место для
-настроек. Все вызовы идут через `webctl.sh` с фиксированным набором команд. Значения
-проверяет сам `service.sh --check` теми же правилами, что и при чтении конфига.
-Разделы WebUI:
+### Сборка из исходников
 
-- **Переключить / Защита** — режим и kill-switch.
-- **Диагностика сети** — подмена DNS, обрыв на ~16 КБ у зарубежных хостингов,
-  белые списки (SNI), Telegram.
-- **DNS** — DoH для раздачи напрямую, Meta «как из Европы», DNS раздачи через VPN,
-  приложения без QUIC.
-- **Обход блокировок** — включение и режим zapret, YouTube-функции, сторож, своя стратегия
-  для сайтов, журнал сторожа и подбора, стратегия текущей сети, свой список сайтов,
-  встроенный список и автосписок, «Проверить сайт», «Скорость YouTube» и подбор стратегии
-  (быстрый ~2 мин, полный ~7 мин).
-- **Прочее / Дополнительно** — описание модуля, запасные DoH, bootstrap, интервалы проверок,
-  настройки Meta, сброс всех настроек.
-- **Журнал** — хвост лога демона и лог прошлого запуска.
-
-Кнопка «Применить» перечитывает настройки без перезагрузки. Раздача пересобирается, только
-если поменялись DNS или kill-switch; zapret и QUIC применяются точечно, без обрыва соединений
-клиентов.
-
-## Настройки: `/data/adb/vpn_tether.conf`
-
-Формат: `КЛЮЧ=значение`, всё после `#` — комментарий, кавычки вокруг значения допустимы.
-Файл **не исполняется**. Читаются только ключи из `CONF_KEYS`, и каждое значение проверяется
-(`_conf_set`). Неверное значение или неизвестный ключ пропускается, и это пишется в лог.
-Если ключ убрать из файла, действует значение по умолчанию. Изменения применяются кнопкой
-«Применить» в WebUI или после перезагрузки.
-
-Флаги: `0` — выкл., `1` — вкл.
-
-### Режим и защита
-
-| Ключ | По умолчанию | Значения | Смысл |
-|---|---|---|---|
-| `KILL_SWITCH` | `1` | 0/1 | Правила VPN не встали или отвалились → трафик клиентов отбрасывается, а не уходит напрямую. |
-| `KILL_SWITCH_STRICT` | `0` | 0/1 | 1 — выбран VPN, а VPN не поднят → клиенты без сети до появления VPN или ручного переключения. 0 — после 3 промахов раздача уходит напрямую. |
-| `TETHER_STEALTH` | `1` | 0/1 | Скрыть раздачу: `net.tethering.noprovisioning`, TTL телефона 63, учёт пакетов раздачи с другим TTL. |
-| `TETHER_TTL_STRICT` | `0` | 0/1 | Отбивать пакеты раздачи в мобильную сеть с «чужим» TTL (например, Windows: 127). Такое устройство без своей настройки TTL останется без интернета. |
-| `NET_PROFILE_ADAPTIVE` | `0` | 0/1 | 0 — всегда профиль FAST (BBR), без пингов. 1 — пинг 1.1.1.1 через WAN раз в ~20 с; RTT выше порога или потеря 2 раза подряд → профиль STABLE (тот же BBR, больше SYN-ретраев). |
-| `STATUS_IN_DESCRIPTION` | `1` | 0/1 | Писать текущее состояние в описание модуля. |
-| `QUIC_BLOCK_APPS` | пусто | имена пакетов через пробел | Закрыть QUIC (UDP 443, REJECT) этим приложениям телефона, чтобы они сразу шли по HTTPS. |
-
-### DNS
-
-| Ключ | По умолчанию | Значения | Смысл |
-|---|---|---|---|
-| `DNSPROXY_ENABLE` | `1` | 0/1 | 0 — dnsproxy не используется вообще: DNS как в версиях до 1.1 (принудительно `DNS_DIRECT=plain`, `DNS_VPN=dnat`, `DNS_PHONE=0`). |
-| `DNS_DIRECT` | `doh` | `doh` / `plain` | Режим «напрямую»: `doh` — `DNS_UPSTREAMS` через dnsproxy; `plain` — DNAT на 1.1.1.1. |
-| `DNS_VPN` | `dnat` | `dnat` / `cache` / `doh` | Режим VPN: `dnat` — DNS VPN-клиента (нужен, если клиент маршрутизирует по доменам/fakeip); `cache` — DNS VPN через dnsproxy с кэшем; `doh` — `DNS_VPN_UPSTREAMS` через туннель с кэшем (замер: ~200 мс вместо ~550 мс, из кэша ~5 мс). |
-| `DNS_PHONE` | `1` | 0/1 | DNS-запросы приложений телефона (:53) идут через dnsproxy, пока VPN не поднят. |
-| `DNS_UPSTREAMS` | `https://dns.wlrus.cfd/dns-query` | адреса через пробел | Основные апстримы: DoH `https://`, DoT `tls://`, DoQ `quic://`, обычный `ip:53`. |
-| `DNS_FALLBACKS` | `https://dns.dagami.ru/dns-query https://not-a-dns.quic.best/dns-query https://dns.comss.one/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query` | адреса через пробел | Запасные, только шифрованные. При сбое основным становится первый из них, которого нет среди основных; остальные — его запасные по порядку. |
-| `DNS_VPN_UPSTREAMS` | `https://dns.google/dns-query https://cloudflare-dns.com/dns-query` | адреса через пробел | Апстримы для `DNS_VPN=doh`, идут через туннель. |
-| `DNS_BOOTSTRAP` | `77.88.8.8:53 1.1.1.1:53 8.8.8.8:53` | `IP:порт` через пробел | Чем резолвить имена самих DoH-серверов. Подмена здесь не опасна: сертификат апстрима всё равно проверяется. |
-| `DNS_HEALTH_INTERVAL` | `5` | 2–600 с | Как часто проверять DoH. Проверки идут только при реальном использовании DNS. |
-| `DNS_HEALTH_RECOVER` | `30` | 2–600 с | Как часто в откате проверять, ожил ли DoH. |
-| `DNS_META_EU` | `1` | 0/1 | Домены Meta (Instagram, Facebook, Threads, Messenger) резолвит отдельный dnsproxy (127.0.0.1:5355) с ECS → приходят адреса европейских узлов. Только там, где DNS и так идёт через DoH без VPN. |
-| `DNS_META_ECS` | `185.15.56.0` | IPv4 | Адрес «откуда спрашиваем» для EDNS Client Subnet (берётся /24, по умолчанию Амстердам). |
-| `DNS_META_UPSTREAMS` | `https://dns.google/dns-query` | адреса через пробел | DoH для Meta. Сервер должен учитывать ECS: Google учитывает, Cloudflare — нет. |
-
-### Обход DPI (zapret)
-
-| Ключ | По умолчанию | Значения | Смысл |
-|---|---|---|---|
-| `ZAPRET_ENABLE` | `1` | 0/1 | Обход DPI для трафика мимо VPN. |
-| `ZAPRET_MODE` | `list` | `list` / `all` | `list` — встроенный + свой + автосписок; `all` — все HTTPS-соединения. |
-| `ZAPRET_PHONE` | `1` | 0/1 | Обходить и для приложений телефона мимо VPN (VPN-клиенты не трогаются). |
-| `ZAPRET_STRATEGY` | `fakeddisorder` | `fakeddisorder` / `md5sig` / `md5sig2` / `badseq` / `disorder` / `seqovl` / `custom` | Общая стратегия для сетей без своей. `custom` — аргументы из `ZAPRET_ARGS`. |
-| `ZAPRET_ARGS` | пусто | только `--dpi-desync*`, `--dup*`, `--orig-*`, `--wssize*` | Аргументы nfqws для `custom`. Файлы подделок — только встроенные `@G` (ClientHello google.com) и `@Q` (QUIC Initial); никаких путей. |
-| `ZAPRET_QUIC_BLOCK` | `1` | 0/1 | Пока zapret включён, закрыть QUIC раздаче: браузеры сразу идут по TCP. |
-| `ZAPRET_PER_NET` | `1` | 0/1 | Своя стратегия для каждой сети: Wi-Fi — по названию, мобильная — по оператору. |
-| `ZAPRET_WATCHDOG` | `1` | 0/1 | Сторож обхода (см. ниже). |
-| `ZAPRET_WATCHDOG_MIN` | `15` | 5–240 мин | Интервал сторожа. |
-| `ZAPRET_ALT` | `1` | 0/1 | Своя стратегия для отдельных сайтов (см. ниже). |
-| `ZAPRET_ALT_MIN` | `180` | 30–1440 мин | Как часто проверять сайты из списков. |
-| `ZAPRET_AUTO_FAIL` | `3` | 2–10 | Сколько сбоев за минуту нужно, чтобы nfqws добавил сайт в автосписок. Причины пишутся в `/data/adb/vpn_tether_zapret_auto.log`, WebUI показывает их у каждого домена и даёт убрать один. |
-
-### YouTube
-
-| Ключ | По умолчанию | Значения | Смысл |
-|---|---|---|---|
-| `YT_DEAD_FAILFAST` | `1` | 0/1 | Отбивать мёртвые видеосерверы (см. ниже). |
-| `YT_SLOW_RETRY` | `1` | 0/1 | Рвать медленные молодые видеосоединения (см. ниже). |
-| `YT_GGC_BLOCK` | `0` | 0/1 | Отбивать (RST) соединения с `googlevideo.com` на адреса вне сетей Google (`zapret/google-ipv4.txt`), то есть кэши оператора, чтобы плеер ушёл на сервер Google. Включать, только если плеер вообще получает серверы Google: на сети, где выдаются одни кэши, ролики перестают открываться. |
-
-Кроме этих ключей, в блоке `USER CONFIG` в `service.sh` есть внутренние параметры, которые
-через конфиг не задаются: `DISABLE_HW_OFFLOAD`, `TARGETED_CT_FLUSH`, `RULE_WATCHDOG`,
-`DNSPROXY_PORT=5354`, `DNSPROXY_GID=3999`, `DNS_ALT_HOLD=600`, `DNS_ALT_HOLD_FLAP=1800`,
-`DNS_PROBE_SLOW_MS=3000`, `YT_DEAD_AFTER=6`, `YT_DEAD_TTL=600`, `YT_DEAD_MAX=16` и др.
-
-Пример:
-
-```ini
-# раздача напрямую — DNS через DoH, телефон тоже
-DNSPROXY_ENABLE=1
-DNS_PHONE=1
-# режим VPN без VPN-клиента — раздача на паузе
-KILL_SWITCH_STRICT=1
-# закрыть QUIC приложению
-QUIC_BLOCK_APPS=com.example.app
+```sh
+git clone https://github.com/JagKubarev/vpn-tethering-ultra.git
+cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 ```
 
-## Как устроен обход DPI
+В корне архива должны оказаться `module.prop`, `service.sh`, `META-INF/`, `lib/`, `bin/`,
+`zapret/`, `webroot/` и остальное содержимое папки `module/`.
 
-Обход работает только **мимо VPN**: в туннель (`tun*`) и в соединения самих VPN-клиентов
-модуль не вмешивается. Первые пакеты HTTPS-соединений из `mangle POSTROUTING` (цепочка
-`VPN_ZAPRET`) уходят в nfqws, а первые ответы (`VPN_ZAPRET_IN`) — тоже в nfqws, чтобы тот
-замечал обрывы и пополнял автосписок. nfqws работает с отдельной группой (GID 3998), и его
-собственные пакеты узнаются по владельцу сокета. Метка пакета не подходит: на мобильном
-интернете Qualcomm-цепочка `qcom_qos_reset` её стирает.
+## Управление
 
-**Списки сайтов.** `zapret/list-default.txt` (~200 доменов: YouTube, Discord, X, СМИ,
-сайты VPN, мессенджеры и т. д.), свой список из WebUI (`/data/adb/vpn_tether_zapret.txt`)
-и автосписок, который nfqws пополняет сам (`/data/adb/vpn_tether_zapret_auto.txt`).
-Для доменов `zapret/list-youtube.txt` может действовать отдельный профиль nfqws (`--new`).
-Домены из `zapret/list-exclude.txt` (банки, Госуслуги) не обрабатываются никогда и не
-попадают в автосписок. Зоны `.ru`, `.su` и `.рф` (`zapret/list-rutld.txt`) обход тоже не
-трогает и в автосписок не берёт — кроме сайтов, явно перечисленных во встроенном или своём
-списке (заблокированные издания): для них отдельный профиль с той же стратегией (с v3.8).
+- **Action** (кнопка ▶ у модуля в менеджере) переключает VPN ↔ напрямую. Демон подтверждает
+  переключение, и Action показывает статус: где идёт раздача, режим, DNS раздачи и телефона,
+  kill-switch.
+- **WebUI** — основное место для настроек: вкладки Главная, Обход, Сеть, Инструменты. Кнопка
+  «Применить» перечитывает настройки без перезагрузки и без обрыва соединений клиентов, если
+  не менялись DNS или kill-switch.
+- **Конфиг** `/data/adb/vpn_tether.conf` — те же настройки в виде `КЛЮЧ=значение`. Файл
+  не исполняется: читаются только известные ключи, каждое значение проверяется.
 
-**Стратегии сетей.** Сеть определяет `zapret/netid.sh`: Wi-Fi — `wifi:<SSID>`, мобильная —
-`mobile:<MCC MNC>` (сеть SIM с мобильными данными). Для каждой сети в
-`/data/adb/vpn_tether_zapret_nets` запоминается своя стратегия, отдельно общая и для YouTube.
-При смене сети nfqws перезапускается с её стратегией. Если для сети записи нет, берётся
-стратегия сети с тем же названием (оператор бывает виден под разными MCC MNC), а если нет и
-её — общая `ZAPRET_STRATEGY`. Встроенные стратегии проверялись сканером в 10 сетях:
-`fakeddisorder` дала полный или почти полный результат везде, поэтому она стоит по умолчанию.
+Таблица всех ключей, устройство обхода DPI и DNS, файлы модуля на устройстве —
+в [docs/settings.md](docs/settings.md).
 
-**Подбор (`zapret/scan.sh quick|full`).** Сканер проверяет стратегии запросами только самого
-себя (`curl --interface <WAN>` от root, через отдельную очередь NFQUEUE 203). Трафик телефона
-и раздачи не затрагивается. Адреса сайтов узнаются через DoH. Сначала сканер выясняет, что
-заблокировано без обхода. Контрольные сайты без блокировок нужны, чтобы отличить блокировку
-от отсутствия связи. Каждый сайт проверяется и обычным, и большим постквантовым ClientHello
-(2 TCP-сегмента, как у Chrome/AdGuard): засчитывается, только если открылся обоими.
-- **Быстрый** (~2 мин) — 22 проверенных шаблона: разрезы, подделки с md5sig/badseq/badsum/ts/datanoack,
-  `hostfakesplit` с приманкой google.com и российским SNI, seqovl, syndata, `--dup`, `--wssize`.
-- **Полный** (~7 мин) — 84 варианта по этапам: разрез без подделок → виды подделок →
-  подделка + разрез, приманки с российским SNI, разрез с наложением → варианты поддельного
-  ClientHello и повторы для трёх лучших → новые приёмы (`--dup`, `--orig-autottl`, `--wssize`)
-  для двух лучших.
+## Вопросы и ответы
 
-Затем лучшие три (плюс до двух лучших для YouTube) перепроверяются по два раза. Побеждает
-стратегия, которая ничего не ломает и открывает больше заблокированного по худшему прогону, а
-при равенстве — более быстрая. Для YouTube своя стратегия запоминается, только если она
-открывает больше YouTube, чем общая.
+**Чем режим «напрямую» отличается от обычной раздачи?**
+Клиенты идут в интернет без VPN, но их DNS шифруется через DoH, а сайты из списков открываются
+через обход DPI. Если обход или свой DNS не нужны, их можно выключить на Главной.
 
-**Сторож (`scan.sh check`, `ZAPRET_WATCHDOG`).** Раз в `ZAPRET_WATCHDOG_MIN` (15) минут, а
-также сразу, если видеосоединения начали застревать на ClientHello, сторож проверяет стратегию
-текущей сети. Если она сломалась, через минуту следует перепроверка. Когда не открылось вообще
-ничего, включая контрольные сайты, это считается проблемой связи, а не ТСПУ, и стратегия не
-меняется. Иначе сторож пробует прежние рабочие стратегии сети (`/data/adb/vpn_tether_zapret_hist`),
-затем быстрый подбор. Работает только при своей стратегии для сети и без поднятого VPN.
-События пишутся в `/data/adb/vpn_tether_zapret_events`.
+**Помогает ли обход от любой блокировки?**
+Нет. zapret работает против блокировок по имени сайта (SNI). Против блокировок по IP-адресу
+он не помогает — для таких сайтов нужен VPN. Обход действует только на трафик мимо VPN:
+туннель и соединения VPN-клиентов модуль не трогает.
 
-**Своя стратегия для отдельных сайтов (`scan.sh sites`, `ZAPRET_ALT`).** Автосписок nfqws
-замечает сбои только у сайтов, которых в списке ещё нет. Поэтому раз в `ZAPRET_ALT_MIN`
-(180) минут демон проверяет сайты из списков (до 400, мимо VPN, без YouTube и исключений).
-Сайтам, которые основная стратегия не открывает, подбирается другая: до 3 стратегий на сеть,
-nfqws получает для них профили перед основным. Если сайт не открылся ничем, он сутки не
-проверяется. Если адресов узнали меньше 60 % или «закрыто» больше 90 %, результат не
-сохраняется и проверка повторяется через ~15 мин. Хранится в `/data/adb/vpn_tether_zapret_alt`.
+**Ноутбук на Windows не выходит в интернет при включённом строгом TTL.**
+`TETHER_TTL_STRICT=1` отбивает пакеты с «чужим» TTL, а у Windows он 127. Выключите эту опцию
+или настройте TTL на самом устройстве. По умолчанию она выключена.
 
-**Отбой мёртвых видеосерверов (`YT_DEAD_FAILFAST`).** Часть видеосерверов Google принимает
-ClientHello, но не присылает ни байта, и плеер ждёт каждый ~27–30 с. Демон помечает
-соединения с `googlevideo.com` битом connmark и ищет их в conntrack. Если сервер молчит 6 с
-после ClientHello, он получает отказ (RST) на 10 мин. Сначала отбивается конкретный адрес
-(/32), а вся /24 — только когда в ней умерли два разных сервера; держится не больше 16 записей.
-Раз в ~минуту отбитые серверы перепроверяются в фоне рукопожатием с нейтральным именем мимо
-обхода: если сервер ожил, отбой снимается сразу. Работает только мимо VPN, пока включён zapret,
-и только для IPv4.
+**VPN-клиент маршрутизирует по доменам (fakeip), а через раздачу сайты не открываются.**
+Оставьте `DNS_VPN=dnat` (по умолчанию): тогда DNS раздачи идёт в DNS самого VPN-клиента.
 
-**Обрыв медленных соединений (`YT_SLOW_RETRY`, `zapret/ytslow.sh`).** По замерам ТСПУ режет
-~85–90 % соединений с Google до ~1 Мбит/с по адресам, а остальные идут 20–60 Мбит/с и такими
-остаются. Раз в секунду скрипт смотрит прирост байт у помеченных видеосоединений. Соединение
-считается медленным, если 3 шага подряд прирост есть, но за 3 с набралось 40 КБ…1,2 МБ
-(0,1–3 Мбит/с). Такое соединение рвётся, если оно младше 15 с и не идёт на адрес `.4`
-(служебные адреса YouTube/API не трогаются). Соединение, которое было быстрым, рвётся, если
-5 с подряд непрерывно качает медленнее ~2 Мбит/с. Плеер без прироста (отдыхающий) не трогается.
-Соединения телефона рвутся через `ss -K`, соединения раздачи — REJECT tcp-reset на 15 с.
-Предохранитель: если за 10 мин набралось ≥ 30 обрывов и ни одного быстрого соединения,
-скрипт встаёт на паузу на 10 мин. Статистика — в `/data/local/tmp/vpn_tether_ytslow.stat`.
+**Слетят ли настройки при обновлении?**
+Нет. Конфиг, свои списки сайтов и стратегии сетей лежат в `/data/adb/` вне папки модуля.
 
-## DNS
-
-- **Напрямую:** DNS клиентов раздачи (любой :53) перенаправляется на локальный dnsproxy
-  (порт 5354, закрыт для всех, кроме раздачи и lo). Оператор видит только TLS до DoH-сервера.
-- **VPN:** по умолчанию DNAT в DNS VPN-клиента. Режимы `cache`/`doh` включаются, только если
-  трафик root реально идёт в туннель.
-- **Проверка здоровья:** запрос со случайным именем, чтобы кэш не маскировал сбой.
-  Медленнее 3000 мс считается отказом. Проверки идут только при реальном использовании DNS,
-  поэтому модем может спать. Если основной DoH молчит, dnsproxy переходит на запасные.
-  Вернуться на основной можно не раньше чем через 10 мин и после 2 удачных проверок подряд;
-  если основной «дёргается» (2 ухода за 30 мин), запасные держатся 30 мин. Если молчат все,
-  DNS временно идёт обычным путём (оператор или VPN) с перепроверкой раз в `DNS_HEALTH_RECOVER`.
-- dnsproxy перезапускается при смене маршрута (VPN ↔ WAN, Wi-Fi ↔ мобильная), чтобы старое
-  keep-alive DoH-соединение не зависало. Если dnsproxy не запустился, раздача получает обычный
-  DNAT, а модуль пытается вернуть dnsproxy раз в ~минуту.
-- CA-сертификаты для dnsproxy берутся из системного хранилища (APEX conscrypt на Android 14+).
-
-## Файлы на устройстве и логи
-
-**Постоянные (`/data/adb/`, переживают обновление модуля):**
-
-| Файл | Что внутри |
-|---|---|
-| `/data/adb/vpn_tether.conf` | Настройки пользователя. |
-| `/data/adb/vpn_tether_zapret.txt` | Свой список сайтов для обхода (WebUI). |
-| `/data/adb/vpn_tether_zapret_auto.txt` | Автосписок, который пополняет nfqws. |
-| `/data/adb/vpn_tether_zapret_nets` | Стратегии сетей: `ключ\|стратегия\|аргументы\|название\|заметка\|дата…` |
-| `/data/adb/vpn_tether_zapret_hist` | Прежние стратегии сетей (для сторожа). |
-| `/data/adb/vpn_tether_zapret_alt` | Своя стратегия сайтов: `ключ\|название\|сайт\|аргументы\|дата`. |
-| `/data/adb/vpn_tether_zapret_altskip` | Сайты, не открывшиеся ничем (сутки не проверяются). |
-| `/data/adb/vpn_tether_zapret_events` | Журнал сторожа и подбора: `дата\|сеть\|событие` (последние ~300 строк). |
-| `/data/adb/vpn_tether_vpn_uids` | UID VPN-клиентов, замеченных владельцами VPN. |
-
-**В папке модуля** (`/data/adb/modules/vpn-to-hotspot-usb/`): `vpn_tether_enabled`
-(флаг режима VPN), `status` (состояние в формате `КЛЮЧ=значение`, его читают Action и WebUI),
-`toggle_req`/`toggle_ack`/`reload_req` (запросы демону и подтверждения).
-
-**Временные (`/data/local/tmp/`):**
-
-| Файл | Что внутри |
-|---|---|
-| `vpn_tether.log` | **Основной лог демона.** При старте прошлый лог переносится в `vpn_tether.log.prev`. |
-| `vpn_tether_dnsproxy.log`, `vpn_tether_dnsproxy_meta.log` | Логи dnsproxy (основной и для Meta). |
-| `vpn_tether_nfqws.log` | Лог nfqws. |
-| `vpn_tether.pid`, `vpn_tether.lock`, `vpn_tether_dnsproxy.pid`, `vpn_tether_nfqws.pid`, `vpn_tether_zscan.pid` | PID-файлы и блокировка от второго экземпляра демона. |
-| `vpn_tether_rules`, `vpn_tether_offload_orig` | Поставленные правила и исходное значение offload (для отката). |
-| `vpn_tether_zscan.*` | Состояние и результаты подбора/сторожа. |
-| `vpn_tether_zalt.*` | Списки сайтов профилей nfqws со своей стратегией. |
-| `vpn_tether_yt*` | Отбой мёртвых серверов, сети Google, обрыв медленных соединений и его статистика. |
-| `vpn_tether_meta_upstreams` | Апстримы dnsproxy для Meta. |
-
-Сообщения демона дублируются в logcat с тегом `vpn_tether`
-(`logcat -s vpn_tether`). Хвост лога и лог прошлого запуска можно посмотреть в WebUI («Журнал»).
-
-## Структура репозитория
-
-- `module/` — сам модуль:
-  - `service.sh` — демон: журнал изменений, блок настроек `USER CONFIG`, чтение
-    `vpn_tether.conf`, служебные вызовы для WebUI, переменные, запуск; функции — в `lib/`:
-    - `lib/common.sh` — журнал, статус и описание модуля;
-    - `lib/net.sh` — интерфейсы, tun/VPN, WAN, поиск раздачи, профили сети и sysctl;
-    - `lib/dns.sh` — DNS клиентов, dnsproxy, проверки DoH, Meta, DNS телефона;
-    - `lib/zapret.sh` — обход DPI (nfqws), QUIC приложений;
-    - `lib/youtube.sh` — кэши оператора, отбой мёртвых и обрыв медленных видеосерверов;
-    - `lib/stealth.sh` — скрытие раздачи (TTL);
-    - `lib/rules.sh` — правила раздачи, kill-switch, conntrack, HW offload;
-    - `lib/loop.sh` — главный цикл, перечитывание настроек, выход;
-  - `action.sh` — кнопка Action;
-  - `webctl.sh` + `webroot/index.html` — WebUI;
-  - `customize.sh` — установка (выбор бинарников, создание конфига);
-  - `post-fs-data.sh` — ранний этап загрузки (`noprovisioning`);
-  - `zapret/` — `scan.sh` (подбор, сторож, сайты), `ytslow.sh`, `netid.sh`, списки доменов,
-    сети Google, файлы подделок ClientHello/QUIC;
-  - `bin/` — `nfqws`, `dnsproxy`, `conntrack` под arm64/armv7.
-- `third_party/conntrack/` — исходники статического `conntrack` (GPL), в модуль не входят.
-- `tools/` — вспомогательные скрипты разработки (сканер блокировок, замеры, отладка);
-  в модуль не входят.
+**Где логи?**
+Основной лог — `/data/local/tmp/vpn_tether.log` (прошлый запуск — `vpn_tether.log.prev`),
+сообщения дублируются в logcat с тегом `vpn_tether`. Хвост лога виден во вкладке «Инструменты»,
+там же кнопка «Отправить логи». С вопросами и логами — в
+[тему на 4PDA](https://4pda.to/forum/index.php?showtopic=915158).
 
 ## Версии
 
 Нумерация `X.Y.Z`: **X** — этап, **Y** — заметная функция, **Z** — исправления.
 `versionCode` = X·10000 + Y·100 + Z (3.8.1 → 30801). До 23.10.2026 у модуля было две
-нумерации (внешняя 2.x и внутренняя 3.x-hybrid) — таблица соответствия в `CHANGELOG.md`.
+нумерации (внешняя 2.x и внутренняя 3.x-hybrid) — таблица соответствия в [`CHANGELOG.md`](CHANGELOG.md).
 Теги `v1.0` … `v3.11.2`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
+
+<details>
+<summary>Кратко по версиям</summary>
 
 **0.x — до репозитория (апрель–август 2026):** прототип и первые сборки на 4PDA (0.1–0.5),
 ветка 0.6–0.7.3, стабильная база hybrid 0.8 и kill-switch 0.9.
@@ -398,53 +235,66 @@ ClientHello, но не присылает ни байта, и плеер ждё�
 | 3.11.1 | Исправления: статус при загрузке без раздачи и VPN, автосписок не стирает неприменённые сайты, сброс pid при загрузке. |
 | 3.11.2 | DNS: первый запасной DoH — dagami; в откате проверяется и основной DoH — возврат на него без ожидания запасных. |
 
-## Сторонние компоненты и лицензии
+</details>
 
-В `module/bin/` лежат готовые бинарники сторонних проектов, их лицензии и источники —
-рядом (`*.LICENSE`, `*.SOURCE`, с sha256 исходных архивов).
+## Благодарности и сторонние компоненты
+
+Модуль опирается на работу других открытых проектов. В `module/bin/` лежат их готовые
+бинарники, лицензии и источники — рядом (`*.LICENSE`, `*.SOURCE`, с sha256 исходных архивов).
 
 | Компонент | Версия | Проект | Лицензия |
 |---|---|---|---|
-| `nfqws` | из zapret v72.13 | [bol-van/zapret](https://github.com/bol-van/zapret) | MIT (`bin/nfqws.LICENSE`) |
-| `dnsproxy` | v0.86.0 | [AdguardTeam/dnsproxy](https://github.com/AdguardTeam/dnsproxy) | Apache-2.0 (`bin/dnsproxy.LICENSE`) |
-| `conntrack` | v1.4.8 (статическая сборка) | conntrack-tools, [netfilter.org](https://www.netfilter.org/projects/conntrack-tools/) | GPL-2.0 (`bin/conntrack.LICENSE`, исходники и сборка — `bin/conntrack.SOURCE`) |
+| `nfqws` | из zapret v72.13 | [bol-van/zapret](https://github.com/bol-van/zapret) | MIT ([`nfqws.LICENSE`](module/bin/nfqws.LICENSE)) |
+| `dnsproxy` | v0.86.0 | [AdguardTeam/dnsproxy](https://github.com/AdguardTeam/dnsproxy) | Apache-2.0 ([`dnsproxy.LICENSE`](module/bin/dnsproxy.LICENSE)) |
+| `conntrack` | v1.4.8 (статическая сборка) | conntrack-tools, [netfilter.org](https://www.netfilter.org/projects/conntrack-tools/) | GPL-2.0 ([`conntrack.LICENSE`](module/bin/conntrack.LICENSE); рецепт сборки — [`conntrack.SOURCE`](module/bin/conntrack.SOURCE), исходники — [`third_party/conntrack/`](third_party/conntrack/)) |
 
 Спасибо авторам zapret (bol-van), dnsproxy (AdGuard) и netfilter. Некоторые идеи подбора
-взяты из ZDT-D, byedpi (`--auto`) и zapret2 (circular), как указано в журнале изменений.
+стратегий взяты из ZDT-D, byedpi (`--auto`) и zapret2 (circular), как указано в журнале
+изменений. Спасибо участникам темы на 4PDA за тесты на своих устройствах и сетях.
+
+## Структура репозитория
+
+| Путь | Что там |
+|---|---|
+| [`module/`](module/) | Сам модуль — из этой папки собирается zip |
+| [`docs/settings.md`](docs/settings.md) | Справочник: все настройки, устройство обхода DPI и DNS, файлы и логи |
+| [`docs/screenshots/`](docs/screenshots/), [`docs/webui/`](docs/webui/) | Скриншоты WebUI |
+| [`third_party/conntrack/`](third_party/conntrack/) | Исходники статического `conntrack` (GPL), в модуль не входят |
+| [`tools/`](tools/) | Стенды и скрипты замеров для разработки, в модуль не входят |
+| [`CHANGELOG.md`](CHANGELOG.md) | Полная история изменений |
+| [`update.json`](update.json), [`update-changelog.md`](update-changelog.md) | Обновление через менеджер модулей |
 
 ## Лицензия
 
-Код модуля (скрипты, WebUI, списки, `tools/`) — **GPL-3.0**, © Kubarev, текст в `LICENSE`
-(копия — `module/LICENSE`, попадает в zip). Изменённые версии можно распространять только
-под той же лицензией, с исходниками и с сохранением авторства. Сторонние бинарники в
-`module/bin/` идут под своими лицензиями (см. таблицу выше).
+Код модуля (скрипты, WebUI, списки, `tools/`) — **GPL-3.0**, © Kubarev, текст в [`LICENSE`](LICENSE)
+(копия — [`module/LICENSE`](module/LICENSE), попадает в zip). Изменённые версии можно
+распространять только под той же лицензией, с исходниками и с сохранением авторства.
+Сторонние бинарники в `module/bin/` идут под своими лицензиями (см. таблицу выше).
 
 ---
 
-## English summary
+## English
 
-**VPN Tethering Ultra** (`vpn-to-hotspot-usb`, v3.11.2) is a KernelSU/Magisk module for rooted
-Android (arm64/armv7) that shares the phone's connection over Wi-Fi hotspot and USB tethering
-either **through the phone's VPN** (NAT into `tun*`) or **directly**. Features:
+**VPN Tethering Ultra** (`vpn-to-hotspot-usb`) is a KernelSU / Magisk / APatch module for rooted
+Android (arm64 / armv7). It shares the phone's connection over Wi-Fi hotspot and USB tethering
+either **through the phone's VPN** (NAT into `tun*`) or **directly**, switchable with the module's
+**Action** button or from the WebUI.
 
-- fail-closed **kill-switch** (optional strict mode: no network for clients while VPN is down),
-  a rule watchdog, and removal of hardware/BPF tethering offload that could leak traffic past the VPN;
-- **own DNS via dnsproxy (DoH)** for tethered clients and the phone itself, with geo-unblocking
-  resolvers, health checks and an ordered fallback chain, plus EU-located answers for Meta domains (ECS);
-- **DPI circumvention** with zapret's `nfqws` for traffic outside the VPN: per-network strategies,
-  quick/full strategy scanner, a watchdog that re-checks and repairs the strategy, per-site
-  strategies, and an exclusion list (banks, government services);
-- **YouTube helpers**: fail-fast on silent video servers, dropping slow young video connections so
-  the player reconnects to a fast one, a separate YouTube strategy, optional ISP-cache (GGC) blocking;
-- tethering stealth (`noprovisioning`, TTL 63), per-app QUIC blocking, status in the module description.
+It provides a fail-closed **kill-switch** with a rule watchdog and removes hardware/BPF tethering
+offload that could leak traffic past the VPN; **encrypted DNS** via dnsproxy (DoH) for tethered
+clients and the phone itself, with health checks, an ordered fallback chain and EU-located answers
+for Meta domains (ECS); **DPI circumvention** with zapret's `nfqws` for traffic outside the VPN —
+per-network strategies, a quick/full strategy scanner, a self-repairing watchdog, per-site
+strategies and an exclusion list for banks and government services; **YouTube helpers** for mobile
+networks (fail-fast on silent video servers, dropping slow video connections); tethering stealth
+(TTL 63) and per-app QUIC blocking.
 
-Install the zip built from `module/`, reboot, toggle VPN/direct with the **Action** button, and
-configure everything in the **WebUI** or in `/data/adb/vpn_tether.conf` (`KEY=value`, validated,
-never executed). The main log is `/data/local/tmp/vpn_tether.log` (previous run: `.prev`;
-logcat tag `vpn_tether`).
+Download the zip from [Releases](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest),
+install it in your root manager and reboot; later updates arrive through the manager. Everything is
+configured in the WebUI or in `/data/adb/vpn_tether.conf` (`KEY=value`, validated, never executed).
+The main log is `/data/local/tmp/vpn_tether.log` (logcat tag `vpn_tether`). The interface and
+documentation are in Russian; the full reference is [docs/settings.md](docs/settings.md).
 
-Third-party binaries: `nfqws` from [zapret](https://github.com/bol-van/zapret) v72.13 (MIT),
-[dnsproxy](https://github.com/AdguardTeam/dnsproxy) v0.86.0 (Apache-2.0), `conntrack` v1.4.8
-from conntrack-tools (GPL-2.0).
-
-The module's own code is licensed under **GPL-3.0** (`LICENSE`, also shipped as `module/LICENSE`).
+The module's own code is licensed under **GPL-3.0**. Bundled third-party binaries: `nfqws` from
+[zapret](https://github.com/bol-van/zapret) v72.13 (MIT), [dnsproxy](https://github.com/AdguardTeam/dnsproxy)
+v0.86.0 (Apache-2.0), `conntrack` v1.4.8 from conntrack-tools (GPL-2.0, sources in `third_party/`).
