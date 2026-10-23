@@ -11,17 +11,20 @@
   --bg: #f4f5f7;
   --card: #ffffff;
   --text: #16181d;
-  --muted: #6b7280;
+  --muted: #5f6672;   /* 4.5:1 и на фоне страницы, не только на карточке */
   --line: #e5e7eb;
+  --field: #d1d5db;   /* рамка полей и выключенный тумблер — заметнее линий-разделителей */
   --accent: #2563eb;
   --accent-text: #ffffff;
   --input: #f9fafb;
   --green: #16a34a;
   --amber: #d97706;
+  --amber-text: #b45309;   /* текст: #d97706 на белом даёт только 3:1 */
   --red: #dc2626;
   --grey: #9ca3af;
   --blue: #2563eb;
   --shadow: 0 1px 2px rgba(0,0,0,.05);
+  --tabbar-h: 58px;   /* от неё отсчитываются плашка «Применить» и тост */
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -30,11 +33,13 @@
     --text: #e8eaee;
     --muted: #9aa1ad;
     --line: #2a2f38;
+    --field: #3d4450;
     --accent: #4f8cff;
     --accent-text: #0b1020;
     --input: #12151a;
     --green: #22c55e;
     --amber: #f59e0b;
+    --amber-text: #f59e0b;
     --red: #ef4444;
     --grey: #6b7280;
     --blue: #4f8cff;
@@ -48,19 +53,23 @@ body {
   padding: calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 150px);
   max-width: 640px; margin: 0 auto;
 }
-h1 { font-size: 20px; font-weight: 600; margin: 4px 2px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-h1 small { font-size: 13px; font-weight: 400; color: var(--muted); }
-h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 22px 4px 8px; }
+h1 { font-size: 20px; font-weight: 600; margin: 4px 2px 14px; display: flex; align-items: center; gap: 10px; }
+h1 .logo { width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; flex: none; }
+h1 .logo svg { width: 18px; height: 18px; }
+h1 small { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--muted); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+h1 small:empty { display: none; }
+h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 24px 4px 8px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
 .pad { padding: 16px; }
 
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; background: var(--grey); }
 .dot.green { background: var(--green); } .dot.amber { background: var(--amber); }
 .dot.red { background: var(--red); } .dot.blue { background: var(--blue); }
-.dot.big { width: 14px; height: 14px; }
+.dot.big { width: 14px; height: 14px; position: relative; }
+.dot.big::before { content: ""; position: absolute; inset: -5px; border-radius: 50%; background: inherit; opacity: .22; }
 
 .hero { display: flex; gap: 12px; align-items: flex-start; }
-.hero .dot { margin-top: 6px; }
+.hero .dot { margin: 6px 4px 0; }
 .hero-title { font-size: 18px; font-weight: 600; }
 .hero > div { min-width: 0; overflow-wrap: anywhere; }
 .hero-sub { color: var(--muted); font-size: 14px; margin-top: 2px; }
@@ -77,32 +86,40 @@ h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacin
   .kv .k:first-child { margin-top: 0; }
 }
 
-.btn { appearance: none; border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 10px; padding: 10px 14px; font: inherit; font-weight: 500; cursor: pointer; }
+.btn { appearance: none; border: 1px solid var(--field); background: var(--card); color: var(--text); border-radius: 10px; padding: 0 14px; min-height: 44px; font: inherit; font-weight: 500; cursor: pointer; transition: background .1s, transform .1s; }
 .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-.btn.wide { width: 100%; margin-top: 14px; padding: 12px; }
-.btn.small { padding: 6px 10px; font-size: 13px; }
-.btn:disabled { opacity: .5; }
+.btn.wide { width: 100%; margin-top: 16px; min-height: 48px; }
+/* компактная — 38 px на вид, но зона нажатия всё равно 44 */
+.btn.small { position: relative; padding: 0 12px; min-height: 38px; font-size: 13.5px; flex: none; }
+.btn.small::after { content: ""; position: absolute; inset: -3px 0; }
+.btn:active:not(:disabled) { background: var(--input); transform: scale(.98); }
+.btn.primary:active:not(:disabled) { background: var(--accent); filter: brightness(.92); }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn:focus-visible, summary:focus-visible, #tabbar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-row.eq > .btn { flex: 1 1 130px; padding: 0 8px; white-space: nowrap; }   /* две равные в ряд, третья — ниже на всю ширину */
 
-.row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-top: 1px solid var(--line); }
+.row { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-top: 1px solid var(--line); }
 .row:first-child { border-top: 0; }
 .row .txt { flex: 1; min-width: 0; }
 .row .t { font-weight: 500; overflow-wrap: anywhere; }
 .row .s { color: var(--muted); font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
 .row.off { opacity: .45; pointer-events: none; }
 .row.col { flex-direction: column; align-items: stretch; }
+.row.col > .head { display: flex; align-items: center; gap: 12px; }   /* заголовок + кнопка справа, итог ниже */
 .badge { font-size: 11px; color: var(--accent); border: 1px solid currentColor; border-radius: 6px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
 
 .sw { position: relative; width: 46px; height: 28px; flex: none; }
-.sw input { opacity: 0; position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; z-index: 1; cursor: pointer; }
-.sw span { position: absolute; inset: 0; background: var(--line); border-radius: 14px; transition: background .15s; }
+.sw input { opacity: 0; position: absolute; inset: -8px -6px; width: calc(100% + 12px); height: calc(100% + 16px); margin: 0; z-index: 1; cursor: pointer; }
+.sw span { position: absolute; inset: 0; background: var(--field); border-radius: 14px; transition: background .15s; }
+.sw input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sw span::after { content: ""; position: absolute; width: 22px; height: 22px; left: 3px; top: 3px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
 .sw input:checked + span { background: var(--accent); }
 .sw input:checked + span::after { transform: translateX(18px); }
 
 select, textarea, input[type=text], input[type=number], input[type=search] {
   width: 100%; font: inherit; color: var(--text); background: var(--input);
-  border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; margin-top: 8px;
+  border: 1px solid var(--field); border-radius: 10px; padding: 9px 11px; margin-top: 10px; min-height: 44px;
 }
 select { appearance: auto; }
 textarea { resize: vertical; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -111,33 +128,50 @@ textarea { resize: vertical; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo
 .st-line > .dot { margin-right: 8px; vertical-align: -1px; }
 details.off { opacity: .45; pointer-events: none; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+select:disabled { opacity: .6; }
+.inline { display: flex; gap: 8px; align-items: flex-start; }
+.inline > input { min-width: 0; }
+.inline > .btn { margin-top: 10px; white-space: nowrap; flex: none; }
 .err { color: var(--red); font-size: 13px; margin-top: 6px; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; background: var(--input); border: 1px solid var(--line); border-radius: 999px; padding: 5px 6px 5px 12px; font-size: 13px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; background: var(--input); border: 1px solid var(--field); border-radius: 999px; padding: 3px 3px 3px 12px; font-size: 13.5px; }
 .chip > span { min-width: 0; overflow-wrap: anywhere; }
-.chip button { border: 0; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; padding: 0 6px; cursor: pointer; }
+.chip button { position: relative; width: 26px; height: 26px; flex: none; border: 0; border-radius: 50%; background: transparent; color: var(--muted); font-size: 17px; line-height: 1; padding: 0; cursor: pointer; }
+.chip button::after { content: ""; position: absolute; inset: -9px; }
+.chip button:active { background: var(--line); }
+/* ✕ в строках автосписка */
+.icon-btn { min-width: 44px; padding: 0 !important; font-size: 14px; color: var(--muted); }
 .empty { color: var(--muted); font-size: 13px; margin-top: 10px; }
 
-details > summary { list-style: none; cursor: pointer; padding: 13px 16px; font-weight: 500; display: flex; justify-content: space-between; }
+details > summary { list-style: none; cursor: pointer; padding: 14px 16px; min-height: 48px; font-weight: 500; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 details > summary::-webkit-details-marker { display: none; }
-details > summary::after { content: "›"; color: var(--muted); transform: rotate(90deg); transition: transform .15s; }
-details[open] > summary::after { transform: rotate(-90deg); }
+/* шеврон рамкой, а не символом «›»: одинаковый в любом шрифте */
+details > summary::after { content: ""; flex: none; width: 7px; height: 7px; margin: 0 4px -2px 0; border: solid var(--muted); border-width: 0 2px 2px 0; transform: translateY(-3px) rotate(45deg); transition: transform .15s; }
+details[open] > summary::after { transform: translateY(1px) rotate(-135deg); }
+.card > details { border-top: 1px solid var(--line); }
+.card > details:first-child { border-top: 0; }
+.card > details[open]:not(.kvbox) > summary { padding-bottom: 8px; min-height: 44px; }
 
-pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; border-top: 1px solid var(--line); }
+pre.log { margin: 0; padding: 12px 14px; background: var(--input); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; border-top: 1px solid var(--line); }
 
-.applybar { position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + 58px); padding: 12px 16px; background: var(--card); border-top: 1px solid var(--line); display: none; z-index: 10; }
+.applybar { position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + var(--tabbar-h) + 1px); padding: 10px 16px; background: var(--card); border-top: 1px solid var(--line); box-shadow: 0 -4px 12px rgba(0,0,0,.08); display: none; z-index: 10; }
 .applybar.show { display: block; }
 .applybar .in { max-width: 640px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
-.applybar .msg { flex: 1; min-width: 0; font-size: 14px; color: var(--muted); }
+.applybar .msg { flex: 1; min-width: 0; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.applybar .btn { padding: 0 12px; }
+.applybar .msg { white-space: nowrap; }
+.applybar .msg::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); flex: none; }
 
 .sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; z-index: 20; }
 .sheet-bg.show { display: block; }
 .sheet { position: fixed; left: 0; right: 0; bottom: 0; max-height: 85vh; background: var(--card); border-radius: 16px 16px 0 0; display: none; flex-direction: column; z-index: 21; padding-bottom: env(safe-area-inset-bottom); }
 .sheet.show { display: flex; }
-.sheet .head { padding: 14px 16px 6px; }
+.sheet .head { padding: 8px 16px 8px; }
+.sheet .head::before { content: ""; display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--field); margin: 0 auto 10px; }
 .sheet .list { overflow: auto; padding: 0 0 12px; }
-.app { display: flex; align-items: center; gap: 12px; padding: 10px 16px; cursor: pointer; }
+.app { display: flex; align-items: center; gap: 12px; padding: 10px 16px; min-height: 52px; cursor: pointer; }
+.app:active { background: var(--input); }
 .app img { width: 32px; height: 32px; border-radius: 8px; flex: none; }
 .app .ph { width: 32px; height: 32px; border-radius: 8px; background: var(--input); border: 1px solid var(--line); flex: none; }
 .app > div { min-width: 0; overflow-wrap: anywhere; }
@@ -145,31 +179,37 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
 .app .p { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .app.sel .n::after { content: " ✓"; color: var(--accent); }
 
-.toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 130px); transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 9px 14px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 30; max-width: calc(100% - 32px); }
+.toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + var(--tabbar-h) + 80px); transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 9px 14px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 30; max-width: calc(100% - 32px); }
 .toast.show { opacity: .95; }
 
 /* вкладки (3.10) */
 .tab { display: none; }
 .tab.on { display: block; }
 .tabbar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); z-index: 11; padding-bottom: env(safe-area-inset-bottom); }
-.tabbar .in { max-width: 640px; margin: 0 auto; display: flex; }
-.tabbar button { flex: 1; min-width: 0; background: none; border: 0; padding: 8px 2px 9px; color: var(--muted); font: 500 11px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; }
-.tabbar button svg { width: 23px; height: 23px; }
-.tabbar button.on { color: var(--accent); }
+.tabbar .in { max-width: 640px; margin: 0 auto; display: flex; height: var(--tabbar-h); }
+.tabbar button { flex: 1; min-width: 0; background: none; border: 0; padding: 6px 2px 0; color: var(--muted); font: 500 11px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; cursor: pointer; }
+.tabbar button svg { width: 22px; height: 22px; box-sizing: content-box; padding: 3px 16px; border-radius: 999px; transition: background .15s; }
+.tabbar button.on { color: var(--accent); font-weight: 600; }
+.tabbar button.on svg { background: var(--input); }
 details.more { margin-top: 18px; }
-details.kvbox { margin-top: 12px; border-top: 1px solid var(--line); }
-details.kvbox > summary { padding: 10px 0 0; font-size: 14px; color: var(--muted); }
-details.kvbox .kv { border-top: 0; margin-top: 4px; padding-top: 6px; }
+details.kvbox { margin: 14px -16px -16px; border-top: 1px solid var(--line); }
+details.kvbox > summary { padding: 12px 16px; min-height: 46px; font-size: 14px; color: var(--muted); }
+details.kvbox .kv { border-top: 0; margin: 0; padding: 0 16px 16px; }
 details.more > summary { color: var(--muted); }
 .hint { color: var(--muted); font-size: 13px; margin: 8px 4px 0; }
-.offnote { padding: 10px 16px; font-size: 13px; color: var(--amber); border-bottom: 1px solid var(--line); cursor: pointer; }
+.offnote { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 10px 16px; font-size: 13.5px; color: var(--amber-text); background: var(--input); cursor: pointer; }
+.offnote::before { content: "!"; flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--amber); color: var(--card); font: 700 12px/18px system-ui, sans-serif; text-align: center; }
+.offnote[hidden] { display: none; }
+/* скрытая подсказка — первой строке карточки линия сверху не нужна */
+.offnote[hidden] + .row, .offnote[hidden] + details { border-top: 0; }
+.offnote::after { content: "›"; margin-left: auto; font-size: 18px; line-height: 1; }
 .muted { color: var(--muted); }
 .mt8 { margin-top: 8px; }
 </style>
 </head>
 <body>
 
-<h1>VPN Tethering <small id="ver"></small></h1>
+<h1><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1" fill="currentColor"/><path d="M12 3v4M9.5 5.5 12 3l2.5 2.5"/></svg></span>VPN Tethering <small id="ver"></small></h1>
 
 <section class="tab" data-tab="home">
 <div class="card pad" id="statusCard">
@@ -338,8 +378,8 @@ details.more > summary { color: var(--muted); }
 <h2>Подбор стратегии</h2>
 <div class="card pad">
   <div class="s muted" style="font-size:13px;margin-top:2px">Поиск рабочей стратегии для текущей сети по списку сайтов. Выполняется в фоне. При сбое стратегии автопроверка обхода запускает его автоматически.</div>
-  <textarea id="scSites" rows="2" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
-  <div class="btn-row mt8">
+  <textarea id="scSites" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+  <div class="btn-row eq mt8">
     <button class="btn" id="scQuick">Быстрый · ~2 мин</button>
     <button class="btn" id="scFull">Полный · ~7 мин</button>
     <button class="btn" id="scStop" style="display:none">Остановить</button>
@@ -477,9 +517,11 @@ details.more > summary { color: var(--muted); }
 <h2>Диагностика сети</h2>
 <div class="card">
   <div class="row col">
-    <div class="txt"><div class="t">Проверка оператора</div>
-      <div class="s">Проверка подмены DNS, обрыва соединений, белых списков и доступности Telegram. Около минуты.</div></div>
-    <div class="mt8"><button class="btn small" id="diagBtn">Проверить</button></div>
+    <div class="head">
+      <div class="txt"><div class="t">Проверка оператора</div>
+        <div class="s">Проверка подмены DNS, обрыва соединений, белых списков и доступности Telegram. Около минуты.</div></div>
+      <button class="btn small" id="diagBtn">Проверить</button>
+    </div>
     <div class="kv" id="diagOut" style="display:none"></div>
   </div>
 </div>
@@ -488,11 +530,11 @@ details.more > summary { color: var(--muted); }
 <h2>Проверить сайт</h2>
 <div class="card pad">
   <div class="s muted" style="font-size:13px;margin-top:2px">Доступность сайта мимо VPN — без обхода и с текущей стратегией.</div>
-  <div style="display:flex;gap:8px;align-items:flex-start">
-    <input type="text" id="stHost" style="min-width:0" enterkeyhint="go" placeholder="youtube.com" autocapitalize="off" autocorrect="off" spellcheck="false">
-    <button class="btn" id="stBtn" style="margin-top:8px;white-space:nowrap">Проверить</button>
+  <div class="inline">
+    <input type="text" id="stHost" enterkeyhint="go" placeholder="youtube.com" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <button class="btn" id="stBtn">Проверить</button>
   </div>
-  <button class="btn" id="ytBtn" style="margin-top:8px">Скорость YouTube</button>
+  <button class="btn" id="ytBtn" style="margin-top:10px">Скорость YouTube</button>
   <div class="s muted" style="font-size:12px;margin-top:4px">Скорость загрузки с серверов Google под именем видеосервера — без обхода и с ним. ~15 секунд, до ~80 МБ трафика.</div>
   <div id="stRes" class="mt8" style="font-size:14px"></div>
 </div>
@@ -504,7 +546,7 @@ details.more > summary { color: var(--muted); }
     <button class="btn small" id="dohBtn">Проверить</button>
   </div>
   <div class="row col">
-    <div style="display:flex;align-items:center;gap:12px">
+    <div class="head">
       <div class="txt"><div class="t">Проверка адресов Meta</div><div class="s">Адреса Instagram и Facebook, полученные с европейским ECS. Рабочие обычно начинаются с 57.144.</div></div>
       <button class="btn small" id="metaBtn">Проверить</button>
     </div>
@@ -781,7 +823,7 @@ function renderForm() {
 function renderDeps() {
   $$('[data-dep]').forEach((row) => { row.classList.toggle('off', CUR[row.dataset.dep] !== '1'); });
   // главный выключатель — только на Главной; во вкладках подсказка, если он выключен
-  $$('[data-offnote]').forEach((n) => { n.style.display = CUR[n.dataset.offnote] === '1' ? 'none' : ''; });
+  $$('[data-offnote]').forEach((n) => { n.hidden = CUR[n.dataset.offnote] === '1'; });
   $('#zArgsBox').style.display = CUR.ZAPRET_STRATEGY === 'custom' ? '' : 'none';
   const pn = CUR.ZAPRET_PER_NET === '1';
   $('#znetBox').style.display = pn ? '' : 'none';
@@ -1057,7 +1099,7 @@ async function loadZ() {
   $('#zlist').value = ZL_SAVED;
   const dl = d.out.split('\n').filter(Boolean), al = a.out.split('\n').filter((l) => l.indexOf('|') > 0).map((l) => l.split('|'));
   $('#zdef').textContent = dl.join('\n'); $('#zdefN').textContent = dl.length;
-  $('#zauto').innerHTML = al.length ? al.map(zautoRow).join('') : '<div class="s muted" style="padding:8px 0">пока пусто</div>';
+  $('#zauto').innerHTML = al.length ? al.map(zautoRow).join('') : '<div class="s muted" style="padding:10px 0">Пока пусто.</div>';
   $('#zautoN').textContent = al.length;
   renderBar();
   loadZalt();
@@ -1076,7 +1118,7 @@ function zautoRow(f) {
   } else info = 'добавлен до 3.9 — причина не записана';
   return '<div class="row" style="padding:6px 0;gap:8px"><div class="txt"><div class="t" style="font-size:14px;font-weight:400">' + esc(h) + '</div>' +
     '<div class="s" style="font-size:12px">' + esc(info) + '</div></div>' +
-    '<button class="btn small" data-zdel="' + esc(h) + '" title="Убрать из автосписка" style="padding:4px 10px">✕</button></div>';
+    '<button class="btn small icon-btn" data-zdel="' + esc(h) + '" title="Убрать из автосписка" aria-label="Убрать из автосписка">✕</button></div>';
 }
 $('#zauto').addEventListener('click', async (e) => {
   const h = e.target.dataset && e.target.dataset.zdel; if (!h) return;
