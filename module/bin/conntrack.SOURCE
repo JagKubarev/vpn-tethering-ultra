@@ -6,6 +6,7 @@ sha256 бинарей:
   conntrack-arm64  392534008d8a2d84c05c8a5bed43e72f31320d1c54e0c23bb555febadc48bd5e
   conntrack-arm    0fef73493188cf60e6302cb70ea7fa0c77ba47b13eea5b47019c4c30ae30bab2
 
+Копии всех тарболов — в репозитории: third_party/conntrack/ (SHA256SUMS там же).
 Исходники (sha256 тарболов с netfilter.org / sourceforge):
   https://www.netfilter.org/projects/conntrack-tools/files/conntrack-tools-1.4.8.tar.xz
     067677f4c5f6564819e78ed3a9d4a8980935ea9273f3abb22a420ea30ab5ded6   GPL-2.0

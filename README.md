@@ -333,6 +333,7 @@ ClientHello, но не присылает ни байта, и плеер ждё�
   - `zapret/` — `scan.sh` (подбор, сторож, сайты), `ytslow.sh`, `netid.sh`, списки доменов,
     сети Google, файлы подделок ClientHello/QUIC;
   - `bin/` — `nfqws`, `dnsproxy`, `conntrack` под arm64/armv7.
+- `third_party/conntrack/` — исходники статического `conntrack` (GPL), в модуль не входят.
 - `tools/` — вспомогательные скрипты разработки (сканер блокировок, замеры, отладка);
   в модуль не входят.
 

@@ -18,6 +18,7 @@ KernelSU/Magisk-модуль (id `vpn-to-hotspot-usb`, автор Kubarev, те�
 - `module/webctl.sh` + `module/webroot/index.html` — WebUI, только фиксированные команды.
 - `module/zapret/` — `scan.sh` (подбор / сторож / сайты), `ytslow.sh`, `netid.sh`, списки.
 - `module/bin/` — `nfqws`, `dnsproxy`, `conntrack` (arm64 + armv7).
+- `third_party/conntrack/` — тарболы исходников `bin/conntrack-*` (GPL), в zip не входят.
 - `tools/` — стенды и замеры для разработки (`zt_harness.sh`, `leakmon.py`,
   `blockscan.sh`, `patch_*.py` …), в модуль не входят.
 - Конфиг пользователя: `/data/adb/vpn_tether.conf` (не исполняется, ключи из `CONF_KEYS`
