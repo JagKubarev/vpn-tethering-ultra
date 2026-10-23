@@ -15,7 +15,7 @@
 [![Android](https://img.shields.io/badge/Android-arm64%20%7C%20armv7-3ddc84?logo=android&logoColor=white)](#совместимость)
 
 [Скачать](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest) ·
-[Тема на 4PDA](https://4pda.to/forum/index.php?showtopic=915158) ·
+[Тема на 4PDA](https://4pda.to/forum/index.php?showtopic=1097835) ·
 [Все настройки](docs/settings.md) ·
 [История изменений](CHANGELOG.md) ·
 [English](#english)
@@ -180,7 +180,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 Основной лог — `/data/local/tmp/vpn_tether.log` (прошлый запуск — `vpn_tether.log.prev`),
 сообщения дублируются в logcat с тегом `vpn_tether`. Хвост лога виден во вкладке «Инструменты»,
 там же кнопка «Отправить логи». С вопросами и логами — в
-[тему на 4PDA](https://4pda.to/forum/index.php?showtopic=915158).
+[тему на 4PDA](https://4pda.to/forum/index.php?showtopic=1097835).
 
 ## Версии
 
