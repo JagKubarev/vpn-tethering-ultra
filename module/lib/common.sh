@@ -163,7 +163,7 @@ friendly_ifaces() {
 
 # Текущее состояние — в описание модуля (список модулей KernelSU/Magisk).
 # Пишем только при изменении; на выходе демона возвращаем обычное описание.
-MODULE_DESC_DEFAULT="Раздача Wi-Fi/USB через VPN с kill-switch, своим DNS (DoH) и обходом DPI. ▶ Action — переключить VPN/напрямую."
+MODULE_DESC_DEFAULT="Раздача Wi-Fi/USB через VPN или напрямую: защита от утечек, зашифрованный DNS (DoH), обход блокировок. Action — переключить VPN/напрямую."
 update_description() {
     [ "$STATUS_IN_DESCRIPTION" = "1" ] || return 0
     local mode="$1" ifaces="$2" f="$MODULE_DIR/module.prop" names d up_host
@@ -171,22 +171,22 @@ update_description() {
     names=$(friendly_ifaces "$ifaces")
     up_host=$(echo "$DNS_UPSTREAMS" | awk '{print $1}' | sed -E 's#^[a-z0-9]+://##; s#[/:].*##')
     case "$mode" in
-        vpn)     d="✅ Раздача через VPN${names:+ · $names}" ;;
-        blocked) d="⛔ VPN не подключён — раздача на паузе (kill-switch)" ;;
+        vpn)     d="Раздача через VPN${names:+ · $names}" ;;
+        blocked) d="VPN не подключён — раздача приостановлена" ;;
         *)
             if [ -z "$names" ]; then
-                d="💤 Раздача выключена · режим: $(is_vpn_tether_enabled && echo VPN || echo напрямую)"
+                d="Раздача выключена · режим: $(is_vpn_tether_enabled && echo VPN || echo напрямую)"
             else
-                d="🌍 Раздача напрямую · $names"
+                d="Раздача напрямую · $names"
             fi ;;
     esac
     if [ "$DNS_DEGRADED" = "1" ]; then
-        d="$d · ⚠️ DoH недоступен, DNS обычный"
+        d="$d · DoH не отвечает, DNS обычный"
     elif [ "$mode" = "direct" ] && [ -n "$names" ]; then
         case "$DNS_STATE" in dnsproxy*) d="$d · DNS: $up_host" ;; esac
     fi
     [ "$mode" = "direct" ] && [ -n "$names" ] && [ "$ZAPRET_STATE" = "on" ] && d="$d · обход DPI"
-    d="$d · ▶ Action — переключить"
+    d="$d · Action — переключить"
     set_description "$d"
 }
 set_description() {

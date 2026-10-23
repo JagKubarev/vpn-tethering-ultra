@@ -4,6 +4,15 @@
 # здесь, как system.prop у tether_unblock, но с учётом переключателя
 # TETHER_STEALTH из /data/adb/vpn_tether.conf (по умолчанию включено).
 CONF=/data/adb/vpn_tether.conf
+# Описание в списке модулей — состояние с прошлого запуска демона (при
+# выключении телефона он не успевает вернуть обычное). До старта демона
+# пишем «запускается», чтобы не показывать устаревший режим.
+P="${0%/*}/module.prop"
+if [ -f "$P" ]; then
+    awk '/^description=/ {print "description=Модуль запускается — состояние появится после загрузки телефона."; next} {print}' "$P" > "$P.tmp" && \
+        grep -q '^id=' "$P.tmp" && cat "$P.tmp" > "$P"
+    rm -f "$P.tmp"
+fi
 v=$(sed -n 's/^[[:space:]]*TETHER_STEALTH[[:space:]]*=[[:space:]]*["'\'']*\([01]\).*/\1/p' "$CONF" 2>/dev/null | tail -n 1)
 [ "$v" = "0" ] && exit 0
 for r in /data/adb/ksu/bin/resetprop /data/adb/magisk/resetprop /data/adb/ap/bin/resetprop resetprop; do

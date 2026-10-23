@@ -88,6 +88,8 @@ signal_daemon() {
 case "$1" in
     status)
         if [ -n "$(daemon_pid)" ]; then echo "daemon=1"; else echo "daemon=0"; fi
+        # без демона: секунды с загрузки — страница отличит «запускается» от «не запущен»
+        echo "uptime=$(cut -d. -f1 /proc/uptime)"
         sed -n 's/^version=/module_version=/p' "$MODDIR/module.prop"
         # строки 1-2 — старый формат, страница читает только КЛЮЧ=значение
         sed '1,2d' "$STATUS_FILE" 2>/dev/null

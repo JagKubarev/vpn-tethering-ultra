@@ -75,92 +75,97 @@ show_status() {
     if [ -z "$mode" ]; then
         # старый формат status (демон ещё не обновлён) — показываем как есть
         { read -r l1; read -r l2; } < "$STATUS_FILE" 2>/dev/null
-        echo "$LINE"; echo "${l1:-❓ Статус неизвестен}"; [ -n "$l2" ] && echo "📡 $l2"; echo "$LINE"
+        echo "$LINE"; echo "${l1:-Статус неизвестен}"; [ -n "$l2" ] && echo "$l2"; echo "$LINE"
         return
     fi
 
     echo "$LINE"
     if [ -z "$names" ]; then
-        echo "💤  РАЗДАЧА СЕЙЧАС ВЫКЛЮЧЕНА"
-        echo "    Включи точку доступа или USB-модем."
-        echo "    Режим при включении: $([ "$target" = "vpn" ] && echo "через VPN 🛡" || echo "напрямую 🌍")"
+        echo "РАЗДАЧА ВЫКЛЮЧЕНА"
+        echo "Включите точку доступа или USB-модем."
+        echo "Режим при включении: $([ "$target" = "vpn" ] && echo "через VPN" || echo "напрямую")."
     elif [ "$mode" = "vpn" ]; then
-        echo "🛡  РАЗДАЧА ЧЕРЕЗ VPN"
-        echo "    Устройства выходят в интернет"
-        echo "    только через VPN."
+        echo "РАЗДАЧА ЧЕРЕЗ VPN"
+        echo "Устройства выходят в интернет"
+        echo "только через VPN."
     elif [ "$mode" = "blocked" ]; then
-        echo "⛔  VPN НЕ ПОДКЛЮЧЁН"
-        echo "    Раздача на паузе, чтобы не"
-        echo "    засветить твой настоящий IP."
-        echo ""
-        echo "👉 Включи VPN-клиент — раздача"
-        echo "   заработает сама."
+        echo "VPN НЕ ПОДКЛЮЧЁН"
+        echo "Раздача приостановлена, чтобы"
+        echo "не раскрыть реальный IP. После"
+        echo "подключения VPN она возобновится"
+        echo "автоматически."
     else
-        echo "🌍  РАЗДАЧА НАПРЯМУЮ"
-        echo "    Без VPN, через оператора."
+        echo "РАЗДАЧА НАПРЯМУЮ"
+        echo "Без VPN, через оператора."
+        # выбран VPN, но клиент не подключён (без строгого режима — напрямую)
+        if [ "$target" = "vpn" ]; then
+            echo "Выбран режим VPN: раздача перейдёт"
+            echo "на VPN, когда он подключится."
+        fi
     fi
     echo "$LINE"
 
-    [ -n "$names" ] && echo "📡 Раздаю на:  $names"
+    [ -n "$names" ] && echo "Раздача:       $names"
 
     # DNS раздачи
     if [ -n "$names" ] && [ "$mode" != "blocked" ]; then
         local dline=""
         if [ "$degraded" = "1" ]; then
             if [ "$mode" = "vpn" ]; then
-                dline="⚠️ $up не ответил,
-              пока DNS VPN (проверяю снова)"
+                dline="$up не отвечает,
+               пока DNS VPN (проверяю снова)"
             else
-                dline="⚠️ $up не ответил,
-              пока DNS оператора (проверяю снова)"
+                dline="$up не отвечает,
+               пока DNS оператора (проверяю снова)"
             fi
         else
             case "$dns" in
                 "dnsproxy doh")
-                    if [ "$mode" = "vpn" ]; then dline="через VPN, зашифрован 🔒"
-                    else dline="$up, зашифрован 🔒"; fi ;;
+                    if [ "$mode" = "vpn" ]; then dline="DoH через VPN"
+                    else dline="$up, зашифрован"; fi ;;
                 "dnsproxy cache") dline="DNS VPN + кэш" ;;
-                "DNAT (dnsproxy упал)") dline="⚠️ обычный (dnsproxy не запустился)" ;;
+                "DNAT (dnsproxy упал)") dline="обычный (dnsproxy не запустился)" ;;
                 DNAT*)
                     if [ "$mode" = "vpn" ]; then dline="через VPN (${dns#DNAT })"
                     else dline="обычный (${dns#DNAT })"; fi ;;
             esac
         fi
-        [ -n "$dline" ] && echo "🌐 DNS:        $dline"
+        [ -n "$dline" ] && echo "DNS раздачи:   $dline"
     fi
 
     # DNS самого телефона
     if [ "$dp" = "1" ] && [ "$phone_en" = "1" ]; then
         if [ "$vpn_up" = "1" ]; then
-            echo "📱 DNS телефона: через VPN"
+            echo "DNS телефона:  через VPN"
         elif [ "$phone" = "1" ] && [ "$degraded" = "1" ]; then
-            echo "📱 DNS телефона: пока обычный —"
-            echo "   $up не ответил, проверяю снова"
+            echo "DNS телефона:  пока обычный,"
+            echo "               $up не отвечает"
         elif [ "$phone" = "1" ]; then
-            echo "📱 DNS телефона: $up 🔒"
+            echo "DNS телефона:  $up, зашифрован"
         fi
     fi
 
     case "$(st zapret)" in
-        on)   echo "🧩 Обход DPI (zapret): включён" ;;
-        fail) echo "🧩 Обход DPI: nfqws не запустился" ;;
+        on)   echo "Обход блокировок: включён" ;;
+        fail) echo "Обход блокировок: nfqws не запустился" ;;
     esac
 
     if [ "$mode" = "vpn" ] && [ "$ks" = "1" ]; then
-        echo "🧱 Kill-switch: если VPN упадёт,"
-        echo "   раздача встанет, но IP не утечёт."
+        echo "Защита от утечек: если VPN"
+        echo "отключится, раздача остановится."
     fi
     [ "$mode" = "vpn" ] && [ -n "$mtu" ] && [ "${mss:-0}" -gt 0 ] 2>/dev/null && \
-        echo "⚙️  MTU $mtu · MSS $mss"
+        echo "MTU $mtu · MSS $mss"
 
     echo "$LINE"
     if [ "$target" = "vpn" ]; then
-        echo "▶ Нажми ещё раз → раздавать напрямую"
+        echo "Action ещё раз — переключить"
+        echo "на прямую раздачу."
     else
-        echo "▶ Нажми ещё раз → раздавать через VPN"
+        echo "Action ещё раз — переключить на VPN."
     fi
-    [ -n "$upd" ] && echo "   (статус на $upd)"
-    [ -d "$MODULE_DIR/webroot" ] && echo "⚙️ Настройки — в WebUI модуля (KernelSU)"
+    [ -n "$upd" ] && echo "Статус на $upd."
+    [ -d "$MODULE_DIR/webroot" ] && echo "Настройки — в WebUI модуля."
 }
 
 # ----------------------------------------------------------------------------
@@ -170,19 +175,21 @@ PID=$(cat "$PID_FILE" 2>/dev/null)
 
 if [ -z "$PID" ] || ! is_our_daemon "$PID"; then
     echo "$LINE"
-    echo "❌  МОДУЛЬ НЕ ЗАПУЩЕН"
-    echo "$LINE"
-    if [ ! -f /data/misc/net/rt_tables ]; then
-        echo "⏳ Телефон ещё загружается."
-        echo "   Подожди минуту и нажми снова."
-    else
-        echo "Попробуй перезагрузить телефон."
-        echo "Если не поможет — пришли лог:"
-        echo "   $LOG_FILE"
+    if [ ! -f /data/misc/net/rt_tables ] || [ "$(cut -d. -f1 /proc/uptime)" -lt 180 ] 2>/dev/null; then
+        echo "МОДУЛЬ ЗАПУСКАЕТСЯ"
+        echo "$LINE"
+        echo "Телефон ещё загружается."
+        echo "Подождите минуту и нажмите снова."
+        exit 0
     fi
+    echo "МОДУЛЬ НЕ ЗАПУЩЕН"
+    echo "$LINE"
+    echo "Перезагрузите телефон. Если не"
+    echo "поможет — отправьте логи: WebUI,"
+    echo "Инструменты, «Отправить логи»."
     if [ -f "$LOG_FILE" ]; then
         echo ""
-        echo "📋 Последние строки лога:"
+        echo "Последние строки журнала:"
         tail -n 5 "$LOG_FILE" 2>/dev/null | while read -r line; do
             echo "   $line"
         done
@@ -198,9 +205,9 @@ _ack=$(cat "$ACK_FILE" 2>/dev/null)
 if [ -n "$_req" ] && [ "$_req" != "$_ack" ]; then
     _age=$(( $(date +%s) - ${_req%%-*} ))
     if [ "$_age" -ge 0 ] 2>/dev/null && [ "$_age" -lt 20 ]; then
-        echo "⏳ Предыдущее переключение ещё"
-        echo "   применяется (${_age} с). Подожди"
-        echo "   пару секунд и нажми снова."
+        echo "Предыдущее переключение ещё"
+        echo "применяется (${_age} с). Подождите"
+        echo "пару секунд и нажмите снова."
         exit 0
     fi
 fi
@@ -210,10 +217,10 @@ fi
 # ----------------------------------------------------------------------------
 if [ -f "$FLAG_FILE" ]; then
     rm -f "$FLAG_FILE"
-    echo "🔄 Переключаю: VPN → напрямую"
+    echo "Переключение: VPN → напрямую"
 else
     touch "$FLAG_FILE"
-    echo "🔄 Переключаю: напрямую → VPN"
+    echo "Переключение: напрямую → VPN"
 fi
 
 # Демон пишет в ACK_FILE токен запроса, когда закончил (а не "sleep 3").
@@ -221,7 +228,7 @@ TOKEN="$(date +%s)-$$"
 echo "$TOKEN" > "$REQ_FILE"
 kill -USR1 "$PID" 2>/dev/null
 
-echo -n "⏳ Применяю"
+echo -n "Применяю"
 i=0
 done_ok=0
 while [ $i -lt 40 ]; do
@@ -237,8 +244,8 @@ if [ "$done_ok" -eq 1 ]; then
     echo " готово ($(( (i + 1) / 2 )) с)"
 else
     echo ""
-    echo "⚠️ Модуль не ответил за 20 с —"
-    echo "   статус ниже может быть старым."
+    echo "Модуль не ответил за 20 с —"
+    echo "статус ниже может быть устаревшим."
 fi
 echo ""
 

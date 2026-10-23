@@ -25,6 +25,7 @@
   --blue: #2563eb;
   --shadow: 0 1px 2px rgba(0,0,0,.05);
   --tabbar-h: 58px;   /* от неё отсчитываются плашка «Применить» и тост */
+  --tabbar-pad: 8px;  /* поля панели снизу и по бокам (.in) — подальше от скруглённых углов экрана */
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -50,12 +51,14 @@
 html, body { margin: 0; background: var(--bg); color: var(--text); }
 /* Прокручивается body, а не вся страница: у страницы WebView на Android
    растягивает при прокрутке до края всё вместе с нижней панелью. */
-html { height: 100%; overflow: hidden; }
+html { height: 100%; overflow: hidden; overscroll-behavior: none; }
 body {
   font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   padding: calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 150px);
   max-width: 640px; margin: 0 auto;
-  height: 100%; overflow-y: auto; overscroll-behavior: none;
+  /* на 1px ниже экрана: блок во весь экран Chromium делает «корневым», и
+     WebView снова тянет всю страницу при прокрутке до края */
+  height: calc(100% - 1px); overflow-y: auto; overscroll-behavior: none;
 }
 h1 { font-size: 20px; font-weight: 600; margin: 4px 2px 14px; display: flex; align-items: center; gap: 10px; }
 h1 .logo { width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; flex: none; }
@@ -159,7 +162,7 @@ details[open] > summary::after { transform: translateY(1px) rotate(-135deg); }
 
 pre.log { margin: 0; padding: 12px 14px; background: var(--input); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; border-top: 1px solid var(--line); }
 
-.applybar { position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + var(--tabbar-h) + 1px); padding: 10px 16px; background: var(--card); border-top: 1px solid var(--line); box-shadow: 0 -4px 12px rgba(0,0,0,.08); display: none; z-index: 10; }
+.applybar { touch-action: none; position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + var(--tabbar-pad) + var(--tabbar-h) + 1px); padding: 10px 16px; background: var(--card); border-top: 1px solid var(--line); box-shadow: 0 -4px 12px rgba(0,0,0,.08); display: none; z-index: 10; }
 .applybar.show { display: block; }
 .applybar .in { max-width: 640px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
 .applybar .msg { flex: 1; min-width: 0; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
@@ -183,18 +186,17 @@ pre.log { margin: 0; padding: 12px 14px; background: var(--input); font: 12px/1.
 .app .p { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .app.sel .n::after { content: " ✓"; color: var(--accent); }
 
-.toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + var(--tabbar-h) + 80px); transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 9px 14px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 30; max-width: calc(100% - 32px); }
+.toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + var(--tabbar-pad) + var(--tabbar-h) + 80px); transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 9px 14px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 30; max-width: calc(100% - 32px); }
 .toast.show { opacity: .95; }
 
 /* вкладки (3.10) */
 .tab { display: none; }
 .tab.on { display: block; }
-.tabbar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); z-index: 11; padding-bottom: env(safe-area-inset-bottom); }
-.tabbar .in { max-width: 640px; margin: 0 auto; display: flex; height: var(--tabbar-h); }
-.tabbar button { flex: 1; min-width: 0; background: none; border: 0; padding: 6px 2px 0; color: var(--muted); font: 500 11px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; cursor: pointer; }
-.tabbar button svg { width: 22px; height: 22px; box-sizing: content-box; padding: 3px 16px; border-radius: 999px; transition: background .15s; }
+.tabbar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); z-index: 11; touch-action: none; padding-bottom: calc(env(safe-area-inset-bottom) + var(--tabbar-pad)); }
+.tabbar .in { max-width: 640px; margin: 0 auto; display: flex; height: var(--tabbar-h); padding: 0 14px; }
+.tabbar button { flex: 1; min-width: 0; background: none; border: 0; padding: 6px 2px 0; color: var(--muted); font: 500 12px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; cursor: pointer; }
+.tabbar button svg { width: 27px; height: 27px; }
 .tabbar button.on { color: var(--accent); font-weight: 600; }
-.tabbar button.on svg { background: var(--input); }
 details.more { margin-top: 18px; }
 details.kvbox { margin: 14px -16px -16px; border-top: 1px solid var(--line); }
 details.kvbox > summary { padding: 12px 16px; min-height: 46px; font-size: 14px; color: var(--muted); }
@@ -688,6 +690,12 @@ function renderStatus(s) {
   const names = friendly(s.ifaces);
   const up = esc(s.dns_upstream || 'DoH');
 
+  if (s.daemon !== '1' && +s.uptime < 180) {
+    dot.className = 'dot big amber'; title.textContent = 'Модуль запускается';
+    sub.textContent = 'Телефон ещё загружается, это до минуты.';
+    $('#kv').innerHTML = ''; btn.disabled = true; btn.textContent = 'Переключить';
+    return;
+  }
   if (s.daemon !== '1') {
     dot.className = 'dot big red'; title.textContent = 'Модуль не запущен';
     sub.textContent = 'Перезагрузите телефон. Если не поможет — отправьте логи (Инструменты).';
@@ -695,7 +703,7 @@ function renderStatus(s) {
     return;
   }
   btn.disabled = false;
-  btn.textContent = s.target === 'vpn' ? 'Раздавать напрямую' : 'Раздавать через VPN';
+  btn.textContent = s.target === 'vpn' ? 'Переключить на прямую раздачу' : 'Переключить на VPN';
 
   if (!names) {
     dot.className = 'dot big'; title.textContent = 'Раздача выключена';
@@ -708,7 +716,7 @@ function renderStatus(s) {
     sub.textContent = 'Раздача приостановлена, чтобы не раскрыть реальный IP. После подключения VPN она возобновится автоматически.';
   } else {
     dot.className = 'dot big blue'; title.textContent = 'Раздача напрямую';
-    sub.textContent = 'Без VPN, через оператора.';
+    sub.textContent = 'Без VPN, через оператора.' + (s.target === 'vpn' ? ' Выбран режим VPN: раздача перейдёт на VPN, когда он подключится.' : '');
   }
 
   let h = '';

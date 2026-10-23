@@ -1,6 +1,7 @@
 id=vpn-to-hotspot-usb
 name=VPN Tethering Ultra
-version=v3.10.1
-versionCode=31001
+version=v3.11
+versionCode=31100
 author=Kubarev
-description=Раздача Wi-Fi/USB через VPN с kill-switch, своим DNS (DoH) и обходом DPI. ▶ Action — переключить VPN/напрямую.
+description=Раздача Wi-Fi/USB через VPN или напрямую: защита от утечек, зашифрованный DNS (DoH), обход блокировок. Action — переключить VPN/напрямую.
+updateJson=https://raw.githubusercontent.com/JagKubarev/vpn-tethering-ultra/main/update.json

@@ -386,6 +386,12 @@
 # v3.10.1 — WebUI: долгие проверки в фоне (страница не зависает), без
 #   растягивания при прокрутке; «Отправить логи» доходит в Telegram (am от
 #   uid 2000, ссылка и в -d, флаг чтения в -f), в подписи версия и время.
+# v3.11 — обновление через менеджер модулей (updateJson -> update.json в
+#   репозитории, zip — в релизе GitHub). Тексты Action и описания модуля без
+#   эмодзи; при загрузке описание «запускается» (post-fs-data.sh) вместо
+#   режима с прошлого запуска; выбран VPN, а клиент не подключён — так и
+#   пишется. WebUI: «Переключить на VPN», нижняя панель как в MAX, без
+#   растягивания у края.
 # ============================================================================
 # ============================================================================
 
@@ -1108,9 +1114,11 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.10.1 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.11 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
+# post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
+[ "$STATUS_IN_DESCRIPTION" = "1" ] || set_description "$MODULE_DESC_DEFAULT"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
 log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/per_net=$ZAPRET_PER_NET YT_DEAD=$YT_DEAD_FAILFAST YT_SLOW=$YT_SLOW_RETRY WATCHDOG=$ZAPRET_WATCHDOG/${ZAPRET_WATCHDOG_MIN}m META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
 
