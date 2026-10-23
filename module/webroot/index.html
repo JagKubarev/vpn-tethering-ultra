@@ -176,7 +176,7 @@ pre.log { margin: 0; padding: 12px 14px; background: var(--input); font: 12px/1.
 .sheet.show { display: flex; }
 .sheet .head { padding: 8px 16px 8px; }
 .sheet .head::before { content: ""; display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--field); margin: 0 auto 10px; }
-.sheet .list { overflow: auto; padding: 0 0 12px; }
+.sheet .list { overflow: auto; overscroll-behavior: contain; padding: 0 0 12px; }
 .app { display: flex; align-items: center; gap: 12px; padding: 10px 16px; min-height: 52px; cursor: pointer; }
 .app:active { background: var(--input); }
 .app img { width: 32px; height: 32px; border-radius: 8px; flex: none; }
