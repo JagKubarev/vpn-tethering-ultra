@@ -11,10 +11,19 @@ KernelSU/Magisk-модуль (id `vpn-to-hotspot-usb`, автор Kubarev, те�
 
 ## Устройство
 
-- `module/service.sh` (~4900 строк) — демон: журнал изменений в шапке, блок
-  `USER CONFIG`, правила, DNS, zapret, YouTube. Служебные вызовы из WebUI:
-  `--defaults | --check | --get | --zapret-strategy`; с любым другим аргументом —
-  выход (защита от второго демона).
+- `module/service.sh` (~1150 строк) — демон: журнал изменений в шапке, блок
+  `USER CONFIG`, чтение конфига и проверка значений, служебные вызовы из WebUI
+  (`--defaults | --check | --get | --zapret-strategy`; с любым другим аргументом —
+  выход, защита от второго демона), lock, все глобальные переменные, запуск.
+- `module/lib/*.sh` — функции демона по областям, подключаются из `service.sh`
+  (`. "$MODULE_DIR/lib/…"`) после всех переменных; служебные вызовы до них не доходят:
+  `common` (log, статус, описание), `net` (интерфейсы, tun/VPN, WAN, раздача, профили
+  сети), `dns` (DNS клиентов, dnsproxy, DoH-проверки, Meta, DNS телефона), `zapret`
+  (nfqws, QUIC приложений), `youtube` (GGC, мёртвые и медленные видеосерверы),
+  `stealth` (TTL), `rules` (правила, kill-switch, conntrack, offload, `apply_state`),
+  `loop` (`handle_change`, `reload_config`, `monitor_loop`). В некоторых есть и свои
+  переменные состояния — порядок подключения не менять. Новая функция — в файл своей
+  области; ранний код до lock (`--check`, `--get` …) не может звать функции из `lib/`.
 - `module/action.sh` — кнопка Action (тоггл VPN ↔ напрямую, ждёт ack от демона).
 - `module/webctl.sh` + `module/webroot/index.html` — WebUI, только фиксированные команды.
 - `module/zapret/` — `scan.sh` (подбор / сторож / сайты), `ytslow.sh`, `netid.sh`, списки.
@@ -43,7 +52,7 @@ KernelSU/Magisk-модуль (id `vpn-to-hotspot-usb`, автор Kubarev, те�
 - Шелл — `/system/bin/sh` (mksh/toybox), **не bash**. Никаких bashism
   (`${x//...}`, `[[ ]]`, массивы). toybox `grep` без `\b` и PCRE, `nc` без `-z`.
 - Пути `$ip`/`$iptables` — абсолютные переменные, не голые `ip`/`iptables`.
-- Перед сборкой: `sh -n` для всех `.sh`; `bash -n` не в счёт — он пропустит bashism.
+- Перед сборкой: `sh -n` для всех `.sh` (и `lib/*.sh`); `bash -n` не в счёт — он пропустит bashism.
 - KernelSU, Magisk и APatch — разные пути модулей (`/data/adb/modules`, `/data/adb/ap`).
 - Сборка: `cd module && zip -r ../vpn-tethering-ultra.zip .`
 

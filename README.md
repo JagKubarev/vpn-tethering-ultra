@@ -69,7 +69,7 @@
 ## Установка
 
 1. Соберите zip из содержимого папки `module/` (в корне архива: `module.prop`, `service.sh`,
-   `META-INF/`, `bin/`, `zapret/`, `webroot/` …):
+   `META-INF/`, `lib/`, `bin/`, `zapret/`, `webroot/` …):
    ```sh
    cd module && zip -r ../vpn-tethering-ultra.zip .
    ```
@@ -327,7 +327,16 @@ ClientHello, но не присылает ни байта, и плеер ждё�
 ## Структура репозитория
 
 - `module/` — сам модуль:
-  - `service.sh` — демон (журнал изменений, настройки, правила, DNS, zapret, YouTube);
+  - `service.sh` — демон: журнал изменений, блок настроек `USER CONFIG`, чтение
+    `vpn_tether.conf`, служебные вызовы для WebUI, переменные, запуск; функции — в `lib/`:
+    - `lib/common.sh` — журнал, статус и описание модуля;
+    - `lib/net.sh` — интерфейсы, tun/VPN, WAN, поиск раздачи, профили сети и sysctl;
+    - `lib/dns.sh` — DNS клиентов, dnsproxy, проверки DoH, Meta, DNS телефона;
+    - `lib/zapret.sh` — обход DPI (nfqws), QUIC приложений;
+    - `lib/youtube.sh` — кэши оператора, отбой мёртвых и обрыв медленных видеосерверов;
+    - `lib/stealth.sh` — скрытие раздачи (TTL);
+    - `lib/rules.sh` — правила раздачи, kill-switch, conntrack, HW offload;
+    - `lib/loop.sh` — главный цикл, перечитывание настроек, выход;
   - `action.sh` — кнопка Action;
   - `webctl.sh` + `webroot/index.html` — WebUI;
   - `customize.sh` — установка (выбор бинарников, создание конфига);

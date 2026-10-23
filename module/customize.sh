@@ -30,6 +30,8 @@ set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/action.sh"  0 0 0755
 set_perm "$MODPATH/webctl.sh"  0 0 0755
 set_perm "$MODPATH/post-fs-data.sh" 0 0 0755
+# lib/ — части service.sh: подключаются через ".", исполняемыми быть не должны
+set_perm_recursive "$MODPATH/lib" 0 0 0755 0644
 
 # Настройки пользователя — вне папки модуля, чтобы переживали обновления.
 # Существующий файл не трогаем.
