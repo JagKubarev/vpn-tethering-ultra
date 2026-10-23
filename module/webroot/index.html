@@ -45,7 +45,7 @@
 html, body { margin: 0; background: var(--bg); color: var(--text); }
 body {
   font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  padding: calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 96px);
+  padding: calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 150px);
   max-width: 640px; margin: 0 auto;
 }
 h1 { font-size: 20px; font-weight: 600; margin: 4px 2px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -126,7 +126,7 @@ details[open] > summary::after { transform: rotate(-90deg); }
 
 pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; border-top: 1px solid var(--line); }
 
-.applybar { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px calc(env(safe-area-inset-bottom) + 12px); background: var(--card); border-top: 1px solid var(--line); display: none; z-index: 10; }
+.applybar { position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + 58px); padding: 12px 16px; background: var(--card); border-top: 1px solid var(--line); display: none; z-index: 10; }
 .applybar.show { display: block; }
 .applybar .in { max-width: 640px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
 .applybar .msg { flex: 1; min-width: 0; font-size: 14px; color: var(--muted); }
@@ -145,8 +145,24 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
 .app .p { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .app.sel .n::after { content: " ✓"; color: var(--accent); }
 
-.toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 90px); transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 9px 14px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 30; max-width: calc(100% - 32px); }
+.toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 130px); transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 9px 14px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 30; max-width: calc(100% - 32px); }
 .toast.show { opacity: .95; }
+
+/* вкладки (3.10) */
+.tab { display: none; }
+.tab.on { display: block; }
+.tabbar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); z-index: 11; padding-bottom: env(safe-area-inset-bottom); }
+.tabbar .in { max-width: 640px; margin: 0 auto; display: flex; }
+.tabbar button { flex: 1; min-width: 0; background: none; border: 0; padding: 8px 2px 9px; color: var(--muted); font: 500 11px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; }
+.tabbar button svg { width: 23px; height: 23px; }
+.tabbar button.on { color: var(--accent); }
+details.more { margin-top: 18px; }
+details.kvbox { margin-top: 12px; border-top: 1px solid var(--line); }
+details.kvbox > summary { padding: 10px 0 0; font-size: 14px; color: var(--muted); }
+details.kvbox .kv { border-top: 0; margin-top: 4px; padding-top: 6px; }
+details.more > summary { color: var(--muted); }
+.hint { color: var(--muted); font-size: 13px; margin: 8px 4px 0; }
+.offnote { padding: 10px 16px; font-size: 13px; color: var(--amber); border-bottom: 1px solid var(--line); cursor: pointer; }
 .muted { color: var(--muted); }
 .mt8 { margin-top: 8px; }
 </style>
@@ -155,7 +171,7 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
 
 <h1>VPN Tethering <small id="ver"></small></h1>
 
-<!-- ============ Состояние ============ -->
+<section class="tab" data-tab="home">
 <div class="card pad" id="statusCard">
   <div class="hero">
     <span class="dot big" id="heroDot"></span>
@@ -164,57 +180,201 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
       <div class="hero-sub" id="heroSub"></div>
     </div>
   </div>
-  <div class="kv" id="kv"></div>
   <button class="btn primary wide" id="toggleBtn" disabled>Переключить</button>
+  <details class="kvbox" id="kvBox">
+    <summary>Подробнее</summary>
+    <div class="kv" id="kv"></div>
+  </details>
 </div>
 
-<!-- ============ Защита ============ -->
-<h2>Защита</h2>
+<h2>Основное</h2>
 <div class="card">
   <div class="row">
-    <div class="txt"><div class="t">Kill-switch</div>
-      <div class="s">Если VPN упал, раздача не уходит напрямую и твой IP не светится.</div></div>
-    <label class="sw"><input type="checkbox" data-key="KILL_SWITCH"><span></span></label>
-  </div>
-  <div class="row" data-dep="KILL_SWITCH">
-    <div class="txt"><div class="t">Строгий режим</div>
-      <div class="s">Выбран VPN, а он не подключён — раздача на паузе. Если выключить, раздача сама перейдёт на «напрямую».</div></div>
-    <label class="sw"><input type="checkbox" data-key="KILL_SWITCH_STRICT"><span></span></label>
+    <div class="txt"><div class="t">Обход блокировок</div>
+      <div class="s">Обход DPI для YouTube, Discord и других сайтов без VPN.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_ENABLE"><span></span></label>
   </div>
   <div class="row">
-    <div class="txt"><div class="t">Скрыть раздачу от оператора</div>
-      <div class="s">Телефону TTL 63 и без проверки раздачи у оператора. Другие модули, которые меняют TTL, тогда лишние — модуль подскажет, какие отключить. Устройства с TTL 64 (телефоны, Mac) выходят неотличимо от телефона; Windows — только с TTL 64 у себя.</div></div>
-    <label class="sw"><input type="checkbox" data-key="TETHER_STEALTH"><span></span></label>
-  </div>
-  <div class="row" data-dep="TETHER_STEALTH">
-    <div class="txt"><div class="t">Не выпускать чужой TTL</div>
-      <div class="s">Пакеты раздачи с другим TTL (Windows без настройки) не уходят к оператору. Такое устройство останется без интернета напрямую, пока на нём не поставить TTL 64.</div></div>
-    <label class="sw"><input type="checkbox" data-key="TETHER_TTL_STRICT"><span></span></label>
-  </div>
-</div>
-
-<!-- ============ Диагностика ============ -->
-<h2>Диагностика сети</h2>
-<div class="card">
-  <div class="row col">
-    <div class="txt"><div class="t">Что делает оператор</div>
-      <div class="s">Подмена DNS, обрыв соединений после первых килобайт, белые списки, Telegram. Мимо VPN и обхода, около минуты.</div></div>
-    <div class="mt8"><button class="btn small" id="diagBtn">Проверить</button></div>
-    <div class="kv" id="diagOut" style="display:none"></div>
-  </div>
-</div>
-
-<!-- ============ DNS ============ -->
-<h2>DNS</h2>
-<div class="card">
-  <div class="row">
-    <div class="txt"><div class="t">Свой DNS (DoH)</div>
-      <div class="s">Зашифрованный DNS через dnsproxy. Выключи, если мешает: DNS будет как в старых версиях.</div></div>
+    <div class="txt"><div class="t">Зашифрованный DNS</div>
+      <div class="s">DNS-запросы по DoH: без подмены оператором и с доступом к сервисам с гео-блокировкой.</div></div>
     <label class="sw"><input type="checkbox" data-key="DNSPROXY_ENABLE"><span></span></label>
   </div>
+  <div class="row">
+    <div class="txt"><div class="t">Скрытие раздачи</div>
+      <div class="s">Скрывает раздачу интернета от оператора.</div></div>
+    <label class="sw"><input type="checkbox" data-key="TETHER_STEALTH"><span></span></label>
+  </div>
+  <div class="row">
+    <div class="txt"><div class="t">Защита от утечек</div>
+      <div class="s">Блокирует раздачу в обход VPN, если VPN отключился.</div></div>
+    <label class="sw"><input type="checkbox" data-key="KILL_SWITCH"><span></span></label>
+  </div>
+</div>
+<details class="card more">
+  <summary>Дополнительно</summary>
+  <div class="row" data-dep="KILL_SWITCH">
+    <div class="txt"><div class="t">Пауза раздачи без VPN</div>
+      <div class="s">Если VPN не подключён, раздача приостанавливается. Иначе — переключается в режим «напрямую».</div></div>
+    <label class="sw"><input type="checkbox" data-key="KILL_SWITCH_STRICT"><span></span></label>
+  </div>
+  <div class="row" data-dep="TETHER_STEALTH">
+    <div class="txt"><div class="t">Только устройства с TTL 64</div>
+      <div class="s">Блокирует пакеты раздачи с TTL, отличным от 64 (например, Windows без настройки).</div></div>
+    <label class="sw"><input type="checkbox" data-key="TETHER_TTL_STRICT"><span></span></label>
+  </div>
+</details>
+<div class="hint">Подробные настройки — во вкладках «Обход» и «Сеть», проверки и журналы — в «Инструментах».</div>
+
+</section>
+
+<section class="tab" data-tab="bypass">
+<h2>Стратегия</h2>
+<div class="card">
+  <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Стратегия для каждой сети</div>
+      <div class="s">Отдельная стратегия для каждой сети Wi-Fi и мобильного оператора, переключается автоматически.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_PER_NET"><span></span></label>
+  </div>
+  <div class="row col" id="znetBox">
+    <div class="txt"><div class="t">Эта сеть: <span id="znetCur">—</span></div>
+      <div class="s" id="znetInfo"></div></div>
+    <select id="znetSel"></select>
+    <div class="s muted" id="znetListHead" style="font-size:13px;margin-top:12px"></div>
+    <div id="znetList"></div>
+  </div>
+  <div class="row col" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t" id="zStratTitle">Стратегия</div>
+      <div class="s" id="zStratSub">Метод обхода DPI.</div></div>
+    <select data-key="ZAPRET_STRATEGY">
+      <option value="fakeddisorder">1 · fakeddisorder — лучшая в среднем</option>
+      <option value="md5sig">2 · md5sig, разрез midsld</option>
+      <option value="md5sig2">3 · md5sig, разрез 1,midsld</option>
+      <option value="badseq">4 · badseq</option>
+      <option value="seqovl">5 · seqovl</option>
+      <option value="disorder">6 · disorder, без подделок</option>
+      <option value="custom">Своя (из подбора)</option>
+    </select>
+    <div id="zArgsBox" style="display:none">
+      <input type="text" data-key="ZAPRET_ARGS" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="--dpi-desync=...">
+      <div class="s muted" style="font-size:12px;margin-top:4px">Только параметры --dpi-desync…; @G — встроенный ClientHello google.com.</div>
+    </div>
+  </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Автопроверка обхода</div>
+      <div class="s">Раз в <span id="zwdMin">15 минут</span> проверяет доступность заблокированных сайтов (и сразу — при зависании видео) и при сбое восстанавливает или подбирает стратегию. Требует «Стратегия для каждой сети», не работает при включённом VPN.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_WATCHDOG"><span></span></label>
+  </div>
+</div>
+
+<h2>Сайты</h2>
+<div class="card">
+  <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
+  <div class="row col" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Какие сайты обходить</div></div>
+    <select data-key="ZAPRET_MODE">
+      <option value="list">Из списка и найденные сами</option>
+      <option value="all">Все сайты</option>
+    </select>
+  </div>
+  <div class="row col" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Дополнительные сайты</div>
+      <div class="s">Домены для обхода, по одному в строке; поддомены включаются. Зоны .ru, .su и .рф обрабатываются, только если указаны здесь или во встроенном списке.</div></div>
+    <textarea id="zlist" rows="4" placeholder="example.com" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+    <div class="err" id="zlistErr" style="display:none"></div>
+  </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Стратегии для отдельных сайтов</div>
+      <div class="s">Раз в <span id="zaltMin">3 часа</span> проверяет сайты из списков и подбирает отдельную стратегию тем, что не открываются основной (до трёх на сеть). Требует «Стратегия для каждой сети», не работает при включённом VPN.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_ALT"><span></span></label>
+  </div>
+  <details id="zaltBox" data-dep="ZAPRET_ENABLE">
+    <summary><span>Сайты с отдельной стратегией: <span id="zaltN">0</span></span></summary>
+    <div style="padding:0 16px 13px">
+      <div id="zalt"></div>
+      <div class="btn-row mt8">
+        <button class="btn small" id="zaltRun">Проверить сайты сейчас</button>
+        <button class="btn small" id="zaltClear">Сбросить</button>
+      </div>
+    </div>
+  </details>
+  <details data-dep="ZAPRET_ENABLE">
+    <summary>Встроенный список и автосписок</summary>
+    <div class="row col">
+      <div class="txt"><div class="t">Автосписок: <span id="zautoN">0</span></div>
+        <div class="s">Сайты, добавленные после сбоев соединения, с датой и причиной. ✕ — удалить из списка.</div></div>
+      <div id="zauto" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:8px;padding:2px 10px"></div>
+      <div class="row" style="padding:10px 0 0;border-top:0">
+        <div class="txt"><div class="s">Порог добавления, сбоев за минуту</div></div>
+        <select data-key="ZAPRET_AUTO_FAIL" style="width:auto">
+          <option value="2">2</option><option value="3">3</option><option value="4">4</option>
+          <option value="5">5</option><option value="7">7</option><option value="10">10</option>
+        </select>
+      </div>
+      <div class="mt8"><button class="btn small" id="zautoClear">Очистить автосписок</button></div>
+    </div>
+    <div class="row col">
+      <div class="txt"><div class="t">Встроенный список: <span id="zdefN">0</span></div></div>
+      <pre class="log" id="zdef" style="max-height:160px;border:1px solid var(--line);border-radius:10px;margin-top:8px"></pre>
+    </div>
+  </details>
+</div>
+
+<h2>YouTube</h2>
+<div class="card">
+  <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Пропуск неотвечающих серверов</div>
+      <div class="s">Видеосерверы YouTube, не отвечающие после соединения, блокируются на 10 минут, и плеер сразу выбирает другой сервер.</div></div>
+    <label class="sw"><input type="checkbox" data-key="YT_DEAD_FAILFAST"><span></span></label>
+  </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Переподключение медленного видео</div>
+      <div class="s">Медленные видеосоединения YouTube разрываются, чтобы плеер переподключился к быстрому узлу. Приостанавливается, если быстрых узлов нет.</div></div>
+    <label class="sw"><input type="checkbox" data-key="YT_SLOW_RETRY"><span></span></label>
+  </div>
+</div>
+
+<h2>Подбор стратегии</h2>
+<div class="card pad">
+  <div class="s muted" style="font-size:13px;margin-top:2px">Поиск рабочей стратегии для текущей сети по списку сайтов. Выполняется в фоне. При сбое стратегии автопроверка обхода запускает его автоматически.</div>
+  <textarea id="scSites" rows="2" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+  <div class="btn-row mt8">
+    <button class="btn" id="scQuick">Быстрый · ~2 мин</button>
+    <button class="btn" id="scFull">Полный · ~7 мин</button>
+    <button class="btn" id="scStop" style="display:none">Остановить</button>
+  </div>
+  <div id="scProg" class="mt8" style="font-size:14px"></div>
+  <div id="scRes" class="mt8"></div>
+</div>
+
+<details class="card more">
+  <summary>Дополнительно</summary>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Обход для приложений телефона</div>
+      <div class="s">Применять обход к приложениям телефона, работающим без VPN. VPN-клиенты не затрагиваются.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_PHONE"><span></span></label>
+  </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Без QUIC на раздаче</div>
+      <div class="s">Устройства раздачи переходят с QUIC (HTTP/3) на HTTPS, где работает обход. Действует только для трафика мимо VPN.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_BLOCK"><span></span></label>
+  </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">YouTube без кэшей оператора</div>
+      <div class="s">Блокирует серверы-кэши оператора, чтобы видео загружалось с серверов Google. Не включать, если оператор выдаёт только кэши.</div></div>
+    <label class="sw"><input type="checkbox" data-key="YT_GGC_BLOCK"><span></span></label>
+  </div>
+</details>
+</section>
+
+<section class="tab" data-tab="net">
+<h2>DNS</h2>
+<div class="card">
+  <div class="offnote" data-offnote="DNSPROXY_ENABLE" role="button">Зашифрованный DNS выключен — включается на Главной.</div>
   <div class="row col" data-dep="DNSPROXY_ENABLE">
-    <div class="txt"><div class="t">DoH-сервер</div>
-      <div class="s">Без VPN. Wlrus, not-a-dns, dagami и comss открывают ChatGPT, Gemini, Claude и другие сервисы с гео-блоком. Если выбранный молчит, модуль сам переходит на следующий.</div></div>
+    <div class="txt"><div class="t">Сервер DNS (DoH)</div>
+      <div class="s">Wlrus, not-a-dns, dagami и comss также открывают сервисы с гео-блокировкой (ChatGPT, Gemini, Claude). При недоступности сервера используется запасной.</div></div>
     <select id="upSelect">
       <option value="https://dns.wlrus.cfd/dns-query">wlrus.cfd</option>
       <option value="https://not-a-dns.quic.best/dns-query">not-a-dns.quic.best</option>
@@ -230,252 +390,141 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
     <div class="err" id="upErr" style="display:none"></div>
   </div>
   <div class="row" data-dep="DNSPROXY_ENABLE">
-    <div class="txt"><div class="t">DNS телефона</div>
-      <div class="s">Когда VPN выключен, сам телефон тоже спрашивает DNS через DoH-сервер.</div></div>
+    <div class="txt"><div class="t">Для телефона</div>
+      <div class="s">Зашифрованный DNS для самого телефона, когда VPN выключен.</div></div>
     <label class="sw"><input type="checkbox" data-key="DNS_PHONE"><span></span></label>
   </div>
   <div class="row" data-dep="DNSPROXY_ENABLE">
-    <div class="txt"><div class="t">DoH для раздачи напрямую</div>
-      <div class="s">Устройства на раздаче без VPN тоже получают DNS через DoH-сервер.</div></div>
+    <div class="txt"><div class="t">Для раздачи без VPN</div>
+      <div class="s">Зашифрованный DNS для устройств раздачи, когда VPN выключен.</div></div>
     <label class="sw"><input type="checkbox" id="directDoh"><span></span></label>
   </div>
   <div class="row" data-dep="DNSPROXY_ENABLE">
-    <div class="txt"><div class="t">Instagram и Facebook «как из Европы»</div>
-      <div class="s">Адреса Meta (Instagram, Facebook, Threads, Messenger) DNS спрашивает у Google так, будто ты в Амстердаме. Приходят европейские серверы, и с обходом DPI они открываются без VPN. Работает там, где DNS идёт через DoH без VPN: раздача напрямую и сам телефон. Проверка — в «Диагностике».</div></div>
+    <div class="txt"><div class="t">Instagram и Facebook без VPN</div>
+      <div class="s">Адреса Instagram, Facebook и Threads запрашиваются с европейским ECS, чтобы открывать их без VPN вместе с обходом блокировок.</div></div>
     <label class="sw"><input type="checkbox" data-key="DNS_META_EU"><span></span></label>
   </div>
+</div>
+
+<h2>Приложения без QUIC</h2>
+<div class="card pad">
+  <div class="muted" style="font-size:13px">Для выбранных приложений блокируется QUIC (UDP 443), трафик идёт по HTTPS. Помогает, если оператор ограничивает QUIC.</div>
+  <div class="chips" id="quicChips"></div>
+  <div class="mt8"><button class="btn small" id="quicAdd">Добавить приложение</button></div>
+</div>
+
+<details class="card more">
+  <summary>Дополнительно</summary>
   <div class="row col" data-dep="DNSPROXY_ENABLE">
-    <div class="txt"><div class="t">DNS раздачи через VPN</div></div>
+    <div class="txt"><div class="t">DNS раздачи при VPN</div>
+      <div class="s">Источник DNS для устройств раздачи при включённом VPN.</div></div>
     <select data-key="DNS_VPN">
       <option value="dnat">DNS VPN-клиента</option>
       <option value="cache">DNS VPN-клиента + кэш</option>
       <option value="doh">DoH через туннель (Google, Cloudflare)</option>
     </select>
   </div>
-</div>
-
-<!-- ============ QUIC ============ -->
-<h2>Приложения без QUIC</h2>
-<div class="card pad">
-  <div class="muted" style="font-size:13px">У этих приложений закрыт HTTP/3 (UDP 443), и они идут по обычному HTTPS. Помогает, когда оператор режет QUIC и часть картинок или видео не грузится.</div>
-  <div class="chips" id="quicChips"></div>
-  <div class="mt8"><button class="btn small" id="quicAdd">Добавить приложение</button></div>
-</div>
-
-<!-- ============ zapret ============ -->
-<h2>Обход блокировок</h2>
-<div class="card">
+  <div class="row col">
+    <div class="txt"><div class="t">Запасные DoH-серверы</div>
+      <div class="s">Используются, если основной сервер не отвечает.</div></div>
+    <input type="text" data-key="DNS_FALLBACKS" autocapitalize="off" autocorrect="off" spellcheck="false">
+  </div>
+  <div class="row col">
+    <div class="txt"><div class="t">Серверы DoH через VPN</div>
+      <div class="s">Серверы для режима «DoH через туннель».</div></div>
+    <input type="text" data-key="DNS_VPN_UPSTREAMS" autocapitalize="off" autocorrect="off" spellcheck="false">
+  </div>
+  <div class="row col">
+    <div class="txt"><div class="t">Начальный DNS (bootstrap)</div>
+      <div class="s">Для определения адреса DoH-сервера (IP:порт).</div></div>
+    <input type="text" data-key="DNS_BOOTSTRAP" autocapitalize="off" autocorrect="off" spellcheck="false">
+  </div>
+  <div class="row col">
+    <div class="txt"><div class="t">Интервал проверки DNS, с</div>
+      <div class="s">Интервал проверки сервера (2–600).</div></div>
+    <input type="number" min="2" max="600" data-key="DNS_HEALTH_INTERVAL">
+  </div>
+  <div class="row col">
+    <div class="txt"><div class="t">Интервал проверки восстановления, с</div>
+      <div class="s">Интервал проверки восстановления после сбоя (2–600).</div></div>
+    <input type="number" min="2" max="600" data-key="DNS_HEALTH_RECOVER">
+  </div>
+  <div class="row col">
+    <div class="txt"><div class="t">Meta: регион запроса (ECS)</div>
+      <div class="s">IPv4-адрес для EDNS Client Subnet (/24). По умолчанию — Амстердам.</div></div>
+    <input type="text" data-key="DNS_META_ECS" inputmode="decimal" autocapitalize="off" autocorrect="off" spellcheck="false">
+  </div>
+  <div class="row col">
+    <div class="txt"><div class="t">Meta: сервер DNS</div>
+      <div class="s">Сервер с поддержкой ECS (Google — да, Cloudflare — нет).</div></div>
+    <input type="text" data-key="DNS_META_UPSTREAMS" autocapitalize="off" autocorrect="off" spellcheck="false">
+  </div>
   <div class="row">
-    <div class="txt"><div class="t">Обход DPI (zapret)</div>
-      <div class="s">Для трафика без VPN: раздача напрямую и приложения телефона мимо VPN. Помогает с YouTube, Discord, X и сайтами, которые режут по имени. Не помогает, если сайт заблокирован по IP.</div></div>
-    <label class="sw"><input type="checkbox" data-key="ZAPRET_ENABLE"><span></span></label>
+    <div class="txt"><div class="t">Адаптация TCP к качеству связи</div>
+      <div class="s">Раз в ~20 секунд проверяет качество связи и при потерях адаптирует параметры TCP.</div></div>
+    <label class="sw"><input type="checkbox" data-key="NET_PROFILE_ADAPTIVE"><span></span></label>
   </div>
-  <div class="row col" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">Какие сайты</div></div>
-    <select data-key="ZAPRET_MODE">
-      <option value="list">Из списка и найденные сами</option>
-      <option value="all">Все сайты</option>
-    </select>
+  <div class="row">
+    <div class="txt"><div class="t">Состояние в описании модуля</div>
+      <div class="s">Показывать текущий режим в описании модуля в менеджере.</div></div>
+    <label class="sw"><input type="checkbox" data-key="STATUS_IN_DESCRIPTION"><span></span></label>
   </div>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">Приложения телефона</div>
-      <div class="s">Обходить и для приложений, которые идут мимо VPN. Соединения VPN-клиентов не трогаются.</div></div>
-    <label class="sw"><input type="checkbox" data-key="ZAPRET_PHONE"><span></span></label>
+  <div class="row"><button class="btn small" id="resetAll">Сбросить все настройки</button></div>
+</details>
+</section>
+
+<section class="tab" data-tab="tools">
+<h2>Диагностика сети</h2>
+<div class="card">
+  <div class="row col">
+    <div class="txt"><div class="t">Проверка оператора</div>
+      <div class="s">Проверка подмены DNS, обрыва соединений, белых списков и доступности Telegram. Около минуты.</div></div>
+    <div class="mt8"><button class="btn small" id="diagBtn">Проверить</button></div>
+    <div class="kv" id="diagOut" style="display:none"></div>
   </div>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">Закрыть QUIC для раздачи</div>
-      <div class="s">Браузеры на раздаче сразу идут по обычному HTTPS, где обход работает.</div></div>
-    <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_BLOCK"><span></span></label>
-  </div>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">YouTube мимо кэша оператора</div>
-      <div class="s">Отбивать видеосерверы-кэши в сети оператора, чтобы плеер взял сервер Google. Помогает, только если YouTube выдаёт и серверы Google; на YOTA он выдаёт одни кэши, и ролики перестают открываться — там не включай.</div></div>
-    <label class="sw"><input type="checkbox" data-key="YT_GGC_BLOCK"><span></span></label>
-  </div>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">Отбивать мёртвые видеосерверы</div>
-      <div class="s">Если сервер YouTube принял соединение и молчит, он на 10 минут получает отказ (два мёртвых в одной подсети — вся подсеть), и плеер сразу берёт другой сервер, а не ждёт ~30 секунд. Раз в минуту отбитые перепроверяются: ожил — отбой снимается.</div></div>
-    <label class="sw"><input type="checkbox" data-key="YT_DEAD_FAILFAST"><span></span></label>
-  </div>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">Рвать медленные видеосоединения</div>
-      <div class="s">Оператор режет большую часть соединений с YouTube до ~1 Мбит/с, но не все. Если новое видеосоединение качает медленно, модуль его рвёт — плеер переподключается и иногда попадает на быстрое (20–60 Мбит/с). Работает вместе с отбоем мёртвых серверов. Если быстрых не попадается вовсе, сам встаёт на паузу.</div></div>
-    <label class="sw"><input type="checkbox" data-key="YT_SLOW_RETRY"><span></span></label>
-  </div>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">Сторож обхода</div>
-      <div class="s">Раз в <span id="zwdMin">15 минут</span> (и сразу, если видео начало застревать) проверяет стратегию этой сети. Сломалась — пробует прежние рабочие, потом быстрый подбор. Нужна «своя стратегия для каждой сети»; при поднятом VPN не работает.</div></div>
-    <label class="sw"><input type="checkbox" data-key="ZAPRET_WATCHDOG"><span></span></label>
-  </div>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">Своя стратегия для отдельных сайтов</div>
-      <div class="s">Раз в <span id="zaltMin">3 часа</span> проверяет сайты из списков: если основная стратегия какой-то не открывает, подбирает ему другую (до трёх на сеть). Нужна «своя стратегия для каждой сети»; при поднятом VPN не работает.</div></div>
-    <label class="sw"><input type="checkbox" data-key="ZAPRET_ALT"><span></span></label>
-  </div>
-  <details id="zaltBox" data-dep="ZAPRET_ENABLE">
-    <summary><span>Сайты со своей стратегией: <span id="zaltN">0</span></span></summary>
-    <div style="padding:0 16px 13px">
-      <div id="zalt"></div>
-      <div class="btn-row mt8">
-        <button class="btn small" id="zaltRun">Проверить сайты сейчас</button>
-        <button class="btn small" id="zaltClear">Сбросить</button>
-      </div>
-    </div>
-  </details>
-  <details id="zevBox" data-dep="ZAPRET_ENABLE">
-    <summary>Журнал сторожа и подбора</summary>
-    <pre class="log" id="zev" style="max-height:200px;border:1px solid var(--line);border-radius:10px;margin-top:8px"></pre>
-  </details>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">Своя стратегия для каждой сети</div>
-      <div class="s">Модуль запоминает стратегию для Wi-Fi (по названию) и мобильной сети (по оператору) и сам переключает её при смене сети. Подбор ниже запоминает лучшую для текущей сети.</div></div>
-    <label class="sw"><input type="checkbox" data-key="ZAPRET_PER_NET"><span></span></label>
-  </div>
-  <div class="row col" id="znetBox">
-    <div class="txt"><div class="t">Эта сеть: <span id="znetCur">—</span></div>
-      <div class="s" id="znetInfo"></div></div>
-    <select id="znetSel"></select>
-    <div class="s muted" id="znetListHead" style="font-size:13px;margin-top:12px"></div>
-    <div id="znetList"></div>
-  </div>
-  <div class="row col" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t" id="zStratTitle">Стратегия</div>
-      <div class="s" id="zStratSub">Если сайт перестал открываться, попробуй другую и проверь ниже.</div></div>
-    <select data-key="ZAPRET_STRATEGY">
-      <option value="fakeddisorder">1 · fakeddisorder — лучшая в среднем</option>
-      <option value="md5sig">2 · md5sig, разрез midsld</option>
-      <option value="md5sig2">3 · md5sig, разрез 1,midsld</option>
-      <option value="badseq">4 · badseq</option>
-      <option value="seqovl">5 · seqovl</option>
-      <option value="disorder">6 · disorder, без подделок</option>
-      <option value="custom">Своя (из подбора)</option>
-    </select>
-    <div id="zArgsBox" style="display:none">
-      <input type="text" data-key="ZAPRET_ARGS" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="--dpi-desync=...">
-      <div class="s muted" style="font-size:12px;margin-top:4px">Только параметры --dpi-desync…; @G — встроенная подделка ClientHello google.com.</div>
-    </div>
-  </div>
-  <div class="row col" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">Свой список сайтов</div>
-      <div class="s">По одному домену в строке, поддомены включаются сами. Используется в режиме «из списка». Сайты .ru, .su и .рф обход не трогает, кроме тех, что есть во встроенном или этом списке.</div></div>
-    <textarea id="zlist" rows="4" placeholder="example.com" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
-    <div class="err" id="zlistErr" style="display:none"></div>
-  </div>
-  <details data-dep="ZAPRET_ENABLE">
-    <summary>Списки: встроенный и найденные автоматически</summary>
-    <div class="row col">
-      <div class="txt"><div class="t">Найдено автоматически: <span id="zautoN">0</span></div>
-        <div class="s">nfqws сам добавляет сайты, где соединение зависает или рвётся. Под каждым — когда и почему; ✕ убирает лишний.</div></div>
-      <div id="zauto" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:8px;padding:2px 10px"></div>
-      <div class="row" style="padding:10px 0 0;border-top:0">
-        <div class="txt"><div class="s">Добавлять после сбоев за минуту</div></div>
-        <select data-key="ZAPRET_AUTO_FAIL" style="width:auto">
-          <option value="2">2</option><option value="3">3</option><option value="4">4</option>
-          <option value="5">5</option><option value="7">7</option><option value="10">10</option>
-        </select>
-      </div>
-      <div class="mt8"><button class="btn small" id="zautoClear">Очистить автосписок</button></div>
-    </div>
-    <div class="row col">
-      <div class="txt"><div class="t">Встроенный список: <span id="zdefN">0</span></div></div>
-      <pre class="log" id="zdef" style="max-height:160px;border:1px solid var(--line);border-radius:10px;margin-top:8px"></pre>
-    </div>
-  </details>
 </div>
-<div class="card pad" style="margin-top:10px">
-  <div class="t" style="font-weight:500">Проверить сайт</div>
-  <div class="s muted" style="font-size:13px;margin-top:2px">Открывается ли сайт через оператора, мимо VPN: без обхода и с выбранной стратегией.</div>
+
+
+<h2>Проверить сайт</h2>
+<div class="card pad">
+  <div class="s muted" style="font-size:13px;margin-top:2px">Доступность сайта мимо VPN — без обхода и с текущей стратегией.</div>
   <div style="display:flex;gap:8px;align-items:flex-start">
     <input type="text" id="stHost" style="min-width:0" enterkeyhint="go" placeholder="youtube.com" autocapitalize="off" autocorrect="off" spellcheck="false">
     <button class="btn" id="stBtn" style="margin-top:8px;white-space:nowrap">Проверить</button>
   </div>
   <button class="btn" id="ytBtn" style="margin-top:8px">Скорость YouTube</button>
-  <div class="s muted" style="font-size:12px;margin-top:4px">Качает файл с сервера Google под именем видеосервера — так видно, режет ли ТСПУ скорость видео и помогает ли стратегия. ~15 секунд, трафик до ~80 МБ.</div>
+  <div class="s muted" style="font-size:12px;margin-top:4px">Скорость загрузки с серверов Google под именем видеосервера — без обхода и с ним. ~15 секунд, до ~80 МБ трафика.</div>
   <div id="stRes" class="mt8" style="font-size:14px"></div>
 </div>
-<div class="card pad" style="margin-top:10px">
-  <div class="t" style="font-weight:500">Подбор стратегии</div>
-  <div class="s muted" style="font-size:13px;margin-top:2px">Перебирает стратегии и проверяет их на твоём операторе по сайтам ниже. Работает в фоне, страницу можно закрыть. Трафик телефона и раздачи не трогается.</div>
-  <textarea id="scSites" rows="2" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
-  <div class="btn-row mt8">
-    <button class="btn" id="scQuick">Быстрый · ~2 мин</button>
-    <button class="btn" id="scFull">Полный · ~7 мин</button>
-    <button class="btn" id="scStop" style="display:none">Остановить</button>
-  </div>
-  <div id="scProg" class="mt8" style="font-size:14px"></div>
-  <div id="scRes" class="mt8"></div>
-</div>
 
-<!-- ============ Прочее ============ -->
-<h2>Прочее</h2>
+<h2>Проверки</h2>
 <div class="card">
   <div class="row">
-    <div class="txt"><div class="t">Состояние в описании модуля</div>
-      <div class="s">Показывать текущий режим в списке модулей KernelSU.</div></div>
-    <label class="sw"><input type="checkbox" data-key="STATUS_IN_DESCRIPTION"><span></span></label>
-  </div>
-  <details>
-    <summary>Дополнительно</summary>
-    <div class="row col">
-      <div class="txt"><div class="t">Запасные DoH-серверы</div>
-        <div class="s">Если основной не ответил. Только шифрованные.</div></div>
-      <input type="text" data-key="DNS_FALLBACKS" autocapitalize="off" autocorrect="off" spellcheck="false">
-    </div>
-    <div class="row col">
-      <div class="txt"><div class="t">DoH через туннель</div>
-        <div class="s">Серверы для режима «DoH через туннель».</div></div>
-      <input type="text" data-key="DNS_VPN_UPSTREAMS" autocapitalize="off" autocorrect="off" spellcheck="false">
-    </div>
-    <div class="row col">
-      <div class="txt"><div class="t">Bootstrap DNS</div>
-        <div class="s">Чем узнать адрес самого DoH-сервера (IP:порт).</div></div>
-      <input type="text" data-key="DNS_BOOTSTRAP" autocapitalize="off" autocorrect="off" spellcheck="false">
-    </div>
-    <div class="row col">
-      <div class="txt"><div class="t">Проверка DoH, сек</div>
-        <div class="s">Как часто проверять сервер (2–600).</div></div>
-      <input type="number" min="2" max="600" data-key="DNS_HEALTH_INTERVAL">
-    </div>
-    <div class="row col">
-      <div class="txt"><div class="t">Проверка возврата, сек</div>
-        <div class="s">Как часто проверять, ожил ли сервер после сбоя (2–600).</div></div>
-      <input type="number" min="2" max="600" data-key="DNS_HEALTH_RECOVER">
-    </div>
-    <div class="row col">
-      <div class="txt"><div class="t">Meta: адрес «откуда спрашиваем»</div>
-        <div class="s">IPv4 для EDNS Client Subnet (берётся /24). По умолчанию — Амстердам.</div></div>
-      <input type="text" data-key="DNS_META_ECS" inputmode="decimal" autocapitalize="off" autocorrect="off" spellcheck="false">
-    </div>
-    <div class="row col">
-      <div class="txt"><div class="t">Meta: DoH-сервер</div>
-        <div class="s">Должен учитывать ECS (Google — да, Cloudflare — нет).</div></div>
-      <input type="text" data-key="DNS_META_UPSTREAMS" autocapitalize="off" autocorrect="off" spellcheck="false">
-    </div>
-    <div class="row">
-      <div class="txt"><div class="t">Адаптивный профиль сети</div>
-        <div class="s">Пинг 1.1.1.1 мимо VPN раз в ~20 с, на плохой связи больше повторов TCP.</div></div>
-      <label class="sw"><input type="checkbox" data-key="NET_PROFILE_ADAPTIVE"><span></span></label>
-    </div>
-    <div class="row"><button class="btn small" id="resetAll">Сбросить все настройки</button></div>
-  </details>
-</div>
-
-<!-- ============ Диагностика ============ -->
-<h2>Диагностика</h2>
-<div class="card">
-  <div class="row">
-    <div class="txt"><div class="t">Проверка DoH</div><div class="s" id="dohRes">Запрос через запущенный dnsproxy.</div></div>
+    <div class="txt"><div class="t">Проверка DNS</div><div class="s" id="dohRes">Проверка работы DNS через dnsproxy.</div></div>
     <button class="btn small" id="dohBtn">Проверить</button>
   </div>
   <div class="row col">
     <div style="display:flex;align-items:center;gap:12px">
-      <div class="txt"><div class="t">Адреса Meta</div><div class="s">Что DNS отвечает для Instagram и Facebook «как из Европы» и по твоему IP. В прошлых замерах рабочими были 57.144.x.x.</div></div>
+      <div class="txt"><div class="t">Проверка адресов Meta</div><div class="s">Адреса Instagram и Facebook, полученные с европейским ECS. Рабочие обычно начинаются с 57.144.</div></div>
       <button class="btn small" id="metaBtn">Проверить</button>
     </div>
     <div id="metaRes" style="font-size:14px"></div>
   </div>
+</div>
+
+<h2>Журналы</h2>
+<div class="card">
+  <div class="row">
+    <div class="txt"><div class="t">Отправить логи</div>
+      <div class="s" id="logSendRes">Журналы и настройки одним файлом в «Загрузки» с отправкой через «Поделиться». Файл содержит названия сетей Wi-Fi и локальные адреса.</div></div>
+    <button class="btn small" id="logSend">Отправить</button>
+  </div>
+  <details id="zevBox">
+    <summary>Журнал автопроверки и подбора</summary>
+    <pre class="log" id="zev" style="max-height:200px;border:1px solid var(--line);border-radius:10px;margin-top:8px"></pre>
+  </details>
   <details id="logBox">
-    <summary>Журнал</summary>
+    <summary>Журнал модуля</summary>
     <div class="row btn-row" style="border-top:0;padding-top:0">
       <button class="btn small" id="logRefresh">Обновить</button>
       <button class="btn small" id="logCopy">Скопировать</button>
@@ -484,6 +533,14 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
     <pre class="log" id="log"></pre>
   </details>
 </div>
+</section>
+
+<nav class="tabbar" id="tabbar"><div class="in">
+  <button data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg><span>Главная</span></button>
+  <button data-tab="bypass"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11l-3-3"/><path d="M20 17H9l3 3"/></svg><span>Обход</span></button>
+  <button data-tab="net"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg><span>Сеть</span></button>
+  <button data-tab="tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>Инструменты</span></button>
+</div></nav>
 
 <div class="applybar" id="applybar"><div class="in">
   <div class="msg" id="applyMsg">Есть несохранённые изменения</div>
@@ -495,7 +552,7 @@ pre.log { margin: 0; padding: 12px 14px; font: 12px/1.45 ui-monospace, SFMono-Re
 <div class="sheet" id="sheet">
   <div class="head">
     <div style="display:flex;justify-content:space-between;align-items:center">
-      <b>Выбери приложения</b><button class="btn small" id="sheetDone">Готово</button>
+      <b>Выберите приложения</b><button class="btn small" id="sheetDone">Готово</button>
     </div>
     <input type="search" id="appSearch" placeholder="Поиск">
   </div>
@@ -569,7 +626,7 @@ function renderStatus(s) {
 
   if (s.daemon !== '1') {
     dot.className = 'dot big red'; title.textContent = 'Модуль не запущен';
-    sub.textContent = 'Перезагрузи телефон. Если не поможет, пришли журнал.';
+    sub.textContent = 'Перезагрузите телефон. Если не поможет — отправьте логи (Инструменты).';
     $('#kv').innerHTML = ''; btn.disabled = true; btn.textContent = 'Переключить';
     return;
   }
@@ -578,13 +635,13 @@ function renderStatus(s) {
 
   if (!names) {
     dot.className = 'dot big'; title.textContent = 'Раздача выключена';
-    sub.textContent = 'Включи точку доступа или USB-модем. Режим при включении: ' + (s.target === 'vpn' ? 'через VPN' : 'напрямую') + '.';
+    sub.textContent = 'Включите точку доступа или USB-модем. Режим при включении: ' + (s.target === 'vpn' ? 'через VPN' : 'напрямую') + '.';
   } else if (s.mode === 'vpn') {
     dot.className = 'dot big green'; title.textContent = 'Раздача через VPN';
     sub.textContent = 'Устройства выходят в интернет только через VPN.';
   } else if (s.mode === 'blocked') {
     dot.className = 'dot big red'; title.textContent = 'VPN не подключён';
-    sub.textContent = 'Раздача на паузе, чтобы не засветить настоящий IP. Включи VPN-клиент, и она заработает сама.';
+    sub.textContent = 'Раздача приостановлена, чтобы не раскрыть реальный IP. После подключения VPN она возобновится автоматически.';
   } else {
     dot.className = 'dot big blue'; title.textContent = 'Раздача напрямую';
     sub.textContent = 'Без VPN, через оператора.';
@@ -616,14 +673,14 @@ function renderStatus(s) {
   }
   if (s.stealth === 'on') {
     const f = +s.ttl_foreign || 0;
-    h += kvRow('Скрытие раздачи', f ? (s.stealth_strict === '1' ? 'отбито пакетов с чужим TTL: ' + f : 'чужой TTL у устройства раздачи (' + f + ' пак.) — поставь на нём TTL 64') : 'включено, чужого TTL нет', f ? 'amber' : 'green');
+    h += kvRow('Скрытие раздачи', f ? (s.stealth_strict === '1' ? 'отбито пакетов с чужим TTL: ' + f : 'чужой TTL у устройства раздачи (' + f + ' пак.) — установите на нём TTL 64') : 'включено, чужого TTL нет', f ? 'amber' : 'green');
   }
   if (s.stealth_rivals) h += kvRow('Лишний модуль', esc(s.stealth_rivals) + (s.stealth === 'on'
       ? ' тоже меняет TTL/раздачу и мешает — отключи или удали его'
-      : ' меняет TTL/раздачу (это умеет и переключатель «Скрыть раздачу»)'), s.stealth === 'on' ? 'amber' : '');
+      : ' меняет TTL/раздачу (это умеет и переключатель «Скрытие раздачи»)'), s.stealth === 'on' ? 'amber' : '');
   else if (s.stealth === 'on' && +s.stealth_rival_rules > 0) h += kvRow('Чужие правила TTL', esc(s.stealth_rival_rules) + ' — их ставит другой модуль или приложение', 'amber');
   if (s.mode === 'vpn') {
-    h += kvRow('Kill-switch', s.kill_switch === '1' ? 'включён' : 'выключен', s.kill_switch === '1' ? 'green' : 'amber');
+    h += kvRow('Защита от утечек', s.kill_switch === '1' ? 'включён' : 'выключен', s.kill_switch === '1' ? 'green' : 'amber');
     if (s.mtu && +s.mss > 0) h += kvRow('MTU / MSS', esc(s.mtu + ' / ' + s.mss));
   }
   if (s.zapret === 'on') {
@@ -632,27 +689,27 @@ function renderStatus(s) {
       (s.zapret_src === 'net' ? ' (своя для «' + esc(s.net_label) + '»)' : s.zapret_src === 'label' ? ' (как у «' + esc(s.net_label) + '», код сети ' + esc(s.net_key) + ')' : ' (общая)');
     if (s.zapret_eff_yt) zt += ' · YouTube: ' + esc(stratLabel(s.zapret_eff_yt));
     if (+s.zapret_auto > 0) zt += ' · найдено сайтов: ' + esc(s.zapret_auto);
-    h += kvRow('Обход DPI', zt, 'green');
+    h += kvRow('Обход блокировок', zt, 'green');
     if (s.ggc === 'on') h += kvRow('YouTube', 'мимо кэша оператора', 'green');
     if (s.yt_dead && s.yt_dead !== 'off') {
       const n = +s.yt_dead, hits = +s.yt_dead_hits || 0;
-      h += kvRow('Мёртвые серверы', (n ? 'в отбое: ' + n : 'сейчас нет') + (hits ? ' · отбоев: ' + hits : ''), n ? 'amber' : 'green');
+      h += kvRow('Неотвечающие серверы', (n ? 'в отбое: ' + n : 'сейчас нет') + (hits ? ' · отбоев: ' + hits : ''), n ? 'amber' : 'green');
     }
     if (s.yt_slow && s.yt_slow !== 'off') {
       const k = +s.yt_slow_kills || 0, f = +s.yt_slow_fast || 0, dg = +s.yt_slow_degr || 0;
-      h += kvRow('Медленные видео', (s.yt_slow === 'pause' ? 'пауза: быстрых не попадается' : 'оборвано: ' + k + ' · быстрых: ' + f + (dg ? ' · догнали быстрых: ' + dg : '')), s.yt_slow === 'pause' ? 'amber' : 'green');
+      h += kvRow('Медленное видео', (s.yt_slow === 'pause' ? 'пауза: быстрых не попадается' : 'оборвано: ' + k + ' · быстрых: ' + f + (dg ? ' · догнали быстрых: ' + dg : '')), s.yt_slow === 'pause' ? 'amber' : 'green');
     }
     if (s.zwd === '1') {
       const w = (s.zwd_last || '').split('|'), t = w[1] || '';
-      h += kvRow('Сторож', s.zwd_last ? esc(w[0] + ' · ' + t) : 'ещё не проверял',
+      h += kvRow('Автопроверка', s.zwd_last ? esc(w[0] + ' · ' + t) : 'ещё не проверял',
         /^(работает|починил|ничего)/.test(t) ? 'green' : t ? 'red' : '');
     }
   }
-  else if (s.zapret === 'fail') h += kvRow('Обход DPI', 'nfqws не запустился, повтор через минуту', 'red');
+  else if (s.zapret === 'fail') h += kvRow('Обход блокировок', 'nfqws не запустился, повтор через минуту', 'red');
   if (s.dnsproxy_enable === '1' && s.meta_eu === '1') {
-    if (s.meta_eu_on === '1') h += kvRow('DNS Meta', 'как из Европы (ECS ' + esc(s.meta_ecs) + ')', 'green');
-    else if (s.vpn_up === '1') h += kvRow('DNS Meta', 'через VPN, Европа не нужна', '');
-    else h += kvRow('DNS Meta', 'обычный: DoH без VPN сейчас не используется', '');
+    if (s.meta_eu_on === '1') h += kvRow('Instagram и Facebook', 'как из Европы (ECS ' + esc(s.meta_ecs) + ')', 'green');
+    else if (s.vpn_up === '1') h += kvRow('Instagram и Facebook', 'через VPN, Европа не нужна', '');
+    else h += kvRow('Instagram и Facebook', 'обычный: DoH без VPN сейчас не используется', '');
   }
   if (s.zapret_per_net === '1' && s.net_key && s.net_key !== ZN.cur && !znetLoading) loadZnet();
   if (s.quic_uids) h += kvRow('Без QUIC', esc(String(s.quic_uids.split(' ').length)) + ' прил.');
@@ -723,6 +780,8 @@ function renderForm() {
 
 function renderDeps() {
   $$('[data-dep]').forEach((row) => { row.classList.toggle('off', CUR[row.dataset.dep] !== '1'); });
+  // главный выключатель — только на Главной; во вкладках подсказка, если он выключен
+  $$('[data-offnote]').forEach((n) => { n.style.display = CUR[n.dataset.offnote] === '1' ? 'none' : ''; });
   $('#zArgsBox').style.display = CUR.ZAPRET_STRATEGY === 'custom' ? '' : 'none';
   const pn = CUR.ZAPRET_PER_NET === '1';
   $('#znetBox').style.display = pn ? '' : 'none';
@@ -730,8 +789,8 @@ function renderDeps() {
   $('#zStratTitle').textContent = pn ? 'Стратегия по умолчанию' : 'Стратегия';
   $('#zwdMin').textContent = fmtMin(CUR.ZAPRET_WATCHDOG_MIN, 15);
   $('#zaltMin').textContent = fmtMin(CUR.ZAPRET_ALT_MIN, 180);
-  $('#zStratSub').textContent = pn ? 'Для сетей, у которых нет своей. Если сайт перестал открываться, попробуй другую и проверь ниже.'
-    : 'Если сайт перестал открываться, попробуй другую и проверь ниже.';
+  $('#zStratSub').textContent = pn ? 'Используется в сетях без своей стратегии.'
+    : 'Метод обхода DPI.';
 }
 
 function changedKeys() { return KEYS.filter((k) => (CUR[k] || '') !== (saved(k) || '')); }
@@ -744,7 +803,15 @@ function renderBar() {
   $('#applyMsg').textContent = n ? 'Изменений: ' + n : '';
 }
 
-function setCur(k, v) { CUR[k] = v; renderDeps(); renderBar(); }
+function setCur(k, v) {
+  CUR[k] = v;
+  // одна настройка может стоять в двух местах (Главная и своя вкладка)
+  $$('[data-key="' + k + '"]').forEach((el) => {
+    if (el.type === 'checkbox') el.checked = v === '1';
+    else if (el.tagName === 'SELECT') el.value = v;
+  });
+  renderDeps(); renderBar();
+}
 
 $$('[data-key]').forEach((el) => {
   const k = el.dataset.key;
@@ -753,6 +820,20 @@ $$('[data-key]').forEach((el) => {
   });
 });
 $('#zlist').addEventListener('input', () => { $('#zlistErr').style.display = 'none'; renderBar(); });
+
+// ---------------------------------------------------------------- вкладки (3.10)
+function showTab(t) {
+  if (!$('.tab[data-tab="' + t + '"]')) t = 'home';
+  $$('.tab').forEach((el) => el.classList.toggle('on', el.dataset.tab === t));
+  $$('#tabbar button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
+  try { localStorage.setItem('vtTab', t); } catch (e) { /* без хранилища — просто не запоминаем */ }
+}
+$$('#tabbar button').forEach((b) => b.addEventListener('click', () => { showTab(b.dataset.tab); window.scrollTo(0, 0); }));
+$$('[data-offnote]').forEach((n) => n.addEventListener('click', () => { showTab('home'); window.scrollTo(0, 0); }));
+let _tab0 = 'home';
+try { _tab0 = localStorage.getItem('vtTab') || 'home'; } catch (e) { /* по умолчанию — Главная */ }
+showTab(_tab0);
+
 $('#directDoh').addEventListener('change', (e) => setCur('DNS_DIRECT', e.target.checked ? 'doh' : 'plain'));
 
 function upValue() {
@@ -840,7 +921,7 @@ function validate() {
   const bad = CUR.DNSPROXY_ENABLE === '1' && (!u || !/^(https|tls|quic|h3|sdns|udp|tcp):\/\/\S+(\s+\S+)*$/.test(u));
   $('#upErr').style.display = bad ? '' : 'none';
   $('#upErr').textContent = bad ? 'Нужен адрес вида https://сервер/dns-query' : '';
-  if (bad) { toast('DoH-сервер: нужен адрес вида https://сервер/dns-query'); return false; }
+  if (bad) { toast('Сервер DNS: нужен адрес вида https://сервер/dns-query'); return false; }
   const ecs = CUR.DNS_META_ECS || '';
   if (!/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(ecs) || ecs.split('.').some((o) => +o > 255)) {
     toast('Meta: адрес «откуда спрашиваем» — нужен IPv4, например 185.15.56.0'); return false;
@@ -926,7 +1007,7 @@ async function loadZev() {
   const r = await ctl('zevents 40');
   const lines = (r.out || '').split('\n').filter(Boolean).reverse()
     .map((l) => { const f = l.split('|'); return f[0] + (f[1] ? ' · ' + f[1] : '') + '\n  ' + f.slice(2).join('|'); });
-  $('#zev').textContent = lines.length ? lines.join('\n') : 'Пока пусто: сторож пишет сюда поломки и починки, подбор — свои итоги.';
+  $('#zev').textContent = lines.length ? lines.join('\n') : 'Пока пусто: здесь появятся результаты автопроверки и подбора.';
 }
 $('#zevBox').addEventListener('toggle', () => { if ($('#zevBox').open) loadZev(); });
 $('#diagBtn').addEventListener('click', async () => {
@@ -942,6 +1023,18 @@ $('#diagBtn').addEventListener('click', async () => {
   } finally { b.disabled = false; b.textContent = 'Проверить ещё раз'; }
 });
 $('#logRefresh').addEventListener('click', loadLog);
+$('#logSend').addEventListener('click', async () => {
+  const b = $('#logSend'), res = $('#logSendRes');
+  b.disabled = true; b.textContent = 'Собираю…';
+  try {
+    const r = await ctl('logs-send');
+    const m = /^OK (\S+)( nosend)?/m.exec(r.out || '');
+    if (!m) { toast(errText(r, 'Не получилось собрать логи')); return; }
+    const name = m[1].split('/').pop();
+    res.textContent = 'Сохранено: Загрузки/' + name + (m[2] ? '. Окно «Поделиться» не открылось — отправьте файл из «Загрузок».' : '. Выберите, куда отправить.');
+    toast(m[2] ? 'Логи в «Загрузках»' : 'Логи собраны — выберите, куда отправить');
+  } finally { b.disabled = false; b.textContent = 'Отправить'; }
+});
 $('#logPrev').addEventListener('click', async () => {
   const r = await ctl('log-prev');
   const pre = $('#log'); pre.textContent = r.out ? '— прошлый запуск (до перезагрузки/перезапуска) —\n' + r.out : 'Лога прошлого запуска нет';
@@ -1053,7 +1146,7 @@ $('#stBtn').addEventListener('click', async () => {
     const dOk = stOk(o.direct), zOk = stOk(o.zapret);
     res.innerHTML = stLine('Без обхода', o.direct) + stLine('С обходом', o.zapret) +
       '<div class="muted mt8" style="font-size:13px">' + (dOk ? 'Сайт и так открывается, обход не нужен.'
-        : zOk ? 'Обход помогает. В режиме «из списка» добавь сайт в свой список, если его нет во встроенном.'
+        : zOk ? 'Обход помогает. В режиме «из списка» добавьте сайт в «Дополнительные сайты», если его нет во встроенном списке.'
         : 'С этой стратегией не помогло. Можно подобрать сайту свою — остальные сайты останутся на прежней. Если не поможет ни одна — скорее всего, блок по IP, тут нужен VPN.') + '</div>' +
       (!dOk && !zOk ? '<button class="btn small mt8" id="stAlt" data-host="' + esc(host) + '">Подобрать для этого сайта</button>' : '');
     const sa = $('#stAlt'); if (sa) sa.addEventListener('click', () => { sa.disabled = true; zaltStart(sa.dataset.host); });
@@ -1145,7 +1238,7 @@ async function scRefresh() {
   }
   const sites = s.mode === 'sites';
   if (blocked.length && !sites) prog += '<div class="muted" style="font-size:13px;margin-top:4px">Заблокировано без обхода: ' + esc(blocked.join(', ')) + '</div>';
-  if (sites) prog += '<div class="muted" style="font-size:13px;margin-top:4px">Своя стратегия для отдельных сайтов: итог — в «Обход DPI → Сайты со своей стратегией».</div>';
+  if (sites) prog += '<div class="muted" style="font-size:13px;margin-top:4px">Стратегии для отдельных сайтов: итог — во вкладке «Обход», раздел «Сайты».</div>';
   $('#scProg').innerHTML = prog;
 
   const rows = sites ? [] : scAggregate(rs.out, blocked.length).slice(0, 8);
@@ -1225,7 +1318,7 @@ function renderZnet() {
   $('#znetInfo').textContent = !ZN.cur
     ? 'Нет Wi-Fi или мобильной сети, или модуль её ещё не видел. Работает стратегия по умолчанию.'
     : e ? 'Своя: ' + stratName(e.st, e.args) + (e.note ? ' · ' + e.note : '') + (e.date ? ' · ' + e.date : '')
-    : 'Своей нет, работает стратегия по умолчанию. Запусти подбор ниже или выбери вручную.';
+    : 'Своей нет, работает стратегия по умолчанию. Запустите подбор или выберите вручную.';
   const presets = Array.from($('[data-key=ZAPRET_STRATEGY]').options).filter((o) => o.value !== 'custom');
   const sel = $('#znetSel');
   sel.innerHTML = '<option value="">По умолчанию — ' + esc(def) + '</option>' +
@@ -1272,7 +1365,7 @@ $('#metaBtn').addEventListener('click', async () => {
       if (f[0] === 'host' && f[1]) {
         const eu = f[2] || '-', ru = f[3] || '-', good = /^57\.144\./.test(eu);
         h += '<div class="st-line"><span class="dot ' + (eu === '-' ? 'red' : good ? 'green' : 'amber') + '"></span><span>' +
-          esc(f[1].replace(/^www\./, '')) + ': <b>' + esc(eu) + '</b> <span class="muted">· по твоему IP ' + esc(ru) + '</span></span></div>';
+          esc(f[1].replace(/^www\./, '')) + ': <b>' + esc(eu) + '</b> <span class="muted">· по вашему IP ' + esc(ru) + '</span></span></div>';
       }
     });
     res.innerHTML = '<div class="muted mt8" style="font-size:13px">«Как из Европы» (ECS ' + esc(ecs) + ') — жирным:</div>' + h;
@@ -1324,6 +1417,7 @@ function mockExec(cmd) {
   if (a === 'zauto') return { errno: 0, out: 'example.org\nfoo.net\n' };
   if (a === 'zauto-info') return { errno: 0, out: 'rutracker.org|23.10.2026 18:05:11|0/3/0|tether\nexample.org|23.10.2026 14:22:40|2/1/0|phone\nfoo.net|||\n' };
   if (/^zauto-del /.test(a)) return { errno: 0, out: 'OK' };
+  if (a === 'logs-send') return { errno: 0, out: 'OK /storage/emulated/0/Download/vpn_tether_logs_20261023_1900.txt' };
   if (a === 'zauto-clear') return { errno: 0, out: 'OK' };
   if (a === 'zalt') return { errno: 0, out: 'rutracker.org|--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld|2026-10-22 18:00\nnnmclub.to|--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld|2026-10-22 18:00\n' };
   if (a === 'zalt-clear') return { errno: 0, out: 'OK' };

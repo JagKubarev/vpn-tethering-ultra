@@ -19,6 +19,7 @@
 #   webctl.sh zauto-clear             очистить автосписок
 #   webctl.sh zauto-info              автосписок с причинами: домен|когда|сбросы/зависания/редиректы|phone/tether
 #   webctl.sh zauto-del ДОМЕН         убрать один домен из автосписка
+#   webctl.sh logs-send               логи одним файлом в «Загрузки» + окно «Поделиться»
 #   webctl.sh sitetest ДОМЕН          открывается ли сайт мимо VPN без/с обходом
 #   webctl.sh ytspeed                 скорость "видео YouTube" мимо VPN без/с обходом
 #   webctl.sh znet                    текущая сеть + стратегии, запомненные для сетей
@@ -177,6 +178,42 @@ case "$1" in
         case "$n" in ''|*[!0-9]*) n=200 ;; esac
         tail -n "$n" "$LOG_FILE" 2>/dev/null
         ;;
+    logs-send)
+        # Один текстовый файл для разбора проблемы: в «Загрузки», затем окно
+        # «Поделиться». Файл виден приложениям через MediaStore (scan_file),
+        # поэтому его можно отправить в мессенджер. Не вышло — файл всё равно
+        # в «Загрузках» (ответ «OK путь nosend»).
+        F=/storage/emulated/0/Download/vpn_tether_logs_$(date '+%Y%m%d_%H%M').txt
+        {
+            echo "=== VPN Tethering Ultra — логи для разбора, $(date '+%d.%m.%Y %H:%M:%S')"
+            sed -n 's/^version=/модуль: /p' "$MODDIR/module.prop"
+            echo "телефон: $(getprop ro.product.manufacturer) $(getprop ro.product.model), Android $(getprop ro.build.version.release), ядро $(uname -r)"
+            echo; echo "=== состояние"; sed '1,2d' "$STATUS_FILE" 2>/dev/null
+            echo; echo "=== настройки (vpn_tether.conf, без комментариев)"; grep -v '^[[:space:]]*#' "$CONF" 2>/dev/null | grep .
+            echo; echo "=== журнал модуля (последние 3000 строк)"; tail -n 3000 "$LOG_FILE" 2>/dev/null
+            echo; echo "=== журнал прошлого запуска (последние 500 строк)"; tail -n 500 "$LOG_FILE.prev" 2>/dev/null
+            echo; echo "=== сторож и подбор (последние 100)"; tail -n 100 "$ZEVENTS" 2>/dev/null
+            echo; echo "=== стратегии сетей"; cat "$ZNETS" 2>/dev/null
+            echo; echo "=== свои стратегии сайтов"; cat "$ZALT" 2>/dev/null
+            echo; echo "=== автосписок: домен|когда|сбросы/зависания/редиректы|кто"; sh "$MODDIR/webctl.sh" zauto-info 2>/dev/null
+            echo; echo "=== nfqws (последние 50 строк)"; tail -n 50 /data/local/tmp/vpn_tether_nfqws.log 2>/dev/null
+            echo; echo "=== ip rule"; ip rule 2>/dev/null
+            echo; echo "=== цепочки модуля (filter / nat / mangle)"
+            for t in filter nat mangle; do iptables -w 2 -t $t -S 2>/dev/null | grep -E 'VPN_|ZAPRET' | sed "s/^/$t: /"; done
+        } > "$F" 2>&1
+        [ -s "$F" ] || { echo "ERR не удалось записать файл"; exit 1; }
+        chmod 644 "$F" 2>/dev/null
+        content call --uri content://media --method scan_file --arg "$F" >/dev/null 2>&1
+        id=$(content query --uri content://media/external/file --projection _id --where "_data='$F'" 2>/dev/null | grep -oE '_id=[0-9]+' | head -1 | cut -d= -f2)
+        if [ -n "$id" ] && am start -a android.intent.action.SEND -t text/plain \
+                --eu android.intent.extra.STREAM "content://media/external/file/$id" \
+                --es android.intent.extra.SUBJECT "VPN Tethering Ultra: логи" \
+                --grant-read-uri-permission -f 0x10000000 >/dev/null 2>&1; then
+            echo "OK $F"
+        else
+            echo "OK $F nosend"
+        fi
+        ;;
     log-prev)   # лог прошлого запуска демона (до ребута/перезапуска)
         tail -n 400 "$LOG_FILE.prev" 2>/dev/null
         ;;
@@ -315,7 +352,7 @@ case "$1" in
         case "$h" in ''|*[!a-z0-9.-]*|*..*|.*) echo "ERR адрес"; exit 1 ;; esac
         wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
         [ -n "$wan" ] || { echo "ERR не знаю интерфейс оператора — модуль ещё не видел сеть"; exit 1; }
-        ip -4 addr show "$wan" 2>/dev/null | grep -q "inet " || { echo "ERR у $wan нет адреса — сеть только что сменилась? Повтори через полминуты"; exit 1; }
+        ip -4 addr show "$wan" 2>/dev/null | grep -q "inet " || { echo "ERR у $wan нет адреса — сеть только что сменилась? Повторите через полминуты"; exit 1; }
         case "$(uname -m)" in aarch64|arm64) nq="$MODDIR/bin/nfqws-arm64" ;; *) nq="$MODDIR/bin/nfqws-arm" ;; esac
         [ -x "$nq" ] || { echo "ERR нет nfqws"; exit 1; }
         CA=/apex/com.android.conscrypt/cacerts
@@ -365,7 +402,7 @@ case "$1" in
         # файл — по заголовку Host. Так видно и замедление, и помогает ли обход.
         wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
         [ -n "$wan" ] || { echo "ERR не знаю интерфейс оператора — модуль ещё не видел сеть"; exit 1; }
-        ip -4 addr show "$wan" 2>/dev/null | grep -q "inet " || { echo "ERR у $wan нет адреса — сеть только что сменилась? Повтори через полминуты"; exit 1; }
+        ip -4 addr show "$wan" 2>/dev/null | grep -q "inet " || { echo "ERR у $wan нет адреса — сеть только что сменилась? Повторите через полминуты"; exit 1; }
         case "$(uname -m)" in aarch64|arm64) nq="$MODDIR/bin/nfqws-arm64" ;; *) nq="$MODDIR/bin/nfqws-arm" ;; esac
         [ -x "$nq" ] || { echo "ERR нет nfqws"; exit 1; }
         CA=/apex/com.android.conscrypt/cacerts
