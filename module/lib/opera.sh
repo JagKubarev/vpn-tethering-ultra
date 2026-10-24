@@ -195,7 +195,7 @@ opera_pool_learn() {
 # Замер: TCP-подключение к каждому серверу региона через WAN (параллельно,
 # ~2с на всё). Живой — ответил (HTTP 400 на голый запрос). OPERA_RANK = «мс ip».
 opera_pool_rank() {
-    local d a w="" g="" pids=""
+    local d a w="" g="" pids="" _n
     command -v curl >/dev/null 2>&1 || return 1
     d="/data/local/tmp/vpn_tether_opera_rank"
     rm -rf "$d"; mkdir -p "$d" || return 1
@@ -211,8 +211,14 @@ opera_pool_rank() {
             pids="$pids $!"
         fi
     done
-    # только свои замеры: голый wait ждал бы и opera-proxy/hev (дети демона)
-    [ -n "$pids" ] && wait $pids
+    # только свои замеры: голый wait ждал бы и opera-proxy/hev (дети демона).
+    # wait прерывается сигналом (USR1 — тоггл/WebUI, rc > 128) — ждём дальше,
+    # иначе замер неполный и перемер решит, что текущий сервер умер
+    _n=0
+    while [ -n "$pids" ] && [ $_n -lt 5 ]; do
+        wait $pids; [ $? -gt 128 ] || break
+        _n=$((_n + 1))
+    done
     OPERA_RANK=$(for a in "$d"/*; do
         [ -f "$a" ] || continue
         set -- $(cat "$a")
@@ -335,6 +341,7 @@ EOF
     while [ $i -lt 10 ]; do
         sleep 0.2
         [ -n "$(opera_hev_pids)" ] && _opera_listening "$OPERA_TP_PORT" && return 0
+        i=$((i + 1))
     done
     return 1
 }
@@ -526,6 +533,7 @@ opera_reconcile() {
             fi
             OPERA_STATE="on"
             OPERA_TICK=12   # первая проверка через ~6с: сразу после старта сервер ещё «прогревается»
+            OPERA_WANT_PREV="$want"   # иначе первый старт (want ещё 0) сочтётся выключением VPN — проверка сразу
             phone_status_refresh ;;
         on)
             if [ -z "$(opera_proxy_pids)" ]; then
@@ -545,6 +553,9 @@ opera_reconcile() {
     # прошлые «не пропустил Telegram» и замер пула — от старой сети
     if [ "$OPERA_STATE" = "on" ] && [ "$LAST_WAN_IFACE" != "$OPERA_WAN" ]; then
         OPERA_TICK=15; OPERA_BAD=""; OPERA_BADREG=""; OPERA_RANK_TS=0
+        # при поднятом VPN проверки нет и OPERA_WAN не обновлялся бы — блок
+        # «~30с» шёл бы каждую итерацию до выключения VPN
+        OPERA_WAN="$LAST_WAN_IFACE"
     fi
     # VPN только что выключили — проверить сервер до того, как вернём правила
     # (одна проверка, а не две: важна скорость; не прошла — сразу другой сервер)
