@@ -401,6 +401,15 @@ details.more > summary { color: var(--muted); }
     </select>
   </div>
   <div class="row" data-dep="OPERA_TG">
+    <div class="txt"><div class="t">Сайты, которые не открывает обход</div>
+      <div class="s">Сайты, которые при проверке не открылись ни одной стратегией, но открываются через Opera, тоже направляются через прокси. Скорость через Opera ниже.</div></div>
+    <label class="sw"><input type="checkbox" data-key="OPERA_SITES"><span></span></label>
+  </div>
+  <details data-dep="OPERA_TG" id="opsBox">
+    <summary>Сайты через Opera: <span id="opsN">0</span></summary>
+    <div id="opsList" style="padding:0 16px 10px"></div>
+  </details>
+  <div class="row" data-dep="OPERA_TG">
     <div class="txt"><div class="t">Состояние</div>
       <div class="s" id="operaState">—</div></div>
   </div>
@@ -851,7 +860,7 @@ const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAM
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK',
   'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK','YT_DEAD_FAILFAST','ZAPRET_WATCHDOG','ZAPRET_WATCHDOG_MIN',
   'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','YT_SLOW_RETRY','ZAPRET_AUTO_FAIL',
-  'OPERA_TG','OPERA_COUNTRY','OPERA_API_LIST'];   // = CONF_KEYS в service.sh
+  'OPERA_TG','OPERA_COUNTRY','OPERA_API_LIST','OPERA_SITES'];   // = CONF_KEYS в service.sh
 // интервал в минутах человеческим языком: 15 -> «15 минут», 180 -> «3 часа»
 function fmtMin(v, def) {
   const m = +v || def;
@@ -1199,6 +1208,25 @@ $('#zauto').addEventListener('click', async (e) => {
   const r = await ctl('zauto-del ' + q(h));
   toast(isOk(r) ? 'Убрано: ' + h : errText(r, 'Не получилось')); await loadZ(true);
 });
+// сайты через Opera (OPERA_SITES): "хост|адреса|epoch"
+async function loadOps() {
+  const r = await ctl('opsites');
+  const rows = (r.out || '').split('\n').filter((l) => l.indexOf('|') > 0).map((l) => l.split('|'));
+  $('#opsN').textContent = rows.length;
+  $('#opsList').innerHTML = rows.length ? rows.map((f) => {
+    const t = +f[2] ? new Date(f[2] * 1000) : null;
+    const when = t ? String(t.getDate()).padStart(2, '0') + '.' + String(t.getMonth() + 1).padStart(2, '0') + ' ' + String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0') : '';
+    return '<div class="row" style="padding:6px 0;gap:8px"><div class="txt"><div class="t" style="font-size:14px;font-weight:400">' + esc(f[0]) + '</div>' +
+      '<div class="s" style="font-size:12px">' + esc((f[1] || '').split(' ').length) + ' адр.' + (when ? ' · проверен ' + esc(when) : '') + '</div></div>' +
+      '<button class="btn small icon-btn" data-opdel="' + esc(f[0]) + '" title="Не направлять через Opera" aria-label="Не направлять через Opera">✕</button></div>';
+  }).join('') : '<div class="s muted" style="padding:10px 0">Пока пусто. Список пополняется после проверки сайтов.</div>';
+}
+$('#opsList').addEventListener('click', async (e) => {
+  const h = e.target.dataset && e.target.dataset.opdel; if (!h) return;
+  e.target.disabled = true;
+  const r = await ctl('opsite-del ' + q(h));
+  toast(isOk(r) ? 'Больше не через Opera: ' + h : errText(r, 'Не получилось')); await loadOps();
+});
 // сайты со своей стратегией (scan.sh sites): "сайт|аргументы|дата"
 async function loadZalt() {
   const r = await ctl('zalt');
@@ -1490,7 +1518,7 @@ $('#metaBtn').addEventListener('click', async () => {
 // ---------------------------------------------------------------- старт
 (async () => {
   // сбой одной загрузки не должен оставить страницу без опроса статуса
-  await Promise.all([loadStatus(), loadConf(), loadZ(), loadZnet()].map((p) => p.catch((e) => console.error(e))));
+  await Promise.all([loadStatus(), loadConf(), loadZ(), loadZnet(), loadOps()].map((p) => p.catch((e) => console.error(e))));
   scRefresh();
   loadApps().then(renderChips);
   setInterval(() => { if (!document.hidden && !busy && !stBusy) loadStatus(); }, 3000);
@@ -1519,7 +1547,7 @@ function mockExec(cmd) {
     'opera_enable=' + (M.usr.OPERA_TG || '0') + '\nopera=' + (M.usr.OPERA_TG === '1' ? 'on' : 'off') +
     '\nopera_country=' + (M.usr.OPERA_COUNTRY || 'AUTO') + '\nopera_region=' + ((M.usr.OPERA_COUNTRY || 'AUTO') === 'AUTO' ? 'AS' : M.usr.OPERA_COUNTRY) + '\nopera_endpoint=' + (M.usr.OPERA_TG === '1' ? '77.111.247.10:443' : '') +
     '\nopera_scope=' + (M.usr.OPERA_TG === '1' && M.target !== 'vpn' ? 'phone tether' : '') + '\nopera_err=\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.wlrus.cfd/dns-query\nD DNS_FALLBACKS=https://dns.dagami.ru/dns-query https://not-a-dns.quic.best/dns-query https://dns.comss.one/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=180\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD OPERA_TG=0\nD OPERA_COUNTRY=AUTO\nD OPERA_API_LIST=https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/all/data.txt\n' +
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.wlrus.cfd/dns-query\nD DNS_FALLBACKS=https://dns.dagami.ru/dns-query https://not-a-dns.quic.best/dns-query https://dns.comss.one/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=180\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD OPERA_TG=0\nD OPERA_COUNTRY=AUTO\nD OPERA_SITES=1\nD OPERA_API_LIST=https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/all/data.txt\n' +
     Object.keys(M.usr).map((k) => 'U ' + k + '=' + M.usr[k] + '\n').join('') };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +
@@ -1534,6 +1562,8 @@ function mockExec(cmd) {
   if (a === 'zlist') return { errno: 0, out: M.zlist };
   if (a === 'zdefault') return { errno: 0, out: 'youtube.com\ngooglevideo.com\ndiscord.com\nx.com\n' };
   if (a === 'zauto') return { errno: 0, out: 'example.org\nfoo.net\n' };
+  if (a === 'opsites') return { errno: 0, out: 'bsky.app|3.230.10.12 54.157.12.4|' + Math.floor(Date.now() / 1000 - 3600) + '\nwww.notion.so|208.103.161.1|' + Math.floor(Date.now() / 1000 - 600) + '\n' };
+  if (/^opsite-del /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'zauto-info') return { errno: 0, out: 'rutracker.org|23.10.2026 18:05:11|0/3/0|tether\nexample.org|23.10.2026 14:22:40|2/1/0|phone\nfoo.net|||\n' };
   if (/^zauto-del /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'logs-send') return { errno: 0, out: 'OK /storage/emulated/0/Download/vpn_tether_logs_20261023_1900.txt' };

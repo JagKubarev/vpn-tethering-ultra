@@ -86,6 +86,76 @@ OPERA_RERANK=0
 opera_cidrs() {
     sed 's/#.*//' "$OPERA_CIDR_FILE" 2>/dev/null | tr -d ' \t\r' | \
         grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$'
+    [ "$OPERA_SITES" = "1" ] && opera_site_ips | sed 's#$#/32#'
+}
+
+# ============================================================================
+# Сайты, которые не открывает обход (OPERA_SITES). Проверка сайтов (scan.sh
+# sites) кладёт «не открылись ничем» в ZSKIP. Фоновая задача перепроверяет
+# каждый: напрямую (мимо AdGuard и nfqws) не открылся, а через Opera открылся
+# — его адреса (как их отдаёт наш DNS) идут в то же перенаправление, что и
+# Telegram. 24.10, Wi-Fi Dom.ru: из 259 заблокированных сайтов zapret открыл
+# 148, ещё 21 открылся только через Opera (bsky.app, notion.so, spiegel.de…).
+# Реклама и телеметрия, которые режет AdGuard, напрямую открываются — не берём.
+# ============================================================================
+OPERA_SITES_FILE="/data/adb/vpn_tether_opera_sites"       # хост|ip ip|epoch проверки
+OPERA_SITES_SKIP="/data/adb/vpn_tether_opera_sites_skip"  # убранные вручную (WebUI ✕)
+OPERA_SITES_PID="/data/local/tmp/vpn_tether_opera_sites.pid"
+OPERA_SITES_MAX=128     # адресов в перенаправлении
+OPERA_SITES_TICK=0
+OPERA_SITES_SIG=""      # cksum файла сайтов — менялся ли список
+OPERA_ZSKIP_SIG=""      # cksum ZSKIP — прошла ли новая проверка сайтов
+OPERA_ZSKIP="/data/adb/vpn_tether_zapret_altskip"
+# Телеметрия и реклама — не через Opera, даже если «не открылись ничем»
+# (24.10 в список попал ums-telemetry-sgp.heytapmobi.com — телеметрия Oppo)
+OPERA_SITES_NOISE='telemetry|analytic|metric|measure|stats\.|tracking|tracker|beacon|crashlytics|sentry|appsflyer|adjust\.|doubleclick|googlead|googlesyndication|adservice|adsystem|(^|\.)ads?[0-9]*\.|heytap|allawnos|app-measurement|branch\.io'
+
+opera_site_ips() {
+    [ -s "$OPERA_SITES_FILE" ] || return 0
+    cut -d'|' -f2 "$OPERA_SITES_FILE" | tr ' ' '\n' | \
+        grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' | sort -u | head -n "$OPERA_SITES_MAX"
+}
+
+# Фоновая проверка (до ~10 мин на 40 сайтов; цикл не держит). Записи старше
+# 6 ч перепроверяются (адреса CDN меняются), чего нет в ZSKIP больше суток —
+# выпадает само.
+opera_sites_job() {
+    local p
+    p=$(cat "$OPERA_SITES_PID" 2>/dev/null)
+    [ -n "$p" ] && kill -0 "$p" 2>/dev/null && return 0
+    (
+        now=$(date +%s); out="$OPERA_SITES_FILE.new"; : > "$out"
+        g=""; [ "$DNSPROXY_SU_G" = "1" ] && [ -n "$DNSPROXY_GID" ] && g="$DNSPROXY_GID"
+        hosts=$( { awk -F'|' -v k="$NET_KEY" '$1 == k {print $2}' "$OPERA_ZSKIP" 2>/dev/null
+                   cut -d'|' -f1 "$OPERA_SITES_FILE" 2>/dev/null; } | \
+                 grep -E '^[a-z0-9.-]+\.[a-z]+$' | grep -vE "$OPERA_SITES_NOISE" | sort -u | head -n 40)
+        for h in $hosts; do
+            grep -qxF "$h" "$OPERA_SITES_SKIP" 2>/dev/null && continue
+            old=$(grep "^$h|" "$OPERA_SITES_FILE" 2>/dev/null | head -n 1)
+            t=$(echo "$old" | cut -d'|' -f3)
+            if [ -n "$t" ] && [ $((now - t)) -lt 21600 ] 2>/dev/null; then echo "$old" >> "$out"; continue; fi
+            # напрямую открылся — не блокировка (или режет только AdGuard)
+            if [ -n "$g" ]; then
+                c=$(su -g "$g" -c "curl -s -o /dev/null -m 5 ${LAST_WAN_IFACE:+--interface $LAST_WAN_IFACE} -w '%{http_code}' https://$h/" 2>/dev/null)
+            else
+                c=$(curl -s -o /dev/null -m 5 ${LAST_WAN_IFACE:+--interface $LAST_WAN_IFACE} -w '%{http_code}' "https://$h/" 2>/dev/null)
+            fi
+            [ -n "$c" ] && [ "$c" != "000" ] && continue
+            c=$(curl -s -o /dev/null -m 8 --socks5-hostname "127.0.0.1:$OPERA_PORT" -w '%{http_code}' "https://$h/" 2>/dev/null)
+            [ -n "$c" ] && [ "$c" != "000" ] || continue
+            # адреса — как их видят клиенты: запрос на :53 от root уходит в наш dnsproxy
+            ips=$(${BUSYBOX:-busybox} nslookup "$h" 8.8.8.8 2>/dev/null | \
+                  awk '/^Name:/ {n=1; next} n && /^Address/ {print $NF}' | \
+                  grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' | \
+                  grep -vE '^(10|127|0)\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[01])\.|^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.' | \
+                  sort -u | head -n 8 | tr '\n' ' ')
+            ips="${ips% }"
+            [ -n "$ips" ] && echo "$h|$ips|$now" >> "$out"
+        done
+        mv -f "$out" "$OPERA_SITES_FILE"
+        rm -f "$OPERA_SITES_PID"
+    ) </dev/null >/dev/null 2>&1 &
+    echo $! > "$OPERA_SITES_PID"
 }
 
 # PID-ы процессов, чей argv[0] начинается с $1, а в аргументах есть $2
@@ -471,6 +541,9 @@ opera_fail() {   # причина [fast — сервер не отвечает: 
 }
 
 opera_down() {   # [quiet]
+    local p
+    p=$(cat "$OPERA_SITES_PID" 2>/dev/null); [ -n "$p" ] && kill "$p" 2>/dev/null; rm -f "$OPERA_SITES_PID"
+    OPERA_SITES_SIG=""
     opera_rules_off
     _opera_kill $(opera_hev_pids)
     _opera_kill $(opera_proxy_pids)
@@ -497,7 +570,7 @@ opera_log_trim() {
 
 # Каждая итерация цикла (после phone_dns_reconcile: он считает PHONE_VPN_STABLE)
 opera_reconcile() {
-    local want=0 ifaces="" sig rc _b _cm _bm
+    local want=0 ifaces="" sig rc _b _cm _bm _z
     if [ "$OPERA_TG" != "1" ]; then
         [ "$OPERA_STATE" != "off" ] && opera_down
         return 0
@@ -617,6 +690,23 @@ opera_reconcile() {
         OPERA_EXCL=$(zapret_vpn_uids)
         opera_exempt
         opera_log_trim
+        # сайты, которые не открывает обход: проверка — после новой проверки
+        # сайтов (ZSKIP изменился) или раз в ~10 мин; список изменился —
+        # перестроить перенаправление
+        if [ "$OPERA_SITES" = "1" ] && [ "$OPERA_STATE" = "on" ] && [ "$want" = "1" ]; then
+            OPERA_SITES_TICK=$((OPERA_SITES_TICK + 1))
+            _z=$(cksum < "$OPERA_ZSKIP" 2>/dev/null)
+            if [ "$_z" != "$OPERA_ZSKIP_SIG" ] || [ "$OPERA_SITES_TICK" -ge 20 ]; then
+                OPERA_ZSKIP_SIG="$_z"; OPERA_SITES_TICK=0
+                opera_sites_job
+            fi
+            _z=$(cksum < "$OPERA_SITES_FILE" 2>/dev/null)
+            if [ "$_z" != "$OPERA_SITES_SIG" ]; then
+                OPERA_SITES_SIG="$_z"
+                [ -n "$OPERA_RULES_SIG" ] && OPERA_RULES_SIG=""
+                [ -s "$OPERA_SITES_FILE" ] && log "opera: сайты только через Opera: $(grep -c . "$OPERA_SITES_FILE") ($(cut -d'|' -f1 "$OPERA_SITES_FILE" | head -n 6 | tr '\n' ' ' | sed 's/ $//')), адресов $(opera_site_ips | grep -c .)"
+            fi
+        fi
         [ -n "$OPERA_RULES_SIG" ] && ! opera_rules_ok && {
             log "WATCHDOG: opera: правила пропали, ставлю заново"; OPERA_RULES_SIG=""; }
     fi

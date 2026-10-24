@@ -309,6 +309,18 @@ case "$1" in
         # тот же файл (cat, а не mv): nfqws сам перечитает изменившийся список
         grep -vxF "$d" "$ZLIST_AUTO" > "$ZLIST_AUTO.tmp"; cat "$ZLIST_AUTO.tmp" > "$ZLIST_AUTO"; rm -f "$ZLIST_AUTO.tmp"
         echo "OK" ;;
+    opsites)
+        # сайты через Opera (lib/opera.sh, OPERA_SITES): "хост|адреса|epoch проверки"
+        cat /data/adb/vpn_tether_opera_sites 2>/dev/null
+        ;;
+    opsite-del)
+        # убрать сайт из «через Opera» и больше не брать (демон перестроит правила за ~30с)
+        d=$(printf '%s' "$2" | tr 'A-Z' 'a-z')
+        case "$d" in ''|*[!a-z0-9.-]*|*..*|.*|*.|-*) echo "ERR неверный домен"; exit 1 ;; esac
+        f=/data/adb/vpn_tether_opera_sites
+        grep -qxF "$d" /data/adb/vpn_tether_opera_sites_skip 2>/dev/null || echo "$d" >> /data/adb/vpn_tether_opera_sites_skip
+        [ -f "$f" ] && { grep -v "^$d|" "$f" > "$f.tmp"; mv -f "$f.tmp" "$f"; }
+        echo "OK" ;;
     zauto-clear)
         [ -f "$ZLIST_AUTO" ] && : > "$ZLIST_AUTO"
         echo "OK" ;;

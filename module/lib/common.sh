@@ -140,6 +140,8 @@ update_status() {
         echo "opera_enable=$OPERA_TG"
         echo "opera_country=$OPERA_COUNTRY"
         echo "opera_region=$OPERA_REGION"
+        echo "opera_sites=$OPERA_SITES"
+        echo "opera_sites_n=$(grep -c . "$OPERA_SITES_FILE" 2>/dev/null || echo 0)"
         echo "opera_endpoint=$OPERA_ENDPOINT"
         echo "opera_scope=$OPERA_SCOPE"
         echo "opera_err=$OPERA_ERR"
