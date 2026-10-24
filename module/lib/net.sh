@@ -267,6 +267,15 @@ refresh_tether_ifaces() {
     fi
 }
 
+# Интерфейс — подключение телефона к сети (клиент Wi-Fi), а не раздача: адрес
+# получен по DHCP (флаг dynamic) или в его таблице есть маршрут по умолчанию.
+# 24.10 20:28:55: телефон подключился к Wi-Fi, WAN ещё был мобильным, и
+# эвристика на 20с приняла wlan0 (клиент) за раздачу.
+is_uplink_iface() {
+    $ip -4 addr show "$1" 2>/dev/null | grep -q " dynamic" && return 0
+    $ip route show table all 2>/dev/null | grep -qE "^default via [0-9.]+ dev $1( |\$)"
+}
+
 get_active_tether_ifaces_heuristic() {
     local wan_iface=$(get_wan_iface)
     local def_iface=$(netd_default_iface)
@@ -281,6 +290,7 @@ get_active_tether_ifaces_heuristic() {
         [ "$iface" = "$TUN_NAME" ] && continue
         [ -n "$wan_iface" ] && [ "$iface" = "$wan_iface" ] && continue
         [ -n "$def_iface" ] && [ "$iface" = "$def_iface" ] && continue
+        is_uplink_iface "$iface" && continue
         case " $ifaces " in *" $iface "*) continue ;; esac
         ifaces="$ifaces $iface"
     done
@@ -292,6 +302,7 @@ get_active_tether_ifaces_heuristic() {
         [ "$iface" = "$TUN_NAME" ] && continue
         [ -n "$wan_iface" ] && [ "$iface" = "$wan_iface" ] && continue
         [ -n "$def_iface" ] && [ "$iface" = "$def_iface" ] && continue
+        is_uplink_iface "$iface" && continue
 
         if $ip link show "$iface" >/dev/null 2>&1; then
             local ipaddr=$($ip addr show "$iface" 2>/dev/null | \
