@@ -423,6 +423,13 @@
 #   адреса Cloudflare уводили в Opera чужие сервисы); umeng в исключениях;
 #   пустой замер пула — перемер; отбракованы все регионы — любой живой
 #   сервер пула, а не выбор Opera.
+# v3.16 — Opera убрана целиком (работала нестабильно, постоянно отваливалась):
+#   lib/opera.sh, bin/opera-proxy + hev-socks5-tproxy, ключи OPERA_*, карточка
+#   в WebUI. Поведение как в 3.12; сохранены эвристика раздачи без клиента
+#   Wi-Fi (is_uplink_iface) и WebUI без рамки фокуса у вкладок. При старте —
+#   уборка хвостов 3.13–3.15.1 (цепочки VPN_OPERA_*, ip rule 2990 / таблица
+#   3997, процессы, файлы vpn_tether_opera*); в customize.sh — ключи OPERA_*
+#   из vpn_tether.conf.
 # ============================================================================
 # ============================================================================
 
@@ -597,22 +604,6 @@ ZAPRET_PER_NET=1
 DNS_META_EU=1           # по умолчанию с 3.3
 DNS_META_ECS="185.15.56.0"                       # "откуда" спрашиваем (Амстердам, /24)
 DNS_META_UPSTREAMS="https://dns.google/dns-query" # должен учитывать ECS (Cloudflare — нет)
-# Telegram без VPN через бесплатные прокси Opera (lib/opera.sh). YOTA и др.
-# закрывают Telegram по IP — обход DPI не помогает (24.10: все DC — таймаут,
-# через opera-proxy — ответ за 0.5-2с). Пока VPN не поднят, TCP к подсетям
-# Telegram (zapret/list-telegram-cidr.txt) с телефона и с раздачи (режим
-# «напрямую») прозрачно уходит в opera-proxy. Только TCP: звонки не пойдут.
-# Остальное не трогает: через Opera Google — 12-20 КБ/с, YouTube не берём.
-OPERA_TG=0              # выкл. по умолчанию
-OPERA_COUNTRY=AUTO      # регион серверов Opera: AUTO (самый быстрый живой сервер) | EU | AS | AM
-OPERA_SITES=1           # при OPERA_TG=1: сайты, которые не открывает обход (не открылись ничем при проверке сайтов), а через Opera открываются — тоже через Opera
-# Список бесплатных прокси для регистрации в API Opera (из РФ API напрямую
-# закрыт). Удачный запоминается (/data/adb/vpn_tether_opera_api) и
-# пробуется первым. Пусто = без списка (только запомненные / API напрямую).
-OPERA_API_LIST="https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/all/data.txt"
-# opera-proxy запускается как root:OPERA_GID (su -g); по этой группе его
-# трафик не трогают nfqws, своё перенаправление (иначе петля) и AdGuard.
-OPERA_GID=3997
 # =====================================================================
 
 # ------------------------------------------------------------------------
@@ -658,7 +649,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|OPERA_TG|OPERA_SITES)
+        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
@@ -670,10 +661,6 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
         ZAPRET_STRATEGY) zapret_strategy_valid "$val" || ok=0 ;;
         ZAPRET_ARGS)     zapret_args_valid "$val" || ok=0 ;;
         DNS_META_ECS)    _ip4_valid "$val" || ok=0 ;;
-        OPERA_COUNTRY)   case "$val" in AUTO|EU|AS|AM) ;; *) ok=0 ;; esac ;;
-        OPERA_API_LIST)
-            # http(s)-ссылка; без кавычек и пробелов: уходит в su -c '...'. Пусто — допустимо
-            case "$val" in '') ;; http://*|https://*) case "$val" in *[!A-Za-z0-9._~:/@%+=?\&-]*) ok=0 ;; esac ;; *) ok=0 ;; esac ;;
         DNS_DIRECT) case "$val" in doh|plain) ;; *) ok=0 ;; esac ;;
         DNS_VPN)    case "$val" in dnat|cache|doh) ;; *) ok=0 ;; esac ;;
         DNS_HEALTH_INTERVAL|DNS_HEALTH_RECOVER)
@@ -712,7 +699,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL OPERA_TG OPERA_COUNTRY OPERA_API_LIST OPERA_SITES"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -994,17 +981,6 @@ for _c in $_NQ_CANDIDATES; do
     [ -x "$_c" ] && NFQWS_BIN="$_c" && break
 done
 ZAPRET_DIR="$MODULE_DIR/zapret"
-# --- Telegram через Opera (OPERA_TG, lib/opera.sh) ---
-case "$(uname -m 2>/dev/null)" in
-    aarch64|arm64) _OP_CANDIDATES="$MODULE_DIR/bin/opera-proxy-arm64"; _HV_CANDIDATES="$MODULE_DIR/bin/hev-socks5-tproxy-arm64" ;;
-    armv*|arm)     _OP_CANDIDATES="$MODULE_DIR/bin/opera-proxy-arm";   _HV_CANDIDATES="$MODULE_DIR/bin/hev-socks5-tproxy-arm" ;;
-    *)             _OP_CANDIDATES="$MODULE_DIR/bin/opera-proxy-arm64 $MODULE_DIR/bin/opera-proxy-arm"
-                   _HV_CANDIDATES="$MODULE_DIR/bin/hev-socks5-tproxy-arm64 $MODULE_DIR/bin/hev-socks5-tproxy-arm" ;;
-esac
-OPERA_BIN=""
-for _c in $_OP_CANDIDATES; do [ -x "$_c" ] && OPERA_BIN="$_c" && break; done
-OPERA_HEV_BIN=""
-for _c in $_HV_CANDIDATES; do [ -x "$_c" ] && OPERA_HEV_BIN="$_c" && break; done
 ZAPRET_LIST_DEFAULT="$ZAPRET_DIR/list-default.txt"
 ZAPRET_LIST_YT="$ZAPRET_DIR/list-youtube.txt"        # своя стратегия YouTube (3.4)
 ZAPRET_LIST_EXCL="$ZAPRET_DIR/list-exclude.txt"      # банки/Госуслуги — обход не трогает
@@ -1163,8 +1139,6 @@ LOG_REPEAT_THRESHOLD=5
 . "$MODULE_DIR/lib/youtube.sh"
 # shellcheck source=lib/stealth.sh
 . "$MODULE_DIR/lib/stealth.sh"
-# shellcheck source=lib/opera.sh
-. "$MODULE_DIR/lib/opera.sh"
 # shellcheck source=lib/rules.sh
 . "$MODULE_DIR/lib/rules.sh"
 # shellcheck source=lib/loop.sh
@@ -1180,13 +1154,13 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.15.1 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.16 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
 [ "$STATUS_IN_DESCRIPTION" = "1" ] || set_description "$MODULE_DESC_DEFAULT"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
-log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/per_net=$ZAPRET_PER_NET YT_DEAD=$YT_DEAD_FAILFAST YT_SLOW=$YT_SLOW_RETRY WATCHDOG=$ZAPRET_WATCHDOG/${ZAPRET_WATCHDOG_MIN}m META_EU=$DNS_META_EU/$DNS_META_ECS OPERA_TG=$OPERA_TG/$OPERA_COUNTRY HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
+log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/per_net=$ZAPRET_PER_NET YT_DEAD=$YT_DEAD_FAILFAST YT_SLOW=$YT_SLOW_RETRY WATCHDOG=$ZAPRET_WATCHDOG/${ZAPRET_WATCHDOG_MIN}m META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
 
 disable_hw_offload
 stealth_apply
@@ -1231,7 +1205,7 @@ clear_rules_file
 quic_block_down            # хвосты от убитого демона
 zapret_rules_off
 zapret_kill_all
-opera_down quiet           # opera-proxy, hev и правила от убитого демона
+opera_leftovers_cleanup    # обновились с 3.13–3.15.1 без перезагрузки
 quic_block_apply
 sleep 2
 

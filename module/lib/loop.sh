@@ -198,7 +198,6 @@ CONF_GRP_DNS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FAL
 CONF_GRP_KS="KILL_SWITCH KILL_SWITCH_STRICT"
 CONF_GRP_QUIC="QUIC_BLOCK_APPS"
 CONF_GRP_STEALTH="TETHER_STEALTH TETHER_TTL_STRICT"
-CONF_GRP_OPERA="OPERA_TG OPERA_COUNTRY OPERA_API_LIST OPERA_SITES"
 CONF_GRP_ZAPRET="ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET YT_GGC_BLOCK YT_DEAD_FAILFAST"
 _conf_grp_sig() {   # $1 = имя переменной-результата, дальше ключи
     local _v="$1" _k _o=""; shift
@@ -208,13 +207,12 @@ _conf_grp_sig() {   # $1 = имя переменной-результата, д�
 RELOAD_NEED_REBUILD=1
 
 reload_config() {
-    local old_ks="$KILL_SWITCH" s_dns0 s_ks0 s_quic0 s_zap0 s_dns1 s_ks1 s_quic1 s_zap1 s_st0 s_st1 s_op0 s_op1 what=""
+    local old_ks="$KILL_SWITCH" s_dns0 s_ks0 s_quic0 s_zap0 s_dns1 s_ks1 s_quic1 s_zap1 s_st0 s_st1 what=""
     _conf_grp_sig s_dns0 $CONF_GRP_DNS
     _conf_grp_sig s_ks0 $CONF_GRP_KS
     _conf_grp_sig s_quic0 $CONF_GRP_QUIC
     _conf_grp_sig s_zap0 $CONF_GRP_ZAPRET
     _conf_grp_sig s_st0 $CONF_GRP_STEALTH
-    _conf_grp_sig s_op0 $CONF_GRP_OPERA
     conf_restore_defaults
     USER_CONF_NOTE=""
     load_user_conf
@@ -226,17 +224,15 @@ reload_config() {
     _conf_grp_sig s_quic1 $CONF_GRP_QUIC
     _conf_grp_sig s_zap1 $CONF_GRP_ZAPRET
     _conf_grp_sig s_st1 $CONF_GRP_STEALTH
-    _conf_grp_sig s_op1 $CONF_GRP_OPERA
     RELOAD_NEED_REBUILD=0
     [ "$s_dns0" != "$s_dns1" ] && { what="$what DNS"; RELOAD_NEED_REBUILD=1; }
     [ "$s_ks0" != "$s_ks1" ] && { what="$what kill-switch"; RELOAD_NEED_REBUILD=1; }
     [ "$s_quic0" != "$s_quic1" ] && what="$what QUIC-приложений"
     [ "$s_zap0" != "$s_zap1" ] && what="$what zapret"
     [ "$s_st0" != "$s_st1" ] && what="$what скрытие-раздачи"
-    [ "$s_op0" != "$s_op1" ] && what="$what Telegram-через-Opera"
     log "Настройки перечитаны:${USER_CONF_NOTE:- (всё по умолчанию)}"
     log "Применяю:${what:- ничего не поменялось}$([ "$RELOAD_NEED_REBUILD" = 1 ] && echo ' — пересборка правил раздачи' || echo ' — без пересборки раздачи')"
-    log "Config: DNSPROXY=$DNSPROXY_ENABLE KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE UPSTREAMS=[$DNS_UPSTREAMS] QUIC_BLOCK=[$QUIC_BLOCK_APPS] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/phone=$ZAPRET_PHONE/quic=$ZAPRET_QUIC_BLOCK/per_net=$ZAPRET_PER_NET META_EU=$DNS_META_EU/$DNS_META_ECS OPERA_TG=$OPERA_TG/$OPERA_COUNTRY HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s"
+    log "Config: DNSPROXY=$DNSPROXY_ENABLE KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE UPSTREAMS=[$DNS_UPSTREAMS] QUIC_BLOCK=[$QUIC_BLOCK_APPS] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/phone=$ZAPRET_PHONE/quic=$ZAPRET_QUIC_BLOCK/per_net=$ZAPRET_PER_NET META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s"
 
     if [ "$s_dns0" != "$s_dns1" ]; then
         # DNS: всё с нуля — пересборка поставит заново под новые настройки
@@ -268,13 +264,6 @@ reload_config() {
 
     [ "$s_st0" != "$s_st1" ] && stealth_apply
 
-    if [ "$s_op0" != "$s_op1" ]; then
-        # Telegram через Opera: всё снять, цикл поднимет заново под новые настройки
-        opera_down
-        OPERA_NOSUPPORT=0
-        OPERA_RANK_TS=0     # замер под прошлый регион (AUTO -> EU дал бы сервер AS)
-    fi
-
     if [ "$s_zap0" != "$s_zap1" ]; then
         # zapret: снять всё, цикл поднимет заново под новые настройки (~2с)
         zapret_down
@@ -301,7 +290,6 @@ cleanup_on_exit() {
     PHONE_DNS_ON=0
     quic_block_down
     zapret_down
-    opera_down
     stealth_off
     dnsproxy_stop
     dnsproxy_port_guard_down
@@ -332,7 +320,6 @@ monitor_loop() {
         handle_change || log "ERROR: handle_change failed, continuing anyway"
         # отдельно от handle_change: тот рано выходит, когда хотспот выключен
         phone_dns_reconcile
-        opera_reconcile     # после phone_dns_reconcile: тот считает PHONE_VPN_STABLE
         dns_health
         [ $((_loop_count % 15)) -eq 0 ] && quic_block_apply
         [ $((_loop_count % 15)) -eq 7 ] && meta_eu_watchdog

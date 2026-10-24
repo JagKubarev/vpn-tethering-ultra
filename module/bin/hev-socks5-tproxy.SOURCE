@@ -1,5 +1,0 @@
-hev-socks5-tproxy 2.13.1 — https://github.com/heiher/hev-socks5-tproxy (MIT, см. hev-socks5-tproxy.LICENSE)
-https://github.com/heiher/hev-socks5-tproxy/releases/tag/2.13.1
-sha256 hev-socks5-tproxy-linux-arm64   (-> hev-socks5-tproxy-arm64) 89fb1d487e4be2034893a8029e3cb0b5037e691358a0554bc8fa8f2763b8de9a
-sha256 hev-socks5-tproxy-linux-arm32v7 (-> hev-socks5-tproxy-arm)   533faeca3f3fd695adfff63610d9f7b19d0c86d576016f4758cf25993768aa8c
-Статические сборки (musl). Только TPROXY: адрес назначения берётся из сокета (getsockname), nat REDIRECT не подходит.

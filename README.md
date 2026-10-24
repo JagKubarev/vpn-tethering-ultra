@@ -59,10 +59,6 @@
   телефона. Своя стратегия для каждой сети, подбор в WebUI (~2 или ~7 мин), сторож, который
   сам чинит сломавшуюся стратегию, отдельные стратегии для отдельных сайтов. Банки и Госуслуги
   обход не трогает никогда.
-- **Telegram без VPN.** Если оператор закрыл Telegram по IP, пока VPN выключен, соединения
-  с серверами Telegram (телефон и раздача) прозрачно идут через бесплатный прокси Opera —
-  без настройки прокси в самом Telegram. Туда же — сайты, которые не открыла ни одна стратегия
-  обхода, но открывает Opera. Только TCP: звонки не работают. Выключено по умолчанию.
 - **YouTube на мобильном интернете.** Отбой «молчащих» видеосерверов, обрыв медленных
   видеосоединений, чтобы плеер ушёл на быстрый сервер, отдельная стратегия для YouTube,
   по желанию — отбой кэшей оператора (GGC), замер «Скорость YouTube».
@@ -139,8 +135,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 
 **Помогает ли обход от любой блокировки?**
 Нет. zapret работает против блокировок по имени сайта (SNI). Против блокировок по IP-адресу
-он не помогает — для таких сайтов нужен VPN (для Telegram есть «Telegram без VPN» во вкладке
-«Обход»). Обход действует только на трафик мимо VPN:
+он не помогает — для таких сайтов нужен VPN. Обход действует только на трафик мимо VPN:
 туннель и соединения VPN-клиентов модуль не трогает.
 
 **Ноутбук на Windows не выходит в интернет при включённом строгом TTL.**
@@ -173,7 +168,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 Нумерация `X.Y.Z`: **X** — этап, **Y** — заметная функция, **Z** — исправления.
 `versionCode` = X·10000 + Y·100 + Z (3.8.1 → 30801). До 23.10.2026 у модуля было две
 нумерации (внешняя 2.x и внутренняя 3.x-hybrid) — таблица соответствия в [`CHANGELOG.md`](CHANGELOG.md).
-Теги `v1.0` … `v3.15.1`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
+Теги `v1.0` … `v3.16`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
 
 <details>
 <summary>Кратко по версиям</summary>
@@ -221,9 +216,8 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 | 3.11.1 | Исправления: статус при загрузке без раздачи и VPN, автосписок не стирает неприменённые сайты, сброс pid при загрузке. |
 | 3.11.2 | DNS: первый запасной DoH — dagami; в откате проверяется и основной DoH — возврат на него без ожидания запасных. |
 | 3.12 | Первый публичный релиз: новое описание репозитория, справочник настроек в `docs/settings.md`; список DNS в WebUI в порядке запасных. |
-| 3.13 | Telegram без VPN через прокси Opera (`OPERA_TG`), эвристика раздачи не путает клиент Wi-Fi с точкой доступа. |
-| 3.14 | Opera: самый быстрый живой сервер из пула, регион «Самый быстрый» с исключением отказавшего региона, быстрая проверка после выключения VPN. |
-| 3.15 | Сайты, которые не открывает обход, — через Opera (`OPERA_SITES`), список в WebUI. |
+| 3.13–3.15.1 | Telegram и сайты без VPN через прокси Opera (убрано в 3.16); эвристика раздачи не путает клиент Wi-Fi с точкой доступа; WebUI без рамки фокуса у вкладок. |
+| 3.16 | Прокси Opera убран целиком (работал нестабильно), поведение как в 3.12 с исправлениями 3.13–3.14; хвосты старых версий убираются при старте. |
 
 </details>
 
@@ -236,12 +230,9 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 |---|---|---|---|
 | `nfqws` | из zapret v72.13 | [bol-van/zapret](https://github.com/bol-van/zapret) | MIT ([`nfqws.LICENSE`](module/bin/nfqws.LICENSE)) |
 | `dnsproxy` | v0.86.0 | [AdguardTeam/dnsproxy](https://github.com/AdguardTeam/dnsproxy) | Apache-2.0 ([`dnsproxy.LICENSE`](module/bin/dnsproxy.LICENSE)) |
-| `opera-proxy` | v1.31.0 | [Alexey71/opera-proxy](https://github.com/Alexey71/opera-proxy) (форк [Snawoot/opera-proxy](https://github.com/Snawoot/opera-proxy)) | MIT ([`opera-proxy.LICENSE`](module/bin/opera-proxy.LICENSE)) |
-| `hev-socks5-tproxy` | 2.13.1 | [heiher/hev-socks5-tproxy](https://github.com/heiher/hev-socks5-tproxy) | MIT ([`hev-socks5-tproxy.LICENSE`](module/bin/hev-socks5-tproxy.LICENSE)) |
 | `conntrack` | v1.4.8 (статическая сборка) | conntrack-tools, [netfilter.org](https://www.netfilter.org/projects/conntrack-tools/) | GPL-2.0 ([`conntrack.LICENSE`](module/bin/conntrack.LICENSE); рецепт сборки — [`conntrack.SOURCE`](module/bin/conntrack.SOURCE), исходники — [`third_party/conntrack/`](third_party/conntrack/)) |
 
-Спасибо авторам zapret (bol-van), dnsproxy (AdGuard), netfilter, opera-proxy (Snawoot,
-Alexey71), hev-socks5-tproxy (heiher) и приложения Opera Proxy (SLY-F0X), подсказавшего идею. Некоторые идеи подбора
+Спасибо авторам zapret (bol-van), dnsproxy (AdGuard) и netfilter. Некоторые идеи подбора
 стратегий взяты из ZDT-D, byedpi (`--auto`) и zapret2 (circular), как указано в журнале
 изменений. Спасибо участникам темы на 4PDA за тесты на своих устройствах и сетях.
 
@@ -279,9 +270,7 @@ clients and the phone itself, with health checks, an ordered fallback chain and 
 for Meta domains (ECS); **DPI circumvention** with zapret's `nfqws` for traffic outside the VPN —
 per-network strategies, a quick/full strategy scanner, a self-repairing watchdog, per-site
 strategies and an exclusion list for banks and government services; **YouTube helpers** for mobile
-networks (fail-fast on silent video servers, dropping slow video connections); optional
-**Telegram without VPN** (TCP to Telegram subnets transparently goes through Opera's free proxy
-while the VPN is down); tethering stealth
+networks (fail-fast on silent video servers, dropping slow video connections); tethering stealth
 (TTL 63) and per-app QUIC blocking.
 
 Download the zip from [Releases](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest),
@@ -293,6 +282,4 @@ documentation are in Russian; the full reference is [docs/settings.md](docs/sett
 
 The module's own code is licensed under **GPL-3.0**. Bundled third-party binaries: `nfqws` from
 [zapret](https://github.com/bol-van/zapret) v72.13 (MIT), [dnsproxy](https://github.com/AdguardTeam/dnsproxy)
-v0.86.0 (Apache-2.0), `conntrack` v1.4.8 from conntrack-tools (GPL-2.0, sources in `third_party/`),
-[opera-proxy](https://github.com/Alexey71/opera-proxy) v1.31.0 (MIT) and
-[hev-socks5-tproxy](https://github.com/heiher/hev-socks5-tproxy) 2.13.1 (MIT).
+v0.86.0 (Apache-2.0), `conntrack` v1.4.8 from conntrack-tools (GPL-2.0, sources in `third_party/`).

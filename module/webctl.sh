@@ -199,8 +199,6 @@ case "$1" in
             echo; echo "=== свои стратегии сайтов"; cat "$ZALT" 2>/dev/null
             echo; echo "=== автосписок: домен|когда|сбросы/зависания/редиректы|кто"; sh "$MODDIR/webctl.sh" zauto-info 2>/dev/null
             echo; echo "=== nfqws (последние 50 строк)"; tail -n 50 /data/local/tmp/vpn_tether_nfqws.log 2>/dev/null
-            echo; echo "=== opera-proxy (последние 80 строк)"; tail -n 80 /data/local/tmp/vpn_tether_opera.log 2>/dev/null
-            echo; echo "=== hev-socks5-tproxy (последние 30 строк)"; tail -n 30 /data/local/tmp/vpn_tether_hev.log 2>/dev/null
             echo; echo "=== ip rule"; ip rule 2>/dev/null
             echo; echo "=== цепочки модуля (filter / nat / mangle)"
             for t in filter nat mangle; do iptables -w 2 -t $t -S 2>/dev/null | grep -E 'VPN_|ZAPRET' | sed "s/^/$t: /"; done
@@ -308,18 +306,6 @@ case "$1" in
         [ -f "$ZLIST_AUTO" ] || { echo "OK"; exit 0; }
         # тот же файл (cat, а не mv): nfqws сам перечитает изменившийся список
         grep -vxF "$d" "$ZLIST_AUTO" > "$ZLIST_AUTO.tmp"; cat "$ZLIST_AUTO.tmp" > "$ZLIST_AUTO"; rm -f "$ZLIST_AUTO.tmp"
-        echo "OK" ;;
-    opsites)
-        # сайты через Opera (lib/opera.sh, OPERA_SITES): "хост|адреса|epoch проверки"
-        cat /data/adb/vpn_tether_opera_sites_ip 2>/dev/null
-        ;;
-    opsite-del)
-        # убрать сайт из «через Opera» и больше не брать (демон перестроит правила за ~30с)
-        d=$(printf '%s' "$2" | tr 'A-Z' 'a-z')
-        case "$d" in ''|*[!a-z0-9.-]*|*..*|.*|*.|-*) echo "ERR неверный домен"; exit 1 ;; esac
-        f=/data/adb/vpn_tether_opera_sites_ip
-        grep -qxF "$d" /data/adb/vpn_tether_opera_sites_skip 2>/dev/null || echo "$d" >> /data/adb/vpn_tether_opera_sites_skip
-        [ -f "$f" ] && { grep -v "^$d|" "$f" > "$f.tmp"; mv -f "$f.tmp" "$f"; }
         echo "OK" ;;
     zauto-clear)
         [ -f "$ZLIST_AUTO" ] && : > "$ZLIST_AUTO"

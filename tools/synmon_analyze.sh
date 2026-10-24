@@ -1,10 +1,10 @@
 #!/system/bin/sh
 # synmon_analyze.sh — разбор tools/synmon.sh: адреса, которые ни разу не
-# соединились, проверка напрямую и через opera-proxy (SOCKS 127.0.0.1:18080).
+# соединились, проверка напрямую и PTR.
 O=/data/local/tmp/synmon
 cat $O/info.txt
 echo "SYN-unreplied records: $(wc -l < $O/syn.txt), distinct IPs: $(awk '{print $3}' $O/syn.txt | sort -u | wc -l), established IPs: $(wc -l < $O/est.txt)"
-# per ip: distinct connections (src:port), skip IPs that ever established, skip Telegram (идёт через Opera)
+# per ip: distinct connections (src:port), skip IPs that ever established, skip Telegram (закрыт по IP, и так известно)
 awk '{k=$3" "$4; c[k" "$5]=1} END{for (x in c){split(x,a," "); n[a[1]" "a[2]]++} for (y in n) print n[y], y}' $O/syn.txt | sort -rn > $O/cand_all.txt
 : > $O/cand.txt
 while read n ip port; do
@@ -16,7 +16,6 @@ echo "candidates (>=2 попыток, ни разу не соединились)
 W=$(sed -n 's/^wan=//p' /data/adb/modules/vpn-to-hotspot-usb/status)
 head -n 40 $O/cand.txt | while read n ip port; do
   d=$(su -g 3999 -c "curl -s -o /dev/null -m 3 --interface $W -w '%{http_code}' http://$ip:$port/" 2>/dev/null)
-  o=$(su -g 3997 -c "curl -s -o /dev/null -m 6 --socks5 127.0.0.1:18080 -w '%{http_code}' http://$ip:$port/" 2>/dev/null)
   ptr=$(/data/adb/ksu/bin/busybox nslookup $ip 2>/dev/null | sed -n 's/.*name = //p; s/^Name:[[:space:]]*//p' | grep -v "^$ip$" | head -1)
-  echo "$n $ip:$port direct=$d opera=$o ${ptr:-?}"
+  echo "$n $ip:$port direct=$d ${ptr:-?}"
 done
