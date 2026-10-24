@@ -89,7 +89,7 @@ DNSPROXY_ENABLE=1
 #     через бесплатный прокси Opera (только TCP, без звонков).
 #OPERA_TG=0
 # Регион серверов Opera: EU, AS или AM
-#OPERA_COUNTRY=EU
+#OPERA_COUNTRY=AUTO
 
 # --- Защита -------------------------------------------------
 # Выбран режим VPN, а VPN не подключён:

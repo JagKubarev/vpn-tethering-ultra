@@ -63,6 +63,24 @@ OPERA_CA_INFO=""
 OPERA_NOSUPPORT=0       # 1 = ядро без TPROXY/бинарей нет — не пытаться до перечитывания настроек
 OPERA_WAN=""            # WAN, на котором последний раз проверяли сервер Opera
 OPERA_PROBE_DC="149.154.167.51:443"   # DC2 Telegram: проверка «через Opera доходит»
+# Серверы Opera: «регион ip» по строке. 24.10: регистрация даёт по 2 сервера
+# на регион, а ТСПУ режет часть адресов 77.111.x по IP (на Dom.ru 8 из 18) —
+# повезёт ли с парой, случайно. Но учётка региона принимается ЛЮБЫМ его
+# сервером (-override-proxy-address), поэтому держим список известных
+# адресов (встроенные + всё, что отдавал discover), меряем TCP-подключение к
+# каждому через WAN и берём самый быстрый живой.
+OPERA_POOL_FILE="/data/adb/vpn_tether_opera_pool"
+OPERA_POOL_SEED="EU 77.111.244.37 EU 77.111.244.47 EU 77.111.244.209 EU 77.111.244.210 EU 77.111.247.19 EU 77.111.247.23 EU 77.111.247.32 EU 77.111.247.42 EU 77.111.247.78 EU 77.111.247.79 EU 77.111.247.80 EU 77.111.247.106 AS 77.111.245.10 AS 77.111.245.11 AS 77.111.245.12 AS 77.111.245.17 AM 77.111.246.14 AM 77.111.246.26 AM 77.111.246.28 AM 77.111.246.40 AM 77.111.246.62"
+OPERA_RANK=""           # живые серверы региона: «мс ip» по возрастанию (последний замер)
+OPERA_RANK_TS=0
+OPERA_BAD=""            # серверы, не пропустившие Telegram в этой сети (до смены сети / 10 мин)
+OPERA_BADREG=""         # регионы, где отказали два сервера подряд (AUTO их не берёт; столько же живут)
+OPERA_LASTFAIL_REG=""
+OPERA_HOPS=0            # переездов подряд без удачной проверки
+OPERA_WANT_PREV=0       # want прошлой итерации: 0 -> 1 = VPN только что выключили
+OPERA_OVERRIDE=""       # сервер, заданный opera-proxy через -override-proxy-address
+OPERA_REGION=""         # регион, в котором зарегистрирован opera-proxy (при AUTO — регион лучшего сервера)
+OPERA_RERANK=0
 
 opera_cidrs() {
     sed 's/#.*//' "$OPERA_CIDR_FILE" 2>/dev/null | tr -d ' \t\r' | \
@@ -155,8 +173,68 @@ opera_spare_fetch() {
         rm -f "$1.dl" "$1.new"' opera "$OPERA_API_SPARE" "$OPERA_API_SPARE_URL" </dev/null >/dev/null 2>&1 &
 }
 
+# Адреса пула для региона (встроенные + выученные), по одному в строке
+# «регион ip» для выбранного региона (AUTO — все регионы)
+opera_pool_list() {
+    { echo "$OPERA_POOL_SEED" | awk '{for (i = 1; i < NF; i += 2) print $i, $(i + 1)}'
+      cat "$OPERA_POOL_FILE" 2>/dev/null; } | \
+        awk -v r="$OPERA_COUNTRY" '(r == "AUTO" || $1 == r) && $1 ~ /^(EU|AS|AM)$/ && $2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && !s[$2]++ {print $1, $2}'
+}
+opera_pool_ips() { opera_pool_list | awk '{print $2}'; }
+opera_ip_region() { opera_pool_list | awk -v a="$1" '$2 == a {print $1; exit}'; }
+
+# Запомнить серверы, которые отдал discover (строка лога opera-proxy)
+opera_pool_learn() {
+    local a
+    for a in $(sed -n 's/.*Discovered endpoints: \[\(.*\)\].*/\1/p' "$OPERA_LOG" 2>/dev/null | tail -n 1 | sed 's/:443//g'); do
+        case "$a" in *[!0-9.]*|"") continue ;; esac
+        opera_pool_ips | grep -qxF "$a" || echo "${OPERA_REGION:-$OPERA_COUNTRY} $a" >> "$OPERA_POOL_FILE"
+    done
+}
+
+# Замер: TCP-подключение к каждому серверу региона через WAN (параллельно,
+# ~2с на всё). Живой — ответил (HTTP 400 на голый запрос). OPERA_RANK = «мс ip».
+opera_pool_rank() {
+    local d a w="" g="" pids=""
+    command -v curl >/dev/null 2>&1 || return 1
+    d="/data/local/tmp/vpn_tether_opera_rank"
+    rm -rf "$d"; mkdir -p "$d" || return 1
+    [ -n "$LAST_WAN_IFACE" ] && w="--interface $LAST_WAN_IFACE"
+    # от группы dnsproxy: мимо AdGuard, nfqws и нашего перенаправления
+    [ "$DNSPROXY_SU_G" = "1" ] && [ -n "$DNSPROXY_GID" ] && g="$DNSPROXY_GID"
+    for a in $(opera_pool_ips); do
+        if [ -n "$g" ]; then
+            su -g "$g" -c "curl -s -o /dev/null -m 2 $w -w '%{http_code} %{time_connect}' http://$a:443/" > "$d/$a" 2>/dev/null &
+            pids="$pids $!"
+        else
+            curl -s -o /dev/null -m 2 $w -w '%{http_code} %{time_connect}' "http://$a:443/" > "$d/$a" 2>/dev/null &
+            pids="$pids $!"
+        fi
+    done
+    # только свои замеры: голый wait ждал бы и opera-proxy/hev (дети демона)
+    [ -n "$pids" ] && wait $pids
+    OPERA_RANK=$(for a in "$d"/*; do
+        [ -f "$a" ] || continue
+        set -- $(cat "$a")
+        [ "${1:-000}" != "000" ] && [ -n "$2" ] && echo "$2 ${a##*/}"
+    done | awk '{printf "%d %s\n", $1 * 1000, $2}' | sort -n)
+    rm -rf "$d"
+    OPERA_RANK_TS=$(date +%s)
+    [ -n "$OPERA_RANK" ]
+}
+
+# Лучший живой сервер, кроме уже не пропустивших Telegram в этой сети
+opera_pool_best() {
+    echo "$OPERA_RANK" | while read -r ms a; do
+        [ -n "$a" ] || continue
+        case " $OPERA_BAD " in *" $a "*) continue ;; esac
+        [ -n "$OPERA_BADREG" ] && case " $OPERA_BADREG " in *" $(opera_ip_region "$a") "*) continue ;; esac
+        echo "$a"; break
+    done
+}
+
 opera_start() {
-    local args via="" cand
+    local args via="" cand best
     _opera_kill $(opera_proxy_pids)
     if [ -z "$OPERA_SU_G" ]; then
         OPERA_SU_G=0
@@ -169,7 +247,15 @@ opera_start() {
     # -server-selection first: «fastest» меряет скачивание с ajax.googleapis.com
     # через каждый сервер, а Google через Opera с YOTA почти не качается —
     # opera-proxy молча завершался через ~17с (24.10, 4 из 4 запусков)
-    args="-bind-address 127.0.0.1:$OPERA_PORT -socks-mode -country $OPERA_COUNTRY -server-selection first -verbosity 20 -cafile $OPERA_CA"
+    # самый быстрый живой сервер из пула (замер свежий — иначе мерим сейчас).
+    # Учётка выдаётся на регион, поэтому при AUTO регион — по этому серверу.
+    [ $(( $(date +%s) - OPERA_RANK_TS )) -lt 120 ] || opera_pool_rank
+    best=$(opera_pool_best)
+    OPERA_OVERRIDE="$best"
+    OPERA_REGION="$OPERA_COUNTRY"
+    [ "$OPERA_REGION" = "AUTO" ] && { OPERA_REGION=$(opera_ip_region "$best"); [ -n "$OPERA_REGION" ] || OPERA_REGION=EU; }
+    args="-bind-address 127.0.0.1:$OPERA_PORT -socks-mode -country $OPERA_REGION -server-selection first -verbosity 20 -cafile $OPERA_CA"
+    [ -n "$best" ] && args="$args -override-proxy-address $best:443"
     args="$args -bootstrap-dns https://dns.comss.one/dns-query,https://dns.adguard-dns.com/dns-query,tls://9.9.9.9:853,https://1.1.1.3/dns-query"
     # Чётная попытка — список по ссылке (не скачался — файл); нечётная (после
     # сбоя) — только файл: удачные раньше + запасной список.
@@ -200,7 +286,7 @@ opera_start() {
     OPERA_STATE="starting"
     OPERA_ENDPOINT=""
     OPERA_ERR=""
-    log "opera: запускаю opera-proxy (регион $OPERA_COUNTRY, gid $([ "$OPERA_SU_G" = 1 ] && echo "$OPERA_GID" || echo 0), прокси API: $via; CA: $OPERA_CA_INFO)"
+    log "opera: запускаю opera-proxy (регион $([ "$OPERA_COUNTRY" = AUTO ] && echo "самый быстрый → $OPERA_REGION" || echo "$OPERA_REGION"), сервер ${best:-по выбору Opera}$([ -n "$OPERA_RANK" ] && echo " — живых $(echo "$OPERA_RANK" | grep -c .) из $(opera_pool_ips | grep -c .), $(echo "$OPERA_RANK" | awk -v b="$best" '$2 == b {print $1 "мс"}')"), gid $([ "$OPERA_SU_G" = 1 ] && echo "$OPERA_GID" || echo 0), прокси API: $via; CA: $OPERA_CA_INFO)"
     phone_status_refresh
 }
 
@@ -215,8 +301,11 @@ opera_started() {
         chmod 600 "$OPERA_API_CACHE" 2>/dev/null
     fi
     ep=$(sed -n 's/.*Selected endpoint address: \([^ ]*\).*/\1/p; s/.*Endpoint override: \([^ ]*\).*/\1/p' "$OPERA_LOG" 2>/dev/null | tail -n 1)
+    # с -override-proxy-address строки «Selected endpoint» нет
+    [ -z "$ep" ] && [ -n "$OPERA_OVERRIDE" ] && ep="$OPERA_OVERRIDE:443"
     OPERA_ENDPOINT="$ep"
     OPERA_WAN="$LAST_WAN_IFACE"
+    opera_pool_learn
     OPERA_FAILS=0
     log "opera: opera-proxy готов за ${secs}с (pid $(opera_proxy_pids | head -n 1), сервер ${ep:-?}${c:+, прокси API $c})"
 }
@@ -246,7 +335,6 @@ EOF
     while [ $i -lt 10 ]; do
         sleep 0.2
         [ -n "$(opera_hev_pids)" ] && _opera_listening "$OPERA_TP_PORT" && return 0
-        i=$((i + 1))
     done
     return 1
 }
@@ -332,15 +420,23 @@ opera_rules_ok() {
 # Сервер Opera доходит? Запрос к DC Telegram через SOCKS opera-proxy (curl от
 # группы opera — мимо перенаправления и nfqws). 24.10: на Wi-Fi Dom.ru часть
 # серверов 77.111.x не отвечала, а opera-proxy жил — Telegram висел.
+# Серверы Opera через раз отвечают 502 (перегружены) — до 3 попыток до первой
+# удачной; 502 приходит быстро. Но сначала TCP до самого сервера (2с): если он
+# закрыт по IP, три попытки по 4с — зря.
 opera_probe() {
-    local code
+    local code n=0 g="sh -c" a="${OPERA_ENDPOINT%:*}"
     command -v curl >/dev/null 2>&1 || return 0
-    if [ "$OPERA_SU_G" = "1" ]; then
-        code=$(su -g "$OPERA_GID" -c "curl -s -o /dev/null -m 6 --socks5 127.0.0.1:$OPERA_PORT -w '%{http_code}' http://$OPERA_PROBE_DC/" 2>/dev/null)
-    else
-        code=$(curl -s -o /dev/null -m 6 --socks5 "127.0.0.1:$OPERA_PORT" -w '%{http_code}' "http://$OPERA_PROBE_DC/" 2>/dev/null)
+    [ "$OPERA_SU_G" = "1" ] && g="su -g $OPERA_GID -c"
+    if [ -n "$a" ]; then
+        code=$($g "curl -s -o /dev/null -m 2 ${LAST_WAN_IFACE:+--interface $LAST_WAN_IFACE} -w '%{http_code}' http://$a:443/" 2>/dev/null)
+        [ -n "$code" ] && [ "$code" != "000" ] || return 1
     fi
-    [ -n "$code" ] && [ "$code" != "000" ]
+    while [ $n -lt 3 ]; do
+        code=$($g "curl -s -o /dev/null -m 4 --socks5 127.0.0.1:$OPERA_PORT -w '%{http_code}' http://$OPERA_PROBE_DC/" 2>/dev/null)
+        [ -n "$code" ] && [ "$code" != "000" ] && return 0
+        n=$((n + 1))
+    done
+    return 1
 }
 
 opera_fail() {   # причина [fast — сервер не отвечает: сразу другой]
@@ -390,7 +486,7 @@ opera_log_trim() {
 
 # Каждая итерация цикла (после phone_dns_reconcile: он считает PHONE_VPN_STABLE)
 opera_reconcile() {
-    local want=0 ifaces="" sig rc
+    local want=0 ifaces="" sig rc _fast _b _cm _bm
     if [ "$OPERA_TG" != "1" ]; then
         [ "$OPERA_STATE" != "off" ] && opera_down
         return 0
@@ -429,7 +525,7 @@ opera_reconcile() {
                 return 0
             fi
             OPERA_STATE="on"
-            OPERA_TICK=15
+            OPERA_TICK=12   # первая проверка через ~6с: сразу после старта сервер ещё «прогревается»
             phone_status_refresh ;;
         on)
             if [ -z "$(opera_proxy_pids)" ]; then
@@ -444,17 +540,62 @@ opera_reconcile() {
     esac
 
     OPERA_TICK=$((OPERA_TICK + 1))
-    # сменилась сеть — сервер Opera мог стать недоступен: проверить сразу
-    [ "$OPERA_STATE" = "on" ] && [ "$LAST_WAN_IFACE" != "$OPERA_WAN" ] && OPERA_TICK=15
+    OPERA_RERANK=$((OPERA_RERANK + 1))
+    # сменилась сеть — сервер Opera мог стать недоступен: проверить сразу,
+    # прошлые «не пропустил Telegram» и замер пула — от старой сети
+    if [ "$OPERA_STATE" = "on" ] && [ "$LAST_WAN_IFACE" != "$OPERA_WAN" ]; then
+        OPERA_TICK=15; OPERA_BAD=""; OPERA_BADREG=""; OPERA_RANK_TS=0
+    fi
+    # VPN только что выключили — проверить сервер до того, как вернём правила
+    # (одна проверка, а не две: важна скорость; не прошла — сразу другой сервер)
+    _fast=0
+    [ "$want" = "1" ] && [ "$OPERA_WANT_PREV" = "0" ] && [ "$OPERA_STATE" = "on" ] && { OPERA_TICK=15; _fast=1; }
+    OPERA_WANT_PREV="$want"
+    # ~10 мин: перемерить пул (через WAN — работает и при поднятом VPN, к его
+    # выключению лучший сервер уже известен). Текущий умер или есть заметно
+    # быстрее (вдвое и на 40+ мс) — переехать.
+    if [ "$OPERA_RERANK" -ge 300 ] && [ "$OPERA_STATE" = "on" ]; then
+        OPERA_RERANK=0
+        OPERA_BAD=""; OPERA_BADREG=""
+        if opera_pool_rank && [ "$want" = "1" ] && [ -n "$OPERA_OVERRIDE" ]; then
+            _b=$(opera_pool_best)
+            _cm=$(echo "$OPERA_RANK" | awk -v a="$OPERA_OVERRIDE" '$2 == a {print $1}')
+            _bm=$(echo "$OPERA_RANK" | awk -v a="$_b" '$2 == a {print $1}')
+            if [ -n "$_b" ] && [ "$_b" != "$OPERA_OVERRIDE" ] && \
+               { [ -z "$_cm" ] || [ $((_bm * 2)) -lt "$_cm" -a $((_cm - _bm)) -gt 40 ]; }; then
+                log "opera: перехожу на $_b (${_bm}мс) — $OPERA_OVERRIDE $([ -z "$_cm" ] && echo "больше не отвечает" || echo "${_cm}мс")"
+                opera_rules_off
+                opera_start
+                return 0
+            fi
+        fi
+    fi
     if [ "$OPERA_TICK" -ge 15 ]; then   # ~30с: дорогое (stat пакетов, iptables -C)
         OPERA_TICK=0
         if [ "$OPERA_STATE" = "on" ] && [ "$want" = "1" ]; then
             OPERA_WAN="$LAST_WAN_IFACE"
-            # две неудачи подряд — перезапуск: opera-proxy возьмёт другой сервер
-            if ! opera_probe && ! opera_probe; then
+            # не пропустил Telegram (проверка сама делает до 3 попыток) — сервер
+            # в чёрный список сети и сразу лучший живой из пула. Два отказа
+            # подряд в одном регионе — отказывает регион (24.10: EU и AM
+            # отвечали 502 на всё, AS работал) — при AUTO его серверы не берём.
+            # 6 переездов подряд — пауза с нарастанием, чтобы не долбить Opera.
+            if ! opera_probe; then
+                [ -n "$OPERA_OVERRIDE" ] && OPERA_BAD="$OPERA_BAD $OPERA_OVERRIDE"
+                [ "$OPERA_COUNTRY" = "AUTO" ] && [ "$OPERA_LASTFAIL_REG" = "$OPERA_REGION" ] && \
+                    case " $OPERA_BADREG " in *" $OPERA_REGION "*) ;; *) OPERA_BADREG="$OPERA_BADREG $OPERA_REGION" ;; esac
+                OPERA_LASTFAIL_REG="$OPERA_REGION"
+                OPERA_HOPS=$((OPERA_HOPS + 1))
+                OPERA_RANK_TS=0
+                if [ "$OPERA_HOPS" -ge 6 ]; then
+                    OPERA_HOPS=0; OPERA_BAD=""; OPERA_BADREG=""; OPERA_LASTFAIL_REG=""
+                    opera_fail "серверы Opera не пропускают Telegram (6 подряд)"
+                    return 0
+                fi
                 opera_fail "сервер Opera ${OPERA_ENDPOINT:-?} не отвечает${OPERA_WAN:+ (сеть $OPERA_WAN)}" fast
+                OPERA_RETRY=0
                 return 0
             fi
+            OPERA_HOPS=0; OPERA_LASTFAIL_REG=""
         fi
         OPERA_EXCL=$(zapret_vpn_uids)
         opera_exempt

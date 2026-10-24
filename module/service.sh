@@ -589,7 +589,7 @@ DNS_META_UPSTREAMS="https://dns.google/dns-query" # должен учитыва�
 # «напрямую») прозрачно уходит в opera-proxy. Только TCP: звонки не пойдут.
 # Остальное не трогает: через Opera Google — 12-20 КБ/с, YouTube не берём.
 OPERA_TG=0              # выкл. по умолчанию
-OPERA_COUNTRY=EU        # регион серверов Opera: EU | AS | AM
+OPERA_COUNTRY=AUTO      # регион серверов Opera: AUTO (самый быстрый живой сервер) | EU | AS | AM
 # Список бесплатных прокси для регистрации в API Opera (из РФ API напрямую
 # закрыт). Удачный запоминается (/data/adb/vpn_tether_opera_api) и
 # пробуется первым. Пусто = без списка (только запомненные / API напрямую).
@@ -654,7 +654,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
         ZAPRET_STRATEGY) zapret_strategy_valid "$val" || ok=0 ;;
         ZAPRET_ARGS)     zapret_args_valid "$val" || ok=0 ;;
         DNS_META_ECS)    _ip4_valid "$val" || ok=0 ;;
-        OPERA_COUNTRY)   case "$val" in EU|AS|AM) ;; *) ok=0 ;; esac ;;
+        OPERA_COUNTRY)   case "$val" in AUTO|EU|AS|AM) ;; *) ok=0 ;; esac ;;
         OPERA_API_LIST)
             # http(s)-ссылка; без кавычек и пробелов: уходит в su -c '...'. Пусто — допустимо
             case "$val" in '') ;; http://*|https://*) case "$val" in *[!A-Za-z0-9._~:/@%+=?\&-]*) ok=0 ;; esac ;; *) ok=0 ;; esac ;;

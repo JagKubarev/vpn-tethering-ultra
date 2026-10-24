@@ -139,6 +139,7 @@ update_status() {
         echo "opera=$OPERA_STATE"
         echo "opera_enable=$OPERA_TG"
         echo "opera_country=$OPERA_COUNTRY"
+        echo "opera_region=$OPERA_REGION"
         echo "opera_endpoint=$OPERA_ENDPOINT"
         echo "opera_scope=$OPERA_SCOPE"
         echo "opera_err=$OPERA_ERR"
