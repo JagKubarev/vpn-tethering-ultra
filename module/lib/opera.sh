@@ -145,18 +145,22 @@ opera_sites_job() {
         # чего (даже до ya.ru) — все адреса выглядели «закрытыми по IP», в список
         # попал бы и API Claude. Контроль не прошёл до или после прогона — результат
         # выбрасываем, старый список остаётся.
-        ctl_ok() {
-            local a c
-            for a in 77.88.8.8 1.1.1.1; do
-                if [ -n "$g" ]; then
-                    c=$(su -g "$g" -c "curl -s -o /dev/null -m 3 ${LAST_WAN_IFACE:+--interface $LAST_WAN_IFACE} -w '%{http_code}' http://$a:443/" 2>/dev/null)
-                else
-                    c=$(curl -s -o /dev/null -m 3 ${LAST_WAN_IFACE:+--interface $LAST_WAN_IFACE} -w '%{http_code}' "http://$a:443/" 2>/dev/null)
-                fi
-                [ -n "$c" ] && [ "$c" != "000" ] && return 0
-            done
+        # TCP до $1:443 напрямую устанавливается. Смотрим time_connect, а не
+        # http_code: на «голый» HTTP в порт 443 TLS-сервер (не nginx/Cloudflare)
+        # рвёт соединение или молчит — код 000 при живом TCP (проверено на
+        # openssl s_server: curl exit 52/28, time_connect > 0). Не соединилось —
+        # 0.000000.
+        tcp_ok() {
+            local c
+            if [ -n "$g" ]; then
+                c=$(su -g "$g" -c "curl -s -o /dev/null -m 3 ${LAST_WAN_IFACE:+--interface $LAST_WAN_IFACE} -w '%{time_connect}' http://$1:443/" 2>/dev/null)
+            else
+                c=$(curl -s -o /dev/null -m 3 ${LAST_WAN_IFACE:+--interface $LAST_WAN_IFACE} -w '%{time_connect}' "http://$1:443/" 2>/dev/null)
+            fi
+            case "$c" in *[1-9]*) return 0 ;; esac
             return 1
         }
+        ctl_ok() { tcp_ok 77.88.8.8 || tcp_ok 1.1.1.1; }
         ctl_ok || { rm -f "$out" "$OPERA_SITES_PID"; exit 0; }
         # только то, что сейчас в ZSKIP этой сети (сеть не определилась — весь
         # ZSKIP): сайт, который zapret снова открывает (проверка сайтов идёт
@@ -193,14 +197,13 @@ opera_sites_job() {
             # сервисы, включая API Claude, — такие не берём.
             blk=""
             for a in $ips; do
-                if [ -n "$g" ]; then
-                    c=$(su -g "$g" -c "curl -s -o /dev/null -m 3 ${LAST_WAN_IFACE:+--interface $LAST_WAN_IFACE} -w '%{http_code}' http://$a:443/" 2>/dev/null)
-                else
-                    c=$(curl -s -o /dev/null -m 3 ${LAST_WAN_IFACE:+--interface $LAST_WAN_IFACE} -w '%{http_code}' "http://$a:443/" 2>/dev/null)
-                fi
-                [ -n "$c" ] && [ "$c" != "000" ] || blk="$blk $a"
+                tcp_ok "$a" || blk="$blk $a"
             done
             ips="${blk# }"
+            # прямой путь пропал посреди прогона (поднялся VPN — задачу тогда
+            # никто не снимает, сменилась сеть): «закрыты» оказались бы все
+            # адреса, а контроль после прогона VPN мог уже не застать — бросаем
+            [ -n "$ips" ] && ! ctl_ok && { rm -f "$out" "$OPERA_SITES_PID"; exit 0; }
             [ -n "$ips" ] && echo "$h|$ips|$now" >> "$out"
         done
         # убранные в WebUI (opsite-del), пока шла проверка, — не возвращать
