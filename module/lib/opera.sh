@@ -103,12 +103,12 @@ OPERA_SITES_SKIP="/data/adb/vpn_tether_opera_sites_skip"  # убранные в�
 OPERA_SITES_PID="/data/local/tmp/vpn_tether_opera_sites.pid"
 OPERA_SITES_MAX=128     # адресов в перенаправлении
 OPERA_SITES_TICK=0
-OPERA_SITES_SIG=""      # cksum файла сайтов — менялся ли список
+OPERA_SITES_SIG=""      # адреса сайтов в перенаправлении — менялись ли
 OPERA_ZSKIP_SIG=""      # cksum ZSKIP — прошла ли новая проверка сайтов
 OPERA_ZSKIP="/data/adb/vpn_tether_zapret_altskip"
 # Телеметрия и реклама — не через Opera, даже если «не открылись ничем»
 # (24.10 в список попал ums-telemetry-sgp.heytapmobi.com — телеметрия Oppo)
-OPERA_SITES_NOISE='telemetry|analytic|metric|measure|stats\.|tracking|tracker|beacon|crashlytics|sentry|appsflyer|adjust\.|doubleclick|googlead|googlesyndication|adservice|adsystem|(^|\.)ads?[0-9]*\.|heytap|allawnos|app-measurement|branch\.io'
+OPERA_SITES_NOISE='telemetry|analytic|metric|measure|stats\.|tracking|(^|[.-])tracker|beacon|crashlytics|sentry|appsflyer|adjust\.|doubleclick|googlead|googlesyndication|adservice|adsystem|(^|\.)ads?[0-9]*\.|heytap|allawnos|app-measurement|branch\.io'
 
 opera_site_ips() {
     [ -s "$OPERA_SITES_FILE" ] || return 0
@@ -116,24 +116,40 @@ opera_site_ips() {
         grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' | sort -u | head -n "$OPERA_SITES_MAX"
 }
 
-# Фоновая проверка (до ~10 мин на 40 сайтов; цикл не держит). Записи старше
-# 6 ч перепроверяются (адреса CDN меняются), чего нет в ZSKIP больше суток —
-# выпадает само.
-opera_sites_job() {
+# pid идущей фоновой задачи. Файл переживает перезагрузку: pid мог достаться
+# чужому процессу (opera_down при старте демона его бы убил) — сверяем cmdline.
+opera_sites_pid() {
     local p
     p=$(cat "$OPERA_SITES_PID" 2>/dev/null)
-    [ -n "$p" ] && kill -0 "$p" 2>/dev/null && return 0
+    case "$p" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$p" != "$$" ] || return 1
+    case "$(tr '\0' ' ' 2>/dev/null < "/proc/$p/cmdline")" in
+        *service.sh*) echo "$p" ;;
+        *) return 1 ;;
+    esac
+}
+
+# Фоновая проверка (до ~10 мин на 40 сайтов; цикл не держит). Записи старше
+# 6 ч перепроверяются (адреса CDN меняются), чего нет в ZSKIP больше суток —
+# выпадает само. Больше 40 к проверке — 40 случайных, остальные записи — как
+# были (по алфавиту дальние не проверялись бы никогда).
+opera_sites_job() {
+    opera_sites_pid >/dev/null && return 0
     (
         now=$(date +%s); out="$OPERA_SITES_FILE.new"; : > "$out"
         g=""; [ "$DNSPROXY_SU_G" = "1" ] && [ -n "$DNSPROXY_GID" ] && g="$DNSPROXY_GID"
         hosts=$( { awk -F'|' -v k="$NET_KEY" '$1 == k {print $2}' "$OPERA_ZSKIP" 2>/dev/null
                    cut -d'|' -f1 "$OPERA_SITES_FILE" 2>/dev/null; } | \
-                 grep -E '^[a-z0-9.-]+\.[a-z]+$' | grep -vE "$OPERA_SITES_NOISE" | sort -u | head -n 40)
+                 grep -E '^[a-z0-9.-]+\.[a-z]+$' | grep -vE "$OPERA_SITES_NOISE" | sort -u | \
+                 awk 'BEGIN {srand()} {print rand() " " $0}' | sort -n | cut -d' ' -f2)
+        n=0
         for h in $hosts; do
             grep -qxF "$h" "$OPERA_SITES_SKIP" 2>/dev/null && continue
             old=$(grep "^$h|" "$OPERA_SITES_FILE" 2>/dev/null | head -n 1)
             t=$(echo "$old" | cut -d'|' -f3)
             if [ -n "$t" ] && [ $((now - t)) -lt 21600 ] 2>/dev/null; then echo "$old" >> "$out"; continue; fi
+            if [ "$n" -ge 40 ]; then [ -n "$old" ] && echo "$old" >> "$out"; continue; fi
+            n=$((n + 1))
             # напрямую открылся — не блокировка (или режет только AdGuard)
             if [ -n "$g" ]; then
                 c=$(su -g "$g" -c "curl -s -o /dev/null -m 5 ${LAST_WAN_IFACE:+--interface $LAST_WAN_IFACE} -w '%{http_code}' https://$h/" 2>/dev/null)
@@ -152,6 +168,8 @@ opera_sites_job() {
             ips="${ips% }"
             [ -n "$ips" ] && echo "$h|$ips|$now" >> "$out"
         done
+        # убранные в WebUI (opsite-del), пока шла проверка, — не возвращать
+        [ -s "$OPERA_SITES_SKIP" ] && awk -F'|' 'NR == FNR {s[$0]; next} !($1 in s)' "$OPERA_SITES_SKIP" "$out" > "$out.2" && mv -f "$out.2" "$out"
         mv -f "$out" "$OPERA_SITES_FILE"
         rm -f "$OPERA_SITES_PID"
     ) </dev/null >/dev/null 2>&1 &
@@ -542,7 +560,7 @@ opera_fail() {   # причина [fast — сервер не отвечает: 
 
 opera_down() {   # [quiet]
     local p
-    p=$(cat "$OPERA_SITES_PID" 2>/dev/null); [ -n "$p" ] && kill "$p" 2>/dev/null; rm -f "$OPERA_SITES_PID"
+    p=$(opera_sites_pid) && kill "$p" 2>/dev/null; rm -f "$OPERA_SITES_PID"
     OPERA_SITES_SIG=""
     opera_rules_off
     _opera_kill $(opera_hev_pids)
@@ -692,7 +710,8 @@ opera_reconcile() {
         opera_log_trim
         # сайты, которые не открывает обход: проверка — после новой проверки
         # сайтов (ZSKIP изменился) или раз в ~10 мин; список изменился —
-        # перестроить перенаправление
+        # перестроить перенаправление (по адресам: смена одного времени
+        # проверки — не повод перестраивать, это рвёт и соединения Telegram)
         if [ "$OPERA_SITES" = "1" ] && [ "$OPERA_STATE" = "on" ] && [ "$want" = "1" ]; then
             OPERA_SITES_TICK=$((OPERA_SITES_TICK + 1))
             _z=$(cksum < "$OPERA_ZSKIP" 2>/dev/null)
@@ -700,7 +719,7 @@ opera_reconcile() {
                 OPERA_ZSKIP_SIG="$_z"; OPERA_SITES_TICK=0
                 opera_sites_job
             fi
-            _z=$(cksum < "$OPERA_SITES_FILE" 2>/dev/null)
+            _z=$(opera_site_ips | tr '\n' ' ')
             if [ "$_z" != "$OPERA_SITES_SIG" ]; then
                 OPERA_SITES_SIG="$_z"
                 [ -n "$OPERA_RULES_SIG" ] && OPERA_RULES_SIG=""
