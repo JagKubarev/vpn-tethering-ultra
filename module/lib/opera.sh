@@ -61,6 +61,8 @@ OPERA_TICK=0
 OPERA_SU_G=""           # "" = не проверяли, 1 = su -g работает, 0 = нет
 OPERA_CA_INFO=""
 OPERA_NOSUPPORT=0       # 1 = ядро без TPROXY/бинарей нет — не пытаться до перечитывания настроек
+OPERA_WAN=""            # WAN, на котором последний раз проверяли сервер Opera
+OPERA_PROBE_DC="149.154.167.51:443"   # DC2 Telegram: проверка «через Opera доходит»
 
 opera_cidrs() {
     sed 's/#.*//' "$OPERA_CIDR_FILE" 2>/dev/null | tr -d ' \t\r' | \
@@ -214,6 +216,7 @@ opera_started() {
     fi
     ep=$(sed -n 's/.*Selected endpoint address: \([^ ]*\).*/\1/p; s/.*Endpoint override: \([^ ]*\).*/\1/p' "$OPERA_LOG" 2>/dev/null | tail -n 1)
     OPERA_ENDPOINT="$ep"
+    OPERA_WAN="$LAST_WAN_IFACE"
     OPERA_FAILS=0
     log "opera: opera-proxy готов за ${secs}с (pid $(opera_proxy_pids | head -n 1), сервер ${ep:-?}${c:+, прокси API $c})"
 }
@@ -326,18 +329,33 @@ opera_rules_ok() {
     $ip route show table "$OPERA_TABLE" 2>/dev/null | grep -q . || return 1
 }
 
-opera_fail() {   # причина
+# Сервер Opera доходит? Запрос к DC Telegram через SOCKS opera-proxy (curl от
+# группы opera — мимо перенаправления и nfqws). 24.10: на Wi-Fi Dom.ru часть
+# серверов 77.111.x не отвечала, а opera-proxy жил — Telegram висел.
+opera_probe() {
+    local code
+    command -v curl >/dev/null 2>&1 || return 0
+    if [ "$OPERA_SU_G" = "1" ]; then
+        code=$(su -g "$OPERA_GID" -c "curl -s -o /dev/null -m 6 --socks5 127.0.0.1:$OPERA_PORT -w '%{http_code}' http://$OPERA_PROBE_DC/" 2>/dev/null)
+    else
+        code=$(curl -s -o /dev/null -m 6 --socks5 "127.0.0.1:$OPERA_PORT" -w '%{http_code}' "http://$OPERA_PROBE_DC/" 2>/dev/null)
+    fi
+    [ -n "$code" ] && [ "$code" != "000" ]
+}
+
+opera_fail() {   # причина [fast — сервер не отвечает: сразу другой]
     local p
     opera_rules_off
     _opera_kill $(opera_hev_pids)
     _opera_kill $(opera_proxy_pids)
     OPERA_FAILS=$((OPERA_FAILS + 1))
     case "$OPERA_FAILS" in 1) p=30 ;; 2) p=60 ;; *) p=150 ;; esac   # итераций по ~2с
+    [ "$2" = "fast" ] && p=2
     OPERA_RETRY=$p
     OPERA_STATE="fail"
     OPERA_ERR="$1"
     OPERA_ENDPOINT=""
-    log "WARNING: opera: $1 — Telegram напрямую, повтор через ~$((p * 2 / 60)) мин"
+    log "WARNING: opera: $1 — Telegram напрямую, повтор через $([ "$p" -lt 30 ] && echo "~$((p * 2))с" || echo "~$((p * 2 / 60)) мин")"
     # после сбоя пригодится запасной список (не скачан или старше суток)
     if [ ! -s "$OPERA_API_SPARE" ] || [ -n "$(find "$OPERA_API_SPARE" -mmin +1440 2>/dev/null)" ]; then
         opera_spare_fetch
@@ -426,8 +444,18 @@ opera_reconcile() {
     esac
 
     OPERA_TICK=$((OPERA_TICK + 1))
+    # сменилась сеть — сервер Opera мог стать недоступен: проверить сразу
+    [ "$OPERA_STATE" = "on" ] && [ "$LAST_WAN_IFACE" != "$OPERA_WAN" ] && OPERA_TICK=15
     if [ "$OPERA_TICK" -ge 15 ]; then   # ~30с: дорогое (stat пакетов, iptables -C)
         OPERA_TICK=0
+        if [ "$OPERA_STATE" = "on" ] && [ "$want" = "1" ]; then
+            OPERA_WAN="$LAST_WAN_IFACE"
+            # две неудачи подряд — перезапуск: opera-proxy возьмёт другой сервер
+            if ! opera_probe && ! opera_probe; then
+                opera_fail "сервер Opera ${OPERA_ENDPOINT:-?} не отвечает${OPERA_WAN:+ (сеть $OPERA_WAN)}" fast
+                return 0
+            fi
+        fi
         OPERA_EXCL=$(zapret_vpn_uids)
         opera_exempt
         opera_log_trim
