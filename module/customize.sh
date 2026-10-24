@@ -2,18 +2,26 @@
 # Оставляем бинари под архитектуру устройства ($ARCH ставит Magisk/KSU/Apatch)
 case "$ARCH" in
     arm64)
-        rm -f "$MODPATH/bin/conntrack-arm" "$MODPATH/bin/dnsproxy-arm" "$MODPATH/bin/nfqws-arm"
+        rm -f "$MODPATH/bin/conntrack-arm" "$MODPATH/bin/dnsproxy-arm" "$MODPATH/bin/nfqws-arm" \
+              "$MODPATH/bin/opera-proxy-arm" "$MODPATH/bin/hev-socks5-tproxy-arm"
         set_perm "$MODPATH/bin/conntrack-arm64" 0 0 0755
         set_perm "$MODPATH/bin/dnsproxy-arm64"  0 0 0755
         set_perm "$MODPATH/bin/nfqws-arm64"     0 0 0755
+        set_perm "$MODPATH/bin/opera-proxy-arm64"       0 0 0755
+        set_perm "$MODPATH/bin/hev-socks5-tproxy-arm64" 0 0 0755
         ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13), arm64"
+        ui_print "- opera-proxy v1.31.0 + hev-socks5-tproxy 2.13.1, arm64"
         ;;
     arm)
-        rm -f "$MODPATH/bin/conntrack-arm64" "$MODPATH/bin/dnsproxy-arm64" "$MODPATH/bin/nfqws-arm64"
+        rm -f "$MODPATH/bin/conntrack-arm64" "$MODPATH/bin/dnsproxy-arm64" "$MODPATH/bin/nfqws-arm64" \
+              "$MODPATH/bin/opera-proxy-arm64" "$MODPATH/bin/hev-socks5-tproxy-arm64"
         set_perm "$MODPATH/bin/conntrack-arm" 0 0 0755
         set_perm "$MODPATH/bin/dnsproxy-arm"  0 0 0755
         set_perm "$MODPATH/bin/nfqws-arm"     0 0 0755
+        set_perm "$MODPATH/bin/opera-proxy-arm"       0 0 0755
+        set_perm "$MODPATH/bin/hev-socks5-tproxy-arm" 0 0 0755
         ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13), armv7"
+        ui_print "- opera-proxy v1.31.0 + hev-socks5-tproxy 2.13.1, armv7"
         ;;
     *)
         # неизвестная арх — оставляем оба, service.sh выберет по uname -m
@@ -23,7 +31,12 @@ case "$ARCH" in
         set_perm "$MODPATH/bin/dnsproxy-arm"    0 0 0755
         set_perm "$MODPATH/bin/nfqws-arm64"     0 0 0755
         set_perm "$MODPATH/bin/nfqws-arm"       0 0 0755
+        set_perm "$MODPATH/bin/opera-proxy-arm64"       0 0 0755
+        set_perm "$MODPATH/bin/opera-proxy-arm"         0 0 0755
+        set_perm "$MODPATH/bin/hev-socks5-tproxy-arm64" 0 0 0755
+        set_perm "$MODPATH/bin/hev-socks5-tproxy-arm"   0 0 0755
         ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13), arm64+armv7"
+        ui_print "- opera-proxy v1.31.0 + hev-socks5-tproxy 2.13.1, arm64+armv7"
         ;;
 esac
 set_perm "$MODPATH/service.sh" 0 0 0755
@@ -70,6 +83,13 @@ DNSPROXY_ENABLE=1
 #ZAPRET_ENABLE=1
 #ZAPRET_MODE=list
 #ZAPRET_STRATEGY=fakeddisorder
+
+# --- Telegram без VPN (прокси Opera) -------------------------
+# 1 = пока VPN выключен, Telegram на телефоне и на раздаче идёт
+#     через бесплатный прокси Opera (только TCP, без звонков).
+#OPERA_TG=0
+# Регион серверов Opera: EU, AS или AM
+#OPERA_COUNTRY=EU
 
 # --- Защита -------------------------------------------------
 # Выбран режим VPN, а VPN не подключён:

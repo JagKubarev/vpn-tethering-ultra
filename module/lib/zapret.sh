@@ -314,6 +314,9 @@ zapret_rules_on() {
         $t -t mangle -A "$CHAIN_ZAPRET" -m mark --mark "$ZAPRET_MARK/$ZAPRET_MARK" -j RETURN 2>/dev/null
         # метку выше на rmnet стирает qcom_qos_reset — дублируем по группе сокета
         $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$ZAPRET_GID" -j RETURN 2>/dev/null
+        # opera-proxy (Telegram через Opera) — его TLS к серверам Opera обход не трогает
+        [ -n "$OPERA_GID" ] && \
+            $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$OPERA_GID" -j RETURN 2>/dev/null
         if [ "$ZAPRET_PHONE" = "1" ]; then
             for u in $excl; do
                 $t -t mangle -A "$CHAIN_ZAPRET" -m owner --uid-owner "$u" -j RETURN 2>/dev/null

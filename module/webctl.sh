@@ -199,6 +199,8 @@ case "$1" in
             echo; echo "=== свои стратегии сайтов"; cat "$ZALT" 2>/dev/null
             echo; echo "=== автосписок: домен|когда|сбросы/зависания/редиректы|кто"; sh "$MODDIR/webctl.sh" zauto-info 2>/dev/null
             echo; echo "=== nfqws (последние 50 строк)"; tail -n 50 /data/local/tmp/vpn_tether_nfqws.log 2>/dev/null
+            echo; echo "=== opera-proxy (последние 80 строк)"; tail -n 80 /data/local/tmp/vpn_tether_opera.log 2>/dev/null
+            echo; echo "=== hev-socks5-tproxy (последние 30 строк)"; tail -n 30 /data/local/tmp/vpn_tether_hev.log 2>/dev/null
             echo; echo "=== ip rule"; ip rule 2>/dev/null
             echo; echo "=== цепочки модуля (filter / nat / mangle)"
             for t in filter nat mangle; do iptables -w 2 -t $t -S 2>/dev/null | grep -E 'VPN_|ZAPRET' | sed "s/^/$t: /"; done
