@@ -77,6 +77,7 @@ OPERA_BAD=""            # серверы, не пропустившие Telegram
 OPERA_BADREG=""         # регионы, где отказали два сервера подряд (AUTO их не берёт; столько же живут)
 OPERA_LASTFAIL_REG=""
 OPERA_HOPS=0            # переездов подряд без удачной проверки
+OPERA_PROBE_WHY=""      # почему не прошла проверка: tcp (сервер недоступен) | upstream (502)
 OPERA_WANT_PREV=0       # want прошлой итерации: 0 -> 1 = VPN только что выключили
 OPERA_OVERRIDE=""       # сервер, заданный opera-proxy через -override-proxy-address
 OPERA_REGION=""         # регион, в котором зарегистрирован opera-proxy (при AUTO — регион лучшего сервера)
@@ -437,8 +438,10 @@ opera_probe() {
     [ "$OPERA_SU_G" = "1" ] && g="su -g $OPERA_GID -c"
     if [ -n "$a" ]; then
         code=$($g "curl -s -o /dev/null -m 2 ${LAST_WAN_IFACE:+--interface $LAST_WAN_IFACE} -w '%{http_code}' http://$a:443/" 2>/dev/null)
+        OPERA_PROBE_WHY="tcp"
         [ -n "$code" ] && [ "$code" != "000" ] || return 1
     fi
+    OPERA_PROBE_WHY="upstream"   # сервер доступен, но дальше не пускает (502)
     while [ $n -lt 3 ]; do
         code=$($g "curl -s -o /dev/null -m 4 --socks5 127.0.0.1:$OPERA_PORT -w '%{http_code}' http://$OPERA_PROBE_DC/" 2>/dev/null)
         [ -n "$code" ] && [ "$code" != "000" ] && return 0
@@ -592,7 +595,10 @@ opera_reconcile() {
             # 6 переездов подряд — пауза с нарастанием, чтобы не долбить Opera.
             if ! opera_probe; then
                 [ -n "$OPERA_OVERRIDE" ] && OPERA_BAD="$OPERA_BAD $OPERA_OVERRIDE"
-                [ "$OPERA_COUNTRY" = "AUTO" ] && [ "$OPERA_LASTFAIL_REG" = "$OPERA_REGION" ] && \
+                # сервер доступен, а Telegram не пропускает (502) — так отказывает
+                # весь регион (24.10: EU 25 мин работал, потом 502 у его серверов;
+                # два отказа подряд стоили ~70с без Telegram) — выводим сразу
+                [ "$OPERA_COUNTRY" = "AUTO" ] && { [ "$OPERA_LASTFAIL_REG" = "$OPERA_REGION" ] || [ "$OPERA_PROBE_WHY" = "upstream" ]; } && \
                     case " $OPERA_BADREG " in *" $OPERA_REGION "*) ;; *) OPERA_BADREG="$OPERA_BADREG $OPERA_REGION" ;; esac
                 OPERA_LASTFAIL_REG="$OPERA_REGION"
                 OPERA_HOPS=$((OPERA_HOPS + 1))
