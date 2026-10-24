@@ -111,7 +111,7 @@ OPERA_ZSKIP_SIG=""      # cksum ZSKIP — прошла ли новая пров�
 OPERA_ZSKIP="/data/adb/vpn_tether_zapret_altskip"
 # Телеметрия и реклама — не через Opera, даже если «не открылись ничем»
 # (24.10 в список попал ums-telemetry-sgp.heytapmobi.com — телеметрия Oppo)
-OPERA_SITES_NOISE='telemetry|analytic|metric|measure|stats\.|tracking|(^|[.-])tracker|beacon|crashlytics|sentry|appsflyer|adjust\.|doubleclick|googlead|googlesyndication|adservice|adsystem|(^|\.)ads?[0-9]*\.|heytap|allawnos|app-measurement|branch\.io'
+OPERA_SITES_NOISE='telemetry|analytic|metric|measure|stats\.|tracking|(^|[.-])tracker|beacon|crashlytics|sentry|appsflyer|adjust\.|doubleclick|googlead|googlesyndication|adservice|adsystem|(^|\.)ads?[0-9]*\.|heytap|allawnos|umeng|app-measurement|branch\.io'
 
 opera_site_ips() {
     [ -s "$OPERA_SITES_FILE" ] || return 0
