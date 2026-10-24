@@ -93,12 +93,15 @@ opera_cidrs() {
 # Сайты, которые не открывает обход (OPERA_SITES). Проверка сайтов (scan.sh
 # sites) кладёт «не открылись ничем» в ZSKIP. Фоновая задача перепроверяет
 # каждый: напрямую (мимо AdGuard и nfqws) не открылся, а через Opera открылся
-# — его адреса (как их отдаёт наш DNS) идут в то же перенаправление, что и
-# Telegram. 24.10, Wi-Fi Dom.ru: из 259 заблокированных сайтов zapret открыл
+# — его адреса (как их отдаёт наш DNS), закрытые ПО IP (TCP не соединяется),
+# идут в то же перенаправление, что и Telegram. Сайт на общем адресе CDN,
+# который режут по DPI, не берём (3.15 брал — через Opera пошли соседи). 24.10, Wi-Fi Dom.ru: из 259 заблокированных сайтов zapret открыл
 # 148, ещё 21 открылся только через Opera (bsky.app, notion.so, spiegel.de…).
 # Реклама и телеметрия, которые режет AdGuard, напрямую открываются — не берём.
 # ============================================================================
-OPERA_SITES_FILE="/data/adb/vpn_tether_opera_sites"       # хост|ip ip|epoch проверки
+OPERA_SITES_FILE="/data/adb/vpn_tether_opera_sites_ip"    # хост|ip ip|epoch проверки (только адреса, закрытые по IP)
+# список 3.15 (с общими адресами CDN) — не переносить
+rm -f /data/adb/vpn_tether_opera_sites /data/adb/vpn_tether_opera_sites.new 2>/dev/null
 OPERA_SITES_SKIP="/data/adb/vpn_tether_opera_sites_skip"  # убранные вручную (WebUI ✕)
 OPERA_SITES_PID="/data/local/tmp/vpn_tether_opera_sites.pid"
 OPERA_SITES_MAX=128     # адресов в перенаправлении
@@ -108,7 +111,7 @@ OPERA_ZSKIP_SIG=""      # cksum ZSKIP — прошла ли новая пров�
 OPERA_ZSKIP="/data/adb/vpn_tether_zapret_altskip"
 # Телеметрия и реклама — не через Opera, даже если «не открылись ничем»
 # (24.10 в список попал ums-telemetry-sgp.heytapmobi.com — телеметрия Oppo)
-OPERA_SITES_NOISE='telemetry|analytic|metric|measure|stats\.|tracking|(^|[.-])tracker|beacon|crashlytics|sentry|appsflyer|adjust\.|doubleclick|googlead|googlesyndication|adservice|adsystem|(^|\.)ads?[0-9]*\.|heytap|allawnos|app-measurement|branch\.io'
+OPERA_SITES_NOISE='telemetry|analytic|metric|measure|stats\.|tracking|(^|[.-])tracker|beacon|crashlytics|sentry|appsflyer|adjust\.|doubleclick|googlead|googlesyndication|adservice|adsystem|(^|\.)ads?[0-9]*\.|heytap|allawnos|umeng|app-measurement|branch\.io'
 
 opera_site_ips() {
     [ -s "$OPERA_SITES_FILE" ] || return 0
@@ -137,6 +140,28 @@ opera_sites_job() {
     (
         now=$(date +%s); out="$OPERA_SITES_FILE.new"; : > "$out"
         g=""; [ "$DNSPROXY_SU_G" = "1" ] && [ -n "$DNSPROXY_GID" ] && g="$DNSPROXY_GID"
+        # Контроль «прямой путь вообще работает»: TCP к заведомо доступным адресам
+        # через WAN. 25.10: при поднятом VPN curl --interface wlan0 не доходил ни до
+        # чего (даже до ya.ru) — все адреса выглядели «закрытыми по IP», в список
+        # попал бы и API Claude. Контроль не прошёл до или после прогона — результат
+        # выбрасываем, старый список остаётся.
+        # TCP до $1:443 напрямую устанавливается. Смотрим time_connect, а не
+        # http_code: на «голый» HTTP в порт 443 TLS-сервер (не nginx/Cloudflare)
+        # рвёт соединение или молчит — код 000 при живом TCP (проверено на
+        # openssl s_server: curl exit 52/28, time_connect > 0). Не соединилось —
+        # 0.000000.
+        tcp_ok() {
+            local c
+            if [ -n "$g" ]; then
+                c=$(su -g "$g" -c "curl -s -o /dev/null -m 3 ${LAST_WAN_IFACE:+--interface $LAST_WAN_IFACE} -w '%{time_connect}' http://$1:443/" 2>/dev/null)
+            else
+                c=$(curl -s -o /dev/null -m 3 ${LAST_WAN_IFACE:+--interface $LAST_WAN_IFACE} -w '%{time_connect}' "http://$1:443/" 2>/dev/null)
+            fi
+            case "$c" in *[1-9]*) return 0 ;; esac
+            return 1
+        }
+        ctl_ok() { tcp_ok 77.88.8.8 || tcp_ok 1.1.1.1; }
+        ctl_ok || { rm -f "$out" "$OPERA_SITES_PID"; exit 0; }
         # только то, что сейчас в ZSKIP этой сети (сеть не определилась — весь
         # ZSKIP): сайт, который zapret снова открывает (проверка сайтов идёт
         # мимо Opera), выпадает из ZSKIP — а с ним и отсюда
@@ -166,13 +191,25 @@ opera_sites_job() {
                   grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' | \
                   grep -vE '^(10|127|0)\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[01])\.|^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.' | \
                   sort -u | head -n 4 | tr '\n' ' ')
-            ips="${ips% }"
+            # Только адреса, закрытые по IP: напрямую не устанавливается даже TCP.
+            # Адрес, до которого TCP доходит (сайт режут по DPI), — общий адрес CDN:
+            # 25.10 через 8.47.69.0/8.6.112.0 (Cloudflare) в Opera ушли и чужие
+            # сервисы, включая API Claude, — такие не берём.
+            blk=""
+            for a in $ips; do
+                tcp_ok "$a" || blk="$blk $a"
+            done
+            ips="${blk# }"
+            # прямой путь пропал посреди прогона (поднялся VPN — задачу тогда
+            # никто не снимает, сменилась сеть): «закрыты» оказались бы все
+            # адреса, а контроль после прогона VPN мог уже не застать — бросаем
+            [ -n "$ips" ] && ! ctl_ok && { rm -f "$out" "$OPERA_SITES_PID"; exit 0; }
             [ -n "$ips" ] && echo "$h|$ips|$now" >> "$out"
         done
         # убранные в WebUI (opsite-del), пока шла проверка, — не возвращать
         [ -s "$OPERA_SITES_SKIP" ] && awk -F'|' 'NR == FNR {s[$0]; next} !($1 in s)' "$OPERA_SITES_SKIP" "$out" > "$out.2" && mv -f "$out.2" "$out"
-        mv -f "$out" "$OPERA_SITES_FILE"
-        rm -f "$OPERA_SITES_PID"
+        ctl_ok && mv -f "$out" "$OPERA_SITES_FILE"
+        rm -f "$out" "$OPERA_SITES_PID"
     ) </dev/null >/dev/null 2>&1 &
     echo $! > "$OPERA_SITES_PID"
 }
@@ -345,7 +382,9 @@ opera_start() {
     # opera-proxy молча завершался через ~17с (24.10, 4 из 4 запусков)
     # самый быстрый живой сервер из пула (замер свежий — иначе мерим сейчас).
     # Учётка выдаётся на регион, поэтому при AUTO регион — по этому серверу.
-    [ $(( $(date +%s) - OPERA_RANK_TS )) -lt 120 ] || opera_pool_rank
+    # пустой замер (например, сделан при поднятом VPN — через WAN тогда не
+    # доходит ничего) — перемерить
+    [ -n "$OPERA_RANK" ] && [ $(( $(date +%s) - OPERA_RANK_TS )) -lt 120 ] || opera_pool_rank
     best=$(opera_pool_best)
     OPERA_OVERRIDE="$best"
     OPERA_REGION="$OPERA_COUNTRY"
