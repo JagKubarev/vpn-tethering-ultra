@@ -173,7 +173,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 Нумерация `X.Y.Z`: **X** — этап, **Y** — заметная функция, **Z** — исправления.
 `versionCode` = X·10000 + Y·100 + Z (3.8.1 → 30801). До 23.10.2026 у модуля было две
 нумерации (внешняя 2.x и внутренняя 3.x-hybrid) — таблица соответствия в [`CHANGELOG.md`](CHANGELOG.md).
-Теги `v1.0` … `v3.14`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
+Теги `v1.0` … `v3.15`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
 
 <details>
 <summary>Кратко по версиям</summary>
@@ -223,6 +223,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 | 3.12 | Первый публичный релиз: новое описание репозитория, справочник настроек в `docs/settings.md`; список DNS в WebUI в порядке запасных. |
 | 3.13 | Telegram без VPN через прокси Opera (`OPERA_TG`), эвристика раздачи не путает клиент Wi-Fi с точкой доступа. |
 | 3.14 | Opera: самый быстрый живой сервер из пула, регион «Самый быстрый» с исключением отказавшего региона, быстрая проверка после выключения VPN. |
+| 3.15 | Сайты, которые не открывает обход, — через Opera (`OPERA_SITES`), список в WebUI. |
 
 </details>
 
