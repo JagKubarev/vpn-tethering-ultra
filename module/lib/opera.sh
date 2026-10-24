@@ -130,16 +130,17 @@ opera_sites_pid() {
 }
 
 # Фоновая проверка (до ~10 мин на 40 сайтов; цикл не держит). Записи старше
-# 6 ч перепроверяются (адреса CDN меняются), чего нет в ZSKIP больше суток —
-# выпадает само. Больше 40 к проверке — 40 случайных, остальные записи — как
+# 6 ч перепроверяются (адреса CDN меняются); чего нет в ZSKIP — выпадает. Больше 40 к проверке — 40 случайных, остальные записи — как
 # были (по алфавиту дальние не проверялись бы никогда).
 opera_sites_job() {
     opera_sites_pid >/dev/null && return 0
     (
         now=$(date +%s); out="$OPERA_SITES_FILE.new"; : > "$out"
         g=""; [ "$DNSPROXY_SU_G" = "1" ] && [ -n "$DNSPROXY_GID" ] && g="$DNSPROXY_GID"
-        hosts=$( { awk -F'|' -v k="$NET_KEY" '$1 == k {print $2}' "$OPERA_ZSKIP" 2>/dev/null
-                   cut -d'|' -f1 "$OPERA_SITES_FILE" 2>/dev/null; } | \
+        # только то, что сейчас в ZSKIP этой сети (сеть не определилась — весь
+        # ZSKIP): сайт, который zapret снова открывает (проверка сайтов идёт
+        # мимо Opera), выпадает из ZSKIP — а с ним и отсюда
+        hosts=$( awk -F'|' -v k="$NET_KEY" 'k == "" || $1 == k {print $2}' "$OPERA_ZSKIP" 2>/dev/null | \
                  grep -E '^[a-z0-9.-]+\.[a-z]+$' | grep -vE "$OPERA_SITES_NOISE" | sort -u | \
                  awk 'BEGIN {srand()} {print rand() " " $0}' | sort -n | cut -d' ' -f2)
         n=0
@@ -164,7 +165,7 @@ opera_sites_job() {
                   awk '/^Name:/ {n=1; next} n && /^Address/ {print $NF}' | \
                   grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' | \
                   grep -vE '^(10|127|0)\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[01])\.|^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.' | \
-                  sort -u | head -n 8 | tr '\n' ' ')
+                  sort -u | head -n 4 | tr '\n' ' ')
             ips="${ips% }"
             [ -n "$ips" ] && echo "$h|$ips|$now" >> "$out"
         done
@@ -480,8 +481,11 @@ opera_rules_on() {
         for u in $OPERA_GID $ZAPRET_GID $DNSPROXY_GID; do
             $iptables -t mangle -A "$CHAIN_OPERA_OUT" -m owner --gid-owner "$u" -j RETURN 2>/dev/null
         done
-        [ "$OPERA_SU_G" = "1" ] || \
-            $iptables -t mangle -A "$CHAIN_OPERA_OUT" -m owner --uid-owner 0 -j RETURN 2>/dev/null
+        # root — всегда мимо: проверка сайтов (scan.sh, curl от root) иначе пошла
+        # бы к адресам из списка сайтов и к общим адресам CDN через Opera и
+        # «открывала» бы их стратегиями zapret — подбор и ZSKIP были бы ложными.
+        # Приложениям телефона (Telegram, AdGuard) это не мешает — они не root.
+        $iptables -t mangle -A "$CHAIN_OPERA_OUT" -m owner --uid-owner 0 -j RETURN 2>/dev/null
         for u in $OPERA_EXCL; do
             $iptables -t mangle -A "$CHAIN_OPERA_OUT" -m owner --uid-owner "$u" -j RETURN 2>/dev/null
         done
