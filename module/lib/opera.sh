@@ -311,6 +311,7 @@ opera_started() {
     [ -z "$ep" ] && [ -n "$OPERA_OVERRIDE" ] && ep="$OPERA_OVERRIDE:443"
     OPERA_ENDPOINT="$ep"
     OPERA_WAN="$LAST_WAN_IFACE"
+    OPERA_RERANK=0      # перемер — через 10 мин от старта, а не сразу после долгой регистрации
     opera_pool_learn
     OPERA_FAILS=0
     log "opera: opera-proxy готов за ${secs}с (pid $(opera_proxy_pids | head -n 1), сервер ${ep:-?}${c:+, прокси API $c})"
@@ -493,7 +494,7 @@ opera_log_trim() {
 
 # Каждая итерация цикла (после phone_dns_reconcile: он считает PHONE_VPN_STABLE)
 opera_reconcile() {
-    local want=0 ifaces="" sig rc _fast _b _cm _bm
+    local want=0 ifaces="" sig rc _b _cm _bm
     if [ "$OPERA_TG" != "1" ]; then
         [ "$OPERA_STATE" != "off" ] && opera_down
         return 0
@@ -558,9 +559,8 @@ opera_reconcile() {
         OPERA_WAN="$LAST_WAN_IFACE"
     fi
     # VPN только что выключили — проверить сервер до того, как вернём правила
-    # (одна проверка, а не две: важна скорость; не прошла — сразу другой сервер)
-    _fast=0
-    [ "$want" = "1" ] && [ "$OPERA_WANT_PREV" = "0" ] && [ "$OPERA_STATE" = "on" ] && { OPERA_TICK=15; _fast=1; }
+    # (не прошла — сразу лучший живой из пула)
+    [ "$want" = "1" ] && [ "$OPERA_WANT_PREV" = "0" ] && [ "$OPERA_STATE" = "on" ] && OPERA_TICK=15
     OPERA_WANT_PREV="$want"
     # ~10 мин: перемерить пул (через WAN — работает и при поднятом VPN, к его
     # выключению лучший сервер уже известен). Текущий умер или есть заметно
@@ -573,7 +573,7 @@ opera_reconcile() {
             _cm=$(echo "$OPERA_RANK" | awk -v a="$OPERA_OVERRIDE" '$2 == a {print $1}')
             _bm=$(echo "$OPERA_RANK" | awk -v a="$_b" '$2 == a {print $1}')
             if [ -n "$_b" ] && [ "$_b" != "$OPERA_OVERRIDE" ] && \
-               { [ -z "$_cm" ] || [ $((_bm * 2)) -lt "$_cm" -a $((_cm - _bm)) -gt 40 ]; }; then
+               { { [ -z "$_cm" ] && ! opera_probe; } || { [ -n "$_cm" ] && [ $((_bm * 2)) -lt "$_cm" ] && [ $((_cm - _bm)) -gt 40 ]; }; }; then
                 log "opera: перехожу на $_b (${_bm}мс) — $OPERA_OVERRIDE $([ -z "$_cm" ] && echo "больше не отвечает" || echo "${_cm}мс")"
                 opera_rules_off
                 opera_start
