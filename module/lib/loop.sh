@@ -272,6 +272,7 @@ reload_config() {
         # Telegram через Opera: всё снять, цикл поднимет заново под новые настройки
         opera_down
         OPERA_NOSUPPORT=0
+        OPERA_RANK_TS=0     # замер под прошлый регион (AUTO -> EU дал бы сервер AS)
     fi
 
     if [ "$s_zap0" != "$s_zap1" ]; then
