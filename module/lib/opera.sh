@@ -79,7 +79,8 @@ _opera_pids() {
 }
 opera_proxy_pids() { _opera_pids "$MODULE_DIR/bin/opera-proxy" "-bind-address 127.0.0.1:$OPERA_PORT "; }
 opera_hev_pids()   { _opera_pids "$MODULE_DIR/bin/hev-socks5-tproxy" "$OPERA_HEV_CONF"; }
-_opera_listening() { ss -ltn 2>/dev/null | grep -qE "127\.0\.0\.1:$1[[:space:]]"; }
+# hev слушает AF_INET6-сокетом: в ss он «[::ffff:127.0.0.1]:порт»
+_opera_listening() { ss -ltn 2>/dev/null | grep -qE "(127\.0\.0\.1|\[::ffff:127\.0\.0\.1\]):$1[[:space:]]"; }
 
 _opera_kill() {
     local p
@@ -163,7 +164,10 @@ opera_start() {
     # регистрация в API — уже мимо AdGuard
     opera_exempt
     opera_ca_build || log "WARNING: opera: системные сертификаты не найдены — opera-proxy может не проверить TLS"
-    args="-bind-address 127.0.0.1:$OPERA_PORT -socks-mode -country $OPERA_COUNTRY -verbosity 20 -cafile $OPERA_CA"
+    # -server-selection first: «fastest» меряет скачивание с ajax.googleapis.com
+    # через каждый сервер, а Google через Opera с YOTA почти не качается —
+    # opera-proxy молча завершался через ~17с (24.10, 4 из 4 запусков)
+    args="-bind-address 127.0.0.1:$OPERA_PORT -socks-mode -country $OPERA_COUNTRY -server-selection first -verbosity 20 -cafile $OPERA_CA"
     args="$args -bootstrap-dns https://dns.comss.one/dns-query,https://dns.adguard-dns.com/dns-query,tls://9.9.9.9:853,https://1.1.1.3/dns-query"
     # Чётная попытка — список по ссылке (не скачался — файл); нечётная (после
     # сбоя) — только файл: удачные раньше + запасной список.
