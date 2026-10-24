@@ -358,12 +358,21 @@ opera_pool_rank() {
 
 # Лучший живой сервер, кроме уже не пропустивших Telegram в этой сети
 opera_pool_best() {
-    echo "$OPERA_RANK" | while read -r ms a; do
+    local b
+    b=$(echo "$OPERA_RANK" | while read -r ms a; do
         [ -n "$a" ] || continue
         case " $OPERA_BAD " in *" $a "*) continue ;; esac
         [ -n "$OPERA_BADREG" ] && case " $OPERA_BADREG " in *" $(opera_ip_region "$a") "*) continue ;; esac
         echo "$a"; break
-    done
+    done)
+    # отбракованы все регионы — любой живой из пула: без -override-proxy-address
+    # сервер выбирает Opera, и 25.10 она раз за разом давала мёртвый по TCP 77.111.244.47
+    [ -z "$b" ] && [ -n "$OPERA_BADREG" ] && b=$(echo "$OPERA_RANK" | while read -r ms a; do
+        [ -n "$a" ] || continue
+        case " $OPERA_BAD " in *" $a "*) continue ;; esac
+        echo "$a"; break
+    done)
+    [ -n "$b" ] && echo "$b"
 }
 
 opera_start() {
