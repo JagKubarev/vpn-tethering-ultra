@@ -140,7 +140,7 @@ opera_sites_job() {
         # только то, что сейчас в ZSKIP этой сети (сеть не определилась — весь
         # ZSKIP): сайт, который zapret снова открывает (проверка сайтов идёт
         # мимо Opera), выпадает из ZSKIP — а с ним и отсюда
-        hosts=$( awk -F'|' -v k="$NET_KEY" 'k == "" || $1 == k {print $2}' "$OPERA_ZSKIP" 2>/dev/null | \
+        hosts=$( K="$NET_KEY" awk -F'|' 'ENVIRON["K"] == "" || $1 == ENVIRON["K"] {print $2}' "$OPERA_ZSKIP" 2>/dev/null | \
                  grep -E '^[a-z0-9.-]+\.[a-z]+$' | grep -vE "$OPERA_SITES_NOISE" | sort -u | \
                  awk 'BEGIN {srand()} {print rand() " " $0}' | sort -n | cut -d' ' -f2)
         n=0
@@ -652,6 +652,7 @@ opera_reconcile() {
     # прошлые «не пропустил Telegram» и замер пула — от старой сети
     if [ "$OPERA_STATE" = "on" ] && [ "$LAST_WAN_IFACE" != "$OPERA_WAN" ]; then
         OPERA_TICK=15; OPERA_BAD=""; OPERA_BADREG=""; OPERA_RANK_TS=0
+        OPERA_ZSKIP_SIG=""   # список сайтов — под новую сеть сразу, а не через ~10 мин
         # при поднятом VPN проверки нет и OPERA_WAN не обновлялся бы — блок
         # «~30с» шёл бы каждую итерацию до выключения VPN
         OPERA_WAN="$LAST_WAN_IFACE"
