@@ -311,13 +311,13 @@ case "$1" in
         echo "OK" ;;
     opsites)
         # сайты через Opera (lib/opera.sh, OPERA_SITES): "хост|адреса|epoch проверки"
-        cat /data/adb/vpn_tether_opera_sites 2>/dev/null
+        cat /data/adb/vpn_tether_opera_sites_ip 2>/dev/null
         ;;
     opsite-del)
         # убрать сайт из «через Opera» и больше не брать (демон перестроит правила за ~30с)
         d=$(printf '%s' "$2" | tr 'A-Z' 'a-z')
         case "$d" in ''|*[!a-z0-9.-]*|*..*|.*|*.|-*) echo "ERR неверный домен"; exit 1 ;; esac
-        f=/data/adb/vpn_tether_opera_sites
+        f=/data/adb/vpn_tether_opera_sites_ip
         grep -qxF "$d" /data/adb/vpn_tether_opera_sites_skip 2>/dev/null || echo "$d" >> /data/adb/vpn_tether_opera_sites_skip
         [ -f "$f" ] && { grep -v "^$d|" "$f" > "$f.tmp"; mv -f "$f.tmp" "$f"; }
         echo "OK" ;;
