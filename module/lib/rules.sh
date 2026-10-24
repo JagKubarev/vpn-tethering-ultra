@@ -297,6 +297,43 @@ cleanup_all_rules() {
     MSS_METHOD="static"
 }
 
+# Хвосты «Telegram через Opera» (3.13–3.15.1, убрано в 3.16): демон
+# перезапущен без перезагрузки — цепочки, ip rule, процессы и файлы старой
+# версии могли остаться. TPROXY без слушателя дропает Telegram. Раз при старте.
+opera_leftovers_cleanup() {
+    local _n f p c t found=0
+    _n=0; while [ $_n -lt 8 ] && $iptables -t mangle -D PREROUTING -j VPN_OPERA_IN 2>/dev/null; do _n=$((_n + 1)); found=1; done
+    _n=0; while [ $_n -lt 8 ] && $iptables -t mangle -D OUTPUT -j VPN_OPERA_OUT 2>/dev/null; do _n=$((_n + 1)); found=1; done
+    for c in VPN_OPERA_IN VPN_OPERA_OUT VPN_OPERA_TP; do
+        for t in mangle nat; do
+            $iptables -t $t -F "$c" 2>/dev/null && { $iptables -t $t -X "$c" 2>/dev/null; found=1; }
+        done
+    done
+    # исключение opera-proxy (группа 3997) из перехвата AdGuard
+    _n=0; while [ $_n -lt 8 ] && $iptables -t nat -D OUTPUT -m owner --gid-owner 3997 -j RETURN 2>/dev/null; do _n=$((_n + 1)); found=1; done
+    _n=0; while [ $_n -lt 8 ] && $ip rule del pref 2990 lookup 3997 2>/dev/null; do _n=$((_n + 1)); found=1; done
+    $ip route flush table 3997 2>/dev/null
+    # фоновая проверка сайтов (подоболочка старого service.sh)
+    p=$(cat /data/local/tmp/vpn_tether_opera_sites.pid 2>/dev/null)
+    case "$p" in ''|*[!0-9]*) ;; *)
+        [ "$p" != "$$" ] && case "$(tr '\0' ' ' 2>/dev/null < "/proc/$p/cmdline")" in
+            *service.sh*) kill "$p" 2>/dev/null && found=1 ;;
+        esac ;;
+    esac
+    # opera-proxy и hev: argv[0] — путь бинаря модуля (обёртки su/sh и сам grep не в счёт)
+    for f in $(grep -lE 'bin/(opera-proxy|hev-socks5-tproxy)' /proc/[0-9]*/cmdline 2>/dev/null); do
+        case "$(tr '\0' ' ' 2>/dev/null < "$f")" in
+            "$MODULE_DIR/bin/opera-proxy"*|"$MODULE_DIR/bin/hev-socks5-tproxy"*)
+                f="${f#/proc/}"; kill -9 "${f%/cmdline}" 2>/dev/null && found=1 ;;
+        esac
+    done
+    for f in /data/adb/vpn_tether_opera* /data/local/tmp/vpn_tether_opera* /data/local/tmp/vpn_tether_hev*; do
+        [ -e "$f" ] && { rm -rf "$f"; found=1; }
+    done
+    [ "$found" = 1 ] && log "Убраны хвосты Telegram через Opera (до 3.16)"
+    return 0
+}
+
 apply_iface_optimizations() {
     local tun_mtu=""
     case "$1" in

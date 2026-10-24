@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # synmon.sh [секунд] — сборщик неотвеченных SYN (блокировка по IP) из conntrack
 # раз в 2 с, на телефоне от root. Результат: /data/local/tmp/synmon/{syn,est}.txt.
-# Анализ — tools/synmon_analyze.sh (напрямую / через Opera / PTR). 24.10.
+# Анализ — tools/synmon_analyze.sh (напрямую / PTR). 24.10.
 CT=/data/adb/modules/vpn-to-hotspot-usb/bin/conntrack-arm64
 O=/data/local/tmp/synmon; mkdir -p $O; : > $O/syn.txt; : > $O/est.txt
 END=$(( $(date +%s) + ${1:-1800} ))
