@@ -14,6 +14,26 @@ cleanup_dns_redirect() {
     $ip6tables -t nat -X "$CHAIN_DNS6" 2>/dev/null
 }
 
+# Старые DNS-потоки раздачи из conntrack — после смены правил DNS. NAT
+# решается на первом пакете потока: запрос, пришедший до новых правил (в
+# окне между flush_conntrack и установкой — 25.10 при выключении VPN, или
+# ещё в прежнем режиме), так и ходит по старому пути. Windows шлёт DNS из
+# пула постоянных портов — такая запись продлевается каждым запросом
+# (25.10: порт 61415, 7 запросов, 155 с из 180) и DNS ноутбука «как от VPN»,
+# пока не переподключишь его или не переключишь DoH. Только порт 53 и только
+# подсети раздачи — остальные потоки не трогаем.
+dns_conntrack_flush() {
+    local iface net p
+    [ -n "$CONNTRACK_BIN" ] || return 0
+    for iface in "$@"; do
+        net=$($ip -4 addr show dev "$iface" 2>/dev/null | awk '/inet /{print $2; exit}')
+        case "$net" in */*) ;; *) continue ;; esac
+        for p in udp tcp; do
+            "$CONNTRACK_BIN" -D -p $p --orig-src "$net" --orig-port-dst 53 >/dev/null 2>&1
+        done
+    done
+}
+
 setup_dns_redirect() {
     local dns_servers=$1
     local dns4="${dns_servers%%"|"*}"
@@ -68,6 +88,7 @@ setup_dns_redirect() {
         done
         log "DNS IPv6 redirect to $valid_dns6 ($added6 rules)"
     fi
+    dns_conntrack_flush $tether_ifaces
 }
 
 # ============================================================================
@@ -431,6 +452,7 @@ dns_redirect_to_proxy() {
         $iptables -t nat -A "$CHAIN_DNS" -i "$iface" -p tcp --dport 53 -j REDIRECT --to-ports "$DNSPROXY_PORT" 2>/dev/null && added=$((added + 1))
     done
     log "DNS -> dnsproxy :$DNSPROXY_PORT ($added rules)"
+    dns_conntrack_flush "$@"
 }
 
 direct_dns_servers() {
