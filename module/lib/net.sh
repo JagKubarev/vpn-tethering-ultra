@@ -129,6 +129,10 @@ detect_tun_name() {
             # без VPN третий проход брал ncm0 за tun — он выпадал из раздачи
             ncm*|softap*|tether*|bnep*|qmi*|seth_*|sipa_*|tunl*)
                 continue ;;
+            # аплинки и служебные (как в is_excluded_iface): иначе без VPN
+            # «VPN ON», а раздача через оператора с реальным IP
+            wwan*|r_rmnet*|rev_rmnet*|epdg*|stnet*|aware*|veth*|vlan*|docker*|lxc*|virbr*|macvlan*|ipvlan*)
+                continue ;;
         esac
         
         if $ip addr show "$iface" 2>/dev/null | grep -q "inet "; then

@@ -240,8 +240,15 @@ verify_active_rules() {
 
     # DNS клиентов в VPN-режиме всегда через нашу цепочку (DNAT или dnsproxy);
     # без хука клиенты спрашивали бы DNS раздачи — мимо VPN
-    $iptables -t nat -C PREROUTING -j "$CHAIN_DNS" 2>/dev/null || {
-        log "WATCHDOG: хук nat PREROUTING -> $CHAIN_DNS пропал"; return 1; }
+    # цепочка цела — хватит вернуть хук, без полной пересборки
+    if ! $iptables -t nat -C PREROUTING -j "$CHAIN_DNS" 2>/dev/null; then
+        if $iptables -t nat -L "$CHAIN_DNS" -n >/dev/null 2>&1 && \
+           $iptables -t nat -I PREROUTING 1 -j "$CHAIN_DNS" 2>/dev/null; then
+            log "WATCHDOG: хук nat PREROUTING -> $CHAIN_DNS пропал — вернул"
+        else
+            log "WATCHDOG: хук nat PREROUTING -> $CHAIN_DNS пропал"; return 1
+        fi
+    fi
 
     if [ "$KILL_SWITCH" = "1" ]; then
         $iptables -C FORWARD -j "$CHAIN_GUARD" 2>/dev/null || {
@@ -261,6 +268,9 @@ cleanup_all_rules() {
        [ "$(cat "/sys/class/net/$TUN_NAME/ifindex" 2>/dev/null)" = "$ORIGINAL_TUN_IFINDEX" ]; then
         $ip link set dev "$TUN_NAME" mtu "$ORIGINAL_TUN_MTU" 2>/dev/null || true
     fi
+    # файл — только если оригинал наш (вернули или tun уже другой); у нового
+    # демона после kill -9 ORIGINAL_TUN_MTU пуст — файл нужен setup_vpn_rules
+    [ -n "$ORIGINAL_TUN_MTU" ] && rm -f "$TUN_MTU_FILE"
     ORIGINAL_TUN_MTU=""
 
     ip_rule_del_all
@@ -468,8 +478,18 @@ setup_vpn_rules() {
     
     # Сохраняем оригинальный MTU в родительском процессе, а не в подоболочке
     if [ -z "$ORIGINAL_TUN_MTU" ]; then
-        ORIGINAL_TUN_MTU=$($ip link show "$TUN_NAME" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="mtu"){print $(i+1); exit}}')
         ORIGINAL_TUN_IFINDEX=$(cat "/sys/class/net/$TUN_NAME/ifindex" 2>/dev/null)
+        # демона убили (kill -9) после того, как он занизил MTU: у того же tun
+        # «оригинал» — из файла, иначе каждый крах опускал бы MTU ещё на 40
+        # (каскад из «Уроков»)
+        local _fi="" _fm=""
+        read -r _fi _fm < "$TUN_MTU_FILE" 2>/dev/null
+        if [ -n "$ORIGINAL_TUN_IFINDEX" ] && [ "$_fi" = "$ORIGINAL_TUN_IFINDEX" ] && [ -n "$_fm" ]; then
+            ORIGINAL_TUN_MTU="$_fm"
+        else
+            ORIGINAL_TUN_MTU=$($ip link show "$TUN_NAME" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="mtu"){print $(i+1); exit}}')
+            [ -n "$ORIGINAL_TUN_IFINDEX" ] && echo "$ORIGINAL_TUN_IFINDEX $ORIGINAL_TUN_MTU" > "$TUN_MTU_FILE" 2>/dev/null
+        fi
         log "Original TUN MTU saved: $ORIGINAL_TUN_MTU"
     fi
     
@@ -617,8 +637,12 @@ apply_state() {
         if [ "$sorted_current" != "$sorted_stable" ]; then
             TETHER_CHANGE_COUNT=$((TETHER_CHANGE_COUNT + 1))
             if [ $TETHER_CHANGE_COUNT -ge 3 ] && [ $((now - TETHER_STABLE_TIME)) -lt 30 ]; then
-                log "WARNING: Tether interfaces flapping, keeping stable set: [$LAST_TETHER_IFACES_STABLE]"
-                tether_ifaces="$LAST_TETHER_IFACES_STABLE"
+                # объединение, а не прежний набор: новый (USB ncm0) иначе до
+                # 30 с вне guard и ip rule — напрямую. С прошлым набором, чтобы
+                # не пересобирать на каждом такте дребезга (A / A+B / A …)
+                _norm_words $LAST_TETHER_IFACES_STABLE $LAST_TETHER_IFACES $tether_ifaces
+                tether_ifaces="$NORM_OUT"
+                log "WARNING: Tether interfaces flapping, keeping union: [$tether_ifaces]"
                 TETHER_CHANGE_COUNT=3
             else
                 LAST_TETHER_IFACES_STABLE="$tether_ifaces"

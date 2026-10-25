@@ -774,10 +774,10 @@ dns_primary_alive() {
     local u code
     set -- $DNS_UPSTREAMS
     u="$1"
-    # проверить нечем — считаем «возможно, жив»: иначе запасной DoH навсегда
-    # (основной после переключения всё равно проверит dns_health)
-    case "$u" in https://*) ;; *) return 0 ;; esac
-    command -v curl >/dev/null 2>&1 || return 0
+    # проверить нечем (не https / нет curl) — «не жив»: запасной работает, а
+    # «жив» гонял бы на мёртвый основной раз в ~30 мин (сценарное ревью)
+    case "$u" in https://*) ;; *) return 1 ;; esac
+    command -v curl >/dev/null 2>&1 || return 1
     case "$u" in *\?*) u="$u&" ;; *) u="$u?" ;; esac
     u="${u}dns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"
     if [ "$DNSPROXY_SU_G" = "1" ]; then

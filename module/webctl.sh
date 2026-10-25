@@ -69,6 +69,8 @@ daemon_pid() {
     # USR1 по умолчанию его завершает
     case "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" in
         *vpn-to-hotspot-usb/service.sh*) echo "$pid" ;;
+        # запущен руками по относительному пути: «service.sh» из каталога модуля
+        *service.sh*) [ "$(ls -l "/proc/$pid/cwd" 2>/dev/null | awk '{print $NF}')" = "$MODDIR" ] && echo "$pid" ;;
     esac
 }
 

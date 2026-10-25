@@ -22,6 +22,8 @@ rm -f /data/local/tmp/vpn_tether_zscan.pid
 # lock демона с прошлой загрузки (демона на этом этапе быть не может): pid в
 # нём мог достаться чужому sh — «Already running», и демон не стартовал бы
 rm -rf /data/local/tmp/vpn_tether.lock
+# оригинальный MTU tun с прошлой загрузки: ifindex после перезагрузки может совпасть
+rm -f /data/local/tmp/vpn_tether_tunmtu
 v=$(sed -n 's/^[[:space:]]*TETHER_STEALTH[[:space:]]*=[[:space:]]*["'\'']*\([01]\).*/\1/p' "$CONF" 2>/dev/null | tail -n 1)
 [ "$v" = "0" ] && exit 0
 for r in /data/adb/ksu/bin/resetprop /data/adb/magisk/resetprop /data/adb/ap/bin/resetprop resetprop; do
