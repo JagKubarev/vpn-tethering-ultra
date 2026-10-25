@@ -113,14 +113,28 @@ yt_dead_on() {
     YT_DEAD_STATE="on"
 }
 
+# Фоновая проверка ещё идёт: PID жив и это наш ребёнок. Закончившаяся
+# проверка оставляет PID в переменной, а демон форкает десятки процессов в
+# минуту — освободившийся PID быстро достаётся чужому процессу: kill -0 по
+# нему «жив» навсегда (проверки больше не запускаются), kill -9 бьёт мимо
+# (ревью 25.10). Родителя берём после «) » — имя процесса бывает с пробелами.
+yt_bg_alive() {
+    local st
+    [ -n "$1" ] || return 1
+    # "состояние родитель …"; Z — уже закончилась, ждёт, пока её подберут
+    st=$(sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | cut -d' ' -f1,2)
+    case "$st" in Z*|'') return 1 ;; esac
+    [ "${st#* }" = "$$" ]
+}
+
 yt_dead_off() {
     yt_dead_hooks_off
     $iptables -F "$CHAIN_YT_DEAD" 2>/dev/null; $iptables -X "$CHAIN_YT_DEAD" 2>/dev/null
     # -9: TERM подоболочке «( … ) &» в mksh доходит до trap демона ->
     # cleanup_on_exit и выход (25.10, воспроизведено на телефоне); curl
     # внутри сам закончится за <=3с
-    [ -n "$YT_RECHECK_PID" ] && kill -9 "$YT_RECHECK_PID" 2>/dev/null; YT_RECHECK_PID=""
-    [ -n "$YT_SPROBE_PID" ] && kill -9 "$YT_SPROBE_PID" 2>/dev/null; YT_SPROBE_PID=""
+    yt_bg_alive "$YT_RECHECK_PID" && kill -9 "$YT_RECHECK_PID" 2>/dev/null; YT_RECHECK_PID=""
+    yt_bg_alive "$YT_SPROBE_PID" && kill -9 "$YT_SPROBE_PID" 2>/dev/null; YT_SPROBE_PID=""
     yt_slow_stop
     rm -f "$YT_DEAD_FILE" "$YT_SEEN_FILE" "$YT_SEEN_FILE.new" "$YT_GRANGES" "$YT_RECHECK_FILE".* "$YT_SPROBE_FILE".*
     YT_DEAD_STATE=""; YT_DEAD_SIG=""; YT_STUCK=""
@@ -327,7 +341,7 @@ yt_dead_scan() {
         awk -v now="$now" '$2 > now' "$YT_SPROBE_FILE.ok" > "$YT_SPROBE_FILE.ok.tmp" 2>/dev/null && mv -f "$YT_SPROBE_FILE.ok.tmp" "$YT_SPROBE_FILE.ok"
     fi
     sil=$(printf '%s\n' "$out" | awk '$1 == "SIL" && !s[$2]++ {print $2, $3}')
-    if [ -n "$sil" ] && [ -n "$LAST_WAN_IFACE" ] && { [ -z "$YT_SPROBE_PID" ] || ! kill -0 "$YT_SPROBE_PID" 2>/dev/null; }; then
+    if [ -n "$sil" ] && [ -n "$LAST_WAN_IFACE" ] && ! yt_bg_alive "$YT_SPROBE_PID"; then
         : > "$YT_SPROBE_FILE.in"
         cnt=0
         for hit in $(printf '%s\n' "$sil" | tr ' ' '_'); do
@@ -383,7 +397,7 @@ yt_dead_recheck() {
         if [ "$changed" = 1 ]; then yt_dead_apply; phone_status_refresh; fi
     fi
     [ -s "$YT_DEAD_FILE" ] && [ -n "$LAST_WAN_IFACE" ] || return 0
-    [ -n "$YT_RECHECK_PID" ] && kill -0 "$YT_RECHECK_PID" 2>/dev/null && return 0
+    yt_bg_alive "$YT_RECHECK_PID" && return 0
     now=$(date +%s)
     # только добавленные больше минуты назад (свежие проверять рано)
     awk -v now="$now" -v ttl="$YT_DEAD_TTL" '$2 - ttl + 60 <= now' "$YT_DEAD_FILE" > "$YT_RECHECK_FILE.in" 2>/dev/null

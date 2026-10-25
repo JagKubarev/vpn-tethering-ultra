@@ -639,6 +639,9 @@ dns_degrade() {
                 # Без перехвата клиенты спрашивают DNS раздачи (dnsmasq ->
                 # DNS оператора), а он в белых списках как раз работает.
                 cleanup_dns_redirect
+                # потоки, уже закреплённые за dnsproxy (у Windows — постоянные
+                # порты), иначе так и ходили бы в него с мёртвым апстримом
+                dns_conntrack_flush $DNS_STATE_IFACES
             fi ;;
     esac
     [ "$PHONE_DNS_ON" = "1" ] && phone_dns_rules_off

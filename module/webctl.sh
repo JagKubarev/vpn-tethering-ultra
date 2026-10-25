@@ -279,6 +279,10 @@ case "$1" in
         if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
             echo "ERR dnsproxy не запущен (VPN с DNS из VPN или dnsproxy выключен) — сбрасывать нечего"; exit 0
         fi
+        # в откате клиенты спрашивают оператора (VPN — DNAT), кэш dnsproxy не при чём
+        if grep -qx 'dns_degraded=1' "$MODDIR/status" 2>/dev/null; then
+            echo "ERR DNS сейчас временно через оператора (DoH не отвечает) — кэш dnsproxy не используется"; exit 0
+        fi
         : > "$DNS_FLUSH_FILE"
         i=0
         while [ -f "$DNS_FLUSH_FILE" ] && [ $i -lt 80 ]; do sleep 0.25; i=$((i + 1)); done
