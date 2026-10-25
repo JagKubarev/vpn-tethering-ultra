@@ -43,6 +43,7 @@ FLAG_FILE="$MODDIR/vpn_tether_enabled"
 REQ_FILE="$MODDIR/toggle_req"
 ACK_FILE="$MODDIR/toggle_ack"
 RELOAD_FILE="$MODDIR/reload_req"
+DNS_FLUSH_FILE="$MODDIR/dnsflush_req"
 PID_FILE=/data/local/tmp/vpn_tether.pid
 LOG_FILE=/data/local/tmp/vpn_tether.log
 DNSPROXY_PID_FILE=/data/local/tmp/vpn_tether_dnsproxy.pid
@@ -267,6 +268,26 @@ case "$1" in
                 0|3) echo "ok $ms" ;;
                 *)   echo "fail ошибка сервера (rcode $(( 0x$4 & 15 )))" ;;
             esac
+        fi
+        ;;
+
+    dnsflush)
+        # Сброс кэша DNS: перезапуск dnsproxy делает демон (у него режим и
+        # апстримы), мы ждём, пока он заберёт запрос и порт снова слушается
+        [ -n "$(daemon_pid)" ] || { echo "ERR демон не запущен"; exit 0; }
+        pid=$(cat "$DNSPROXY_PID_FILE" 2>/dev/null)
+        if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+            echo "ERR dnsproxy не запущен (VPN с DNS из VPN или dnsproxy выключен) — сбрасывать нечего"; exit 0
+        fi
+        : > "$DNS_FLUSH_FILE"
+        i=0
+        while [ -f "$DNS_FLUSH_FILE" ] && [ $i -lt 80 ]; do sleep 0.25; i=$((i + 1)); done
+        if [ -f "$DNS_FLUSH_FILE" ]; then rm -f "$DNS_FLUSH_FILE"; echo "ERR демон не ответил за 20 с"; exit 0; fi
+        new=$(cat "$DNSPROXY_PID_FILE" 2>/dev/null)
+        if [ -n "$new" ] && [ "$new" != "$pid" ] && kill -0 "$new" 2>/dev/null; then
+            echo "OK кэш сброшен (dnsproxy перезапущен). На ноутбуке — ещё ipconfig /flushdns"
+        else
+            echo "ERR dnsproxy не поднялся — смотрите лог"
         fi
         ;;
 

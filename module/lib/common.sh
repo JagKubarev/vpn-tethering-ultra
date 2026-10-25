@@ -99,7 +99,7 @@ update_status() {
         echo "dns_degraded=$DNS_DEGRADED"
         echo "dns_alt=$([ -n "$DNS_ALT_UPS" ] && echo 1 || echo 0)"
         echo "ggc=$([ -n "$GGC_STATE" ] && echo on || echo off)"
-        echo "yt_dead=$([ "$YT_DEAD_STATE" = on ] && awk 'END {print NR}' "$YT_DEAD_FILE" 2>/dev/null || echo off)"
+        echo "yt_dead=$([ "$YT_DEAD_STATE" = on ] && cat "$YT_DEAD_FILE" 2>/dev/null | awk 'END {print NR}' || echo off)"
         echo "yt_dead_hits=$(yt_dead_hits)"
         if [ -n "$YT_SLOW_PID" ]; then
             echo "yt_slow=$(sed -n 's/^state=//p' "$YT_SLOW_STAT" 2>/dev/null || echo on)"

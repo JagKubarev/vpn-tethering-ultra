@@ -430,6 +430,29 @@
 #   уборка хвостов 3.13–3.15.1 (цепочки VPN_OPERA_*, ip rule 2990 / таблица
 #   3997, процессы, файлы vpn_tether_opera*); в customize.sh — ключи OPERA_*
 #   из vpn_tether.conf.
+# v3.17 — отбой мёртвых серверов и для Play Маркета, и «молчит после запроса»:
+#   - 25.10, YOTA: загрузки Play вставали на N% — Play качает с тех же
+#     кластеров sn-4g5… (rr…gvt1.com), сервер принимает ClientHello и молчит,
+#     Play ждёт бесконечно; без zapret то же самое. ss -K такого соединения ->
+#     Obsidian докачался через 14с (Play взял другой сервер).
+#   - соединения с gvt1.com — свой бит connmark 0x04000000 (GVT_MATCH): отбой
+#     мёртвых (те же /32 -> /24, перепроверка), обрыв медленных их не трогает.
+#   - «молчит после запроса» (googlevideo.com и gvt1.com): рукопожатие было
+#     (от сервера <= YT_SILENT_MAX), потом YT_SILENT_AFTER=10с ни байта ->
+#     адрес проверяется в фоне (yt_probe_ip: TLS + 204, как перепроверка) и
+#     отбивается, только если проверка не прошла; прошедшие 5 мин не трогаем.
+#   - отбой адреса вынесен в yt_dead_add, проверка — в yt_probe_ip (её же
+#     зовёт перепроверка отбитых).
+#   - DNS: из DNS_FALLBACKS убраны Google и Cloudflare (гео-блок не обходят;
+#     dnsproxy при задержке wlrus брал самый быстрый запасной -> настоящие
+#     адреса ИИ-сервисов в кэше, «регион недоступен» на ноуте). Сброс кэша
+#     dnsproxy (dnsproxy_flush = перезапуск с теми же апстримами): кнопка в
+#     WebUI (webctl dnsflush -> dnsflush_req -> цикл демона); возврат с DNS
+#     оператора или с запасных DoH и раньше перезапускал dnsproxy (кэш пустой).
+#   - по ревью: фоновые проверки отбоя — kill -9 (TERM подоболочке доходил до
+#     trap демона -> cleanup_on_exit и выход; было и у перепроверки с 3.x);
+#     сигнатура dnsproxy не теряется при неудачном сбросе; yt_dead=0, а не
+#     off, пока отбитых нет.
 # ============================================================================
 # ============================================================================
 
@@ -481,9 +504,14 @@ DNS_UPSTREAMS="https://dns.wlrus.cfd/dns-query"
 # становится только он, остальные — его запасные (по порядку). dagami,
 # not-a-dns и comss, как и Wlrus, обходят гео-блок. Первым — dagami: 23.10
 # с YOTA 0.26-0.40с против 1.0-2.6с у not-a-dns (тот не укладывался в 4с
-# проверки, и DNS уходил к оператору). Google/Cloudflare —
-# последние: гео-блок не обходят, но в крайнем случае DNS не уйдёт к оператору.
-DNS_FALLBACKS="https://dns.dagami.ru/dns-query https://not-a-dns.quic.best/dns-query https://dns.comss.one/dns-query https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
+# проверки, и DNS уходил к оператору). Google/Cloudflare убраны (3.17):
+# гео-блок не обходят, а dnsproxy при задержке основного (> --timeout)
+# опрашивает запасные разом и берёт самый быстрый ответ — им мог оказаться
+# Google с настоящими адресами ChatGPT/Claude/Gemini, и тот сидел в кэше
+# (25.10: «регион недоступен» на ноуте, переподключение Wi-Fi не помогало;
+# причина вероятная, в логе не поймана). Молчат
+# все — модуль и так уводит DNS к оператору (проверка dns_health).
+DNS_FALLBACKS="https://dns.dagami.ru/dns-query https://not-a-dns.quic.best/dns-query https://dns.comss.one/dns-query"
 # Апстримы для DNS_VPN=doh (идут через туннель)
 DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Чем резолвить имена самих апстримов (dns.wlrus.cfd и т.д.). Подмена тут не
@@ -556,8 +584,14 @@ YT_GGC_BLOCK=0
 # ни байта; плеер ждёт ~27с. Демон видит такие соединения с googlevideo.com
 # (conntrack) и на YT_DEAD_TTL сек отбивает их /24 (RST) — плеер сразу идёт
 # на другой сервер. Только мимо VPN и пока zapret включён, только IPv4.
+# 3.17: то же для серверов загрузок Play Маркета (gvt1.com, те же кластеры
+# sn-4g5…: Play ждёт молчащий сервер бесконечно, после RST берёт другой) и
+# «молчит после запроса»: рукопожатие было, а на запрос ни байта — такой
+# адрес сначала проверяется (как при снятии отбоя) и отбивается, только если
+# проверка не прошла.
 YT_DEAD_FAILFAST=1
 YT_DEAD_AFTER=6         # сек без ответа сервера после ClientHello = мёртв
+YT_SILENT_AFTER=10      # сек без новых байт после рукопожатия = молчит (-> проверка)
 YT_DEAD_TTL=600         # сек держать сервер/подсеть в отбое (ожил раньше — снимаем)
 YT_DEAD_MAX=16          # больше записей не держим
 # Обрыв медленных видеосоединений (3.7): ТСПУ режет большую часть
@@ -930,6 +964,7 @@ STATUS_FILE="$MODULE_DIR/status"
 REQ_FILE="$MODULE_DIR/toggle_req"
 ACK_FILE="$MODULE_DIR/toggle_ack"
 RELOAD_FILE="$MODULE_DIR/reload_req"   # есть вместе с USR1 = перечитать настройки (WebUI)
+DNS_FLUSH_FILE="$MODULE_DIR/dnsflush_req"   # WebUI: сбросить кэш dnsproxy (цикл забирает за ~2с)
 USR1_PENDING=0
 DISCOVERY_SRC=""
 LOG_FILE="/data/local/tmp/vpn_tether.log"
@@ -1004,6 +1039,8 @@ CHAIN_ZAPRET_GGC="VPN_ZAPRET_GGC"   # filter OUTPUT/FORWARD: YouTube мимо к
 # ClientHello; у постквантового ClientHello из двух сегментов имя может
 # оказаться во втором — поэтому 1:6, а не 1:1)
 GGC_MATCH="-p tcp --dport 443 -m connbytes --connbytes-dir original --connbytes-mode packets --connbytes 1:6 -m string --string googlevideo.com --algo bm"
+# то же для серверов загрузок Play Маркета (rr…---sn-….gvt1.com)
+GVT_MATCH="-p tcp --dport 443 -m connbytes --connbytes-dir original --connbytes-mode packets --connbytes 1:6 -m string --string gvt1.com --algo bm"
 GGC_STATE=""            # что стоит: "" | v4 | v4+v6 (для лога)
 # Мёртвые видеосерверы (YT_DEAD_FAILFAST). Соединения с googlevideo.com
 # помечаются битом connmark (у netd — младшие 0xfffff, этот бит не трогает),
@@ -1011,8 +1048,12 @@ GGC_STATE=""            # что стоит: "" | v4 | v4+v6 (для лога)
 CHAIN_YT_MARK="VPN_YT_MARK"     # mangle OUTPUT/FORWARD: пометить googlevideo.com
 CHAIN_YT_DEAD="VPN_YT_DEAD"     # filter OUTPUT/FORWARD: мёртвые подсети -> RST
 YT_CTMARK=0x10000000
+YT_GCTMARK=0x04000000   # gvt1.com (Play): отбой мёртвых да, обрыв медленных (ytslow.sh) — нет
+YT_SILENT_MAX=16384     # молчит после запроса: от сервера не больше (рукопожатие ~5 КБ)
 YT_DEAD_FILE="/data/local/tmp/vpn_tether_ytdead"   # "подсеть/24 до_когда(epoch) ip"
-YT_SEEN_FILE="/data/local/tmp/vpn_tether_ytseen"   # кандидаты: "кортеж впервые вид учтён"
+YT_SEEN_FILE="/data/local/tmp/vpn_tether_ytseen"   # кандидаты: "кортеж впервые вид учтён байт_ответа когда_менялись"
+YT_SPROBE_FILE="/data/local/tmp/vpn_tether_ytsprobe"  # проверка молчащих: .in .done .ok
+YT_SPROBE_PID=""
 YT_GRANGES="/data/local/tmp/vpn_tether_ytgr"       # сети Google числами: "начало конец"
 YT_RECHECK_FILE="/data/local/tmp/vpn_tether_ytrecheck"  # фоновая перепроверка отбитых
 YT_RECHECK_PID=""
@@ -1154,7 +1195,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.16 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.17 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное

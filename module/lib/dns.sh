@@ -632,6 +632,20 @@ dns_route_changed() {
     [ "$DNS_DEGRADED" = "1" ] && DNS_FAST_RECHECK=1
 }
 
+# Сброс кэша dnsproxy (3.17): кэш живёт в памяти процесса — перезапуск с теми
+# же режимом и апстримами (порт свободен ~1с). $1 — причина, для журнала.
+# 0 — перезапущен; 1 — dnsproxy не запущен (VPN с DNAT, DNSPROXY_ENABLE=0).
+dnsproxy_flush() {
+    local tag ups
+    [ -n "$DNSPROXY_SIG" ] && dnsproxy_alive || return 1
+    tag="${DNSPROXY_SIG%%"|"*}"; ups="${DNSPROXY_SIG#*"|"}"
+    log "DNS: сбрасываю кэш dnsproxy ($1)"
+    dnsproxy_stop
+    # не поднялся — сигнатуру вернуть: dnsproxy_stop её обнулил, и сторож
+    # иначе не знал бы, с чем перезапускать
+    dnsproxy_start "$tag" $ups || { DNSPROXY_SIG="$tag|$ups"; return 1; }
+}
+
 dns_restore() {
     [ "$DNS_DEGRADED" = "1" ] || return 0
     DNS_DEGRADED=0
@@ -670,7 +684,7 @@ wan_bytes() {
 # модуль увёл DNS к оператору — а тот для заблокированных сайтов может отдать
 # заглушку, которая потом сидит в кэше Android/Windows. Теперь: основной
 # DoH молчит -> тот же dnsproxy, но основными становятся DNS_FALLBACKS
-# (Google/Cloudflare DoH). К оператору — только если молчат и они (белые
+# (с 3.17 — только DoH с обходом гео-блока). К оператору — только если молчат и они (белые
 # списки). Ожил ли основной — проверяем curl-ом раз в DNS_HEALTH_RECOVER,
 # не трогая dnsproxy (его кэш не теряется).
 dns_hosts_of() { echo $* | sed -E 's#[a-z0-9]+://([^/: ]+)[^ ]*#\1#g'; }
@@ -735,7 +749,7 @@ dns_alt_recheck() {
     DNS_ALT_UPS=""
     DNS_ALT_OKS=0
     if dnsproxy_start "direct-doh" $DNS_UPSTREAMS; then
-        log "DoH-апстрим $(dns_hosts_of $DNS_UPSTREAMS) снова отвечает — DNS обратно через него"
+        log "DoH-апстрим $(dns_hosts_of $DNS_UPSTREAMS) снова отвечает — DNS обратно через него (dnsproxy перезапущен, кэш пустой)"
     fi
     DNS_HEALTH_LAST=0
     phone_status_refresh

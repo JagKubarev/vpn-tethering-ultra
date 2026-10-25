@@ -320,6 +320,11 @@ monitor_loop() {
         handle_change || log "ERROR: handle_change failed, continuing anyway"
         # отдельно от handle_change: тот рано выходит, когда хотспот выключен
         phone_dns_reconcile
+        # WebUI: сбросить кэш DNS (webctl dnsflush ждёт, пока файл исчезнет)
+        if [ -f "$DNS_FLUSH_FILE" ]; then
+            dnsproxy_flush "кнопка в WebUI" || log "DNS: сброс кэша — dnsproxy сейчас не запущен"
+            rm -f "$DNS_FLUSH_FILE"
+        fi
         dns_health
         [ $((_loop_count % 15)) -eq 0 ] && quic_block_apply
         [ $((_loop_count % 15)) -eq 7 ] && meta_eu_watchdog

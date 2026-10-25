@@ -69,13 +69,20 @@ zapret_ggc_hits() {
 # списка. tun+ — мимо: через VPN сервер достижим.
 YT_MARK_OUT="! -o tun+ -m owner ! --uid-owner 0 $GGC_MATCH -j CONNMARK --set-xmark $YT_CTMARK/$YT_CTMARK"
 YT_MARK_FWD="! -o tun+ $GGC_MATCH -j CONNMARK --set-xmark $YT_CTMARK/$YT_CTMARK"
+# Play Маркет (gvt1.com) — свой бит: обрыв медленных его не трогает
+YT_GMARK_OUT="! -o tun+ -m owner ! --uid-owner 0 $GVT_MATCH -j CONNMARK --set-xmark $YT_GCTMARK/$YT_GCTMARK"
+YT_GMARK_FWD="! -o tun+ $GVT_MATCH -j CONNMARK --set-xmark $YT_GCTMARK/$YT_GCTMARK"
 
 yt_dead_hooks_off() {
-    local c _n
+    local c m _n
     _n=0; while [ $_n -lt 8 ] && $iptables -t mangle -D OUTPUT $YT_MARK_OUT 2>/dev/null; do _n=$((_n + 1)); done
     _n=0; while [ $_n -lt 8 ] && $iptables -t mangle -D FORWARD $YT_MARK_FWD 2>/dev/null; do _n=$((_n + 1)); done
+    _n=0; while [ $_n -lt 8 ] && $iptables -t mangle -D OUTPUT $YT_GMARK_OUT 2>/dev/null; do _n=$((_n + 1)); done
+    _n=0; while [ $_n -lt 8 ] && $iptables -t mangle -D FORWARD $YT_GMARK_FWD 2>/dev/null; do _n=$((_n + 1)); done
     for c in OUTPUT FORWARD; do
-        _n=0; while [ $_n -lt 8 ] && $iptables -D "$c" $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null; do _n=$((_n + 1)); done
+        for m in "$GGC_MATCH" "$GVT_MATCH"; do
+            _n=0; while [ $_n -lt 8 ] && $iptables -D "$c" $m -j "$CHAIN_YT_DEAD" 2>/dev/null; do _n=$((_n + 1)); done
+        done
     done
 }
 
@@ -93,21 +100,29 @@ yt_dead_on() {
     YT_DEAD_SIG="-"
     yt_dead_apply
     $iptables -t mangle -I FORWARD 1 $YT_MARK_FWD 2>/dev/null
+    $iptables -t mangle -I FORWARD 1 $YT_GMARK_FWD 2>/dev/null
+    $iptables -I FORWARD 1 $GVT_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     $iptables -I FORWARD 1 $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     if [ "$ZAPRET_PHONE" = "1" ]; then
         $iptables -t mangle -I OUTPUT 1 $YT_MARK_OUT 2>/dev/null
+        $iptables -t mangle -I OUTPUT 1 $YT_GMARK_OUT 2>/dev/null
+        $iptables -I OUTPUT 1 $GVT_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
         $iptables -I OUTPUT 1 $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     fi
-    [ "$YT_DEAD_STATE" = "on" ] || log "zapret: отбой мёртвых видеосерверов YouTube включён (нет ответа ${YT_DEAD_AFTER}с -> /24 на $((YT_DEAD_TTL / 60)) мин)"
+    [ "$YT_DEAD_STATE" = "on" ] || log "zapret: отбой мёртвых и молчащих серверов YouTube и Play включён (нет ответа ${YT_DEAD_AFTER}с, на запрос ${YT_SILENT_AFTER}с и проверка не прошла -> RST на $((YT_DEAD_TTL / 60)) мин)"
     YT_DEAD_STATE="on"
 }
 
 yt_dead_off() {
     yt_dead_hooks_off
     $iptables -F "$CHAIN_YT_DEAD" 2>/dev/null; $iptables -X "$CHAIN_YT_DEAD" 2>/dev/null
-    [ -n "$YT_RECHECK_PID" ] && kill "$YT_RECHECK_PID" 2>/dev/null; YT_RECHECK_PID=""
+    # -9: TERM подоболочке «( … ) &» в mksh доходит до trap демона ->
+    # cleanup_on_exit и выход (25.10, воспроизведено на телефоне); curl
+    # внутри сам закончится за <=3с
+    [ -n "$YT_RECHECK_PID" ] && kill -9 "$YT_RECHECK_PID" 2>/dev/null; YT_RECHECK_PID=""
+    [ -n "$YT_SPROBE_PID" ] && kill -9 "$YT_SPROBE_PID" 2>/dev/null; YT_SPROBE_PID=""
     yt_slow_stop
-    rm -f "$YT_DEAD_FILE" "$YT_SEEN_FILE" "$YT_SEEN_FILE.new" "$YT_GRANGES" "$YT_RECHECK_FILE".*
+    rm -f "$YT_DEAD_FILE" "$YT_SEEN_FILE" "$YT_SEEN_FILE.new" "$YT_GRANGES" "$YT_RECHECK_FILE".* "$YT_SPROBE_FILE".*
     YT_DEAD_STATE=""; YT_DEAD_SIG=""; YT_STUCK=""
 }
 
@@ -157,14 +172,73 @@ yt_dead_hits() {
     $iptables -L "$CHAIN_YT_DEAD" -v -x -n 2>/dev/null | awk '/REJECT/ {s += $1} END {print s + 0}'
 }
 
-# Раз в ~4с: соединения с googlevideo.com (помечены; у раздачи пометку
-# может стереть tether_unblock — тогда любые к сетям Google) из conntrack. ClientHello ушёл
-# (>=600 байт), а от сервера дольше YT_DEAD_AFTER — ни байта данных:
+# Проверка адреса сервера: TLS-рукопожатие с нейтральным именем
+# (www.google.com) и ответ 204 мимо обхода и AdGuard (группа dnsproxy).
+# Печатает ok/dead. Зовётся только в фоне — до 3 с на адрес.
+yt_probe_ip() {
+    local cmd c
+    cmd="curl -s -k -o /dev/null -m 3 --interface $LAST_WAN_IFACE --connect-to www.google.com:443:$1:443 -w '%{http_code}' https://www.google.com/generate_204"
+    if [ "$DNSPROXY_SU_G" = "1" ]; then c=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else c=$(eval "$cmd" 2>/dev/null); fi
+    if [ "$c" = 204 ]; then echo ok; else echo dead; fi
+}
+
+# Отбить адрес мёртвого/молчащего сервера: /32, второй в той же /24 — вся /24.
+#   yt_dead_add АДРЕС КТО ЧТО_С_НИМ NOW   (КТО и ЧТО — для журнала)
+# 0 — добавлен (цепочку отбоя надо пересобрать), 1 — нет.
+yt_dead_add() {
+    local dip="$1" who="$2" why="$3" now="$4" net n24 sib keep t nlist
+    case "$dip" in *[!0-9.]*|'') return 1 ;; esac
+    net="$dip/32"; n24="${dip%.*}.0/24"
+    # уже открытые соединения телефона к нему — закрыть сразу: AdGuard и
+    # приложение переподключатся (с раздачи соединение доживёт до таймаута)
+    ss -K -tn dst "$dip" dport = :443 >/dev/null 2>&1
+    grep -q -e "^$net " -e "^$n24 " "$YT_DEAD_FILE" 2>/dev/null && return 1
+    [ "$now" -lt "$YT_DEAD_PAUSE" ] && return 1
+    # лавина (>=6 подсетей за минуту) — не мёртвые серверы, а сломанный
+    # обход или связь: отбив всё подряд, оставим плеер без серверов
+    keep=""
+    for t in $YT_DEAD_ADDS; do [ $((now - t)) -lt 60 ] && keep="$keep $t"; done
+    YT_DEAD_ADDS="$keep"
+    if [ "$(echo $YT_DEAD_ADDS | wc -w)" -ge 6 ]; then
+        YT_DEAD_PAUSE=$((now + 300))
+        log "WARNING: YouTube: слишком много «мёртвых» видеосерверов подряд — похоже, сломан обход или связь; 5 мин новые не отбиваю"
+        return 1
+    fi
+    nlist=$(awk 'END {print NR}' "$YT_DEAD_FILE" 2>/dev/null)
+    [ "${nlist:-0}" -ge "$YT_DEAD_MAX" ] && return 1
+    # второй мёртвый в той же /24 — отбиваем подсеть целиком (в записи —
+    # все замеченные адреса: по ним перепроверка поймёт, ожила ли она)
+    sib=$(awk -v p="${dip%.*}." 'index($1, p) == 1 && $1 ~ /\/32$/ { sub(/\/32$/, "", $1); printf "%s,", $1 }' "$YT_DEAD_FILE" 2>/dev/null)
+    if [ -n "$sib" ]; then
+        awk -v p="${dip%.*}." '!(index($1, p) == 1 && $1 ~ /\/32$/)' "$YT_DEAD_FILE" > "$YT_DEAD_FILE.tmp" && mv -f "$YT_DEAD_FILE.tmp" "$YT_DEAD_FILE"
+        echo "$n24 $((now + YT_DEAD_TTL)) $sib$dip" >> "$YT_DEAD_FILE"
+        log "$who $dip $why — в $n24 это уже второй (${sib%,}), отбиваю подсеть на $((YT_DEAD_TTL / 60)) мин"
+    else
+        echo "$net $((now + YT_DEAD_TTL)) $dip" >> "$YT_DEAD_FILE"
+        log "$who $dip $why — отбиваю его на $((YT_DEAD_TTL / 60)) мин"
+    fi
+    YT_DEAD_ADDS="$YT_DEAD_ADDS $now"
+    return 0
+}
+
+yt_dead_who() {
+    case "$1" in play) echo "Play Маркет: сервер загрузок" ;; *) echo "YouTube: видеосервер" ;; esac
+}
+
+# Раз в ~4с: соединения с googlevideo.com и gvt1.com (помечены; у раздачи
+# пометку может стереть tether_unblock — тогда любые к сетям Google) из
+# conntrack. ClientHello ушёл (>=600 байт), а от сервера дольше
+# YT_DEAD_AFTER — ни байта данных:
 #   пакетов от сервера >=2 — ClientHello он подтвердил, но молчит -> мёртв;
 #   1 (только SYN-ACK) — ClientHello не дошёл: это DPI, а не сервер -> сторожу.
+# Молчит после запроса (только помеченные): от сервера было рукопожатие,
+# но не больше YT_SILENT_MAX, и YT_SILENT_AFTER — ни байта нового. Так же
+# выглядит и живое соединение без запроса (заготовка, короткий ответ), поэтому
+# такой адрес сначала проверяется в фоне (yt_probe_ip), отбой — только если
+# проверка не прошла; прошедшие 5 мин не проверяем снова.
 yt_dead_scan() {
     [ "$YT_DEAD_STATE" = "on" ] || return 0
-    local now out dip net n t keep="" changed=0 nlist
+    local now out dip hit n t keep="" changed=0 sil res tag cnt
     # не ip: локальная ip затирала бы $ip (/system/bin/ip) — адрес WAN ниже не узнавался
     now=$(date +%s)
     if [ -s "$YT_DEAD_FILE" ]; then
@@ -177,9 +251,9 @@ yt_dead_scan() {
     # подстраховка "по сетям Google" — только для раздачи
     local wip="$LAST_WAN_IP"
     [ -n "$wip" ] || wip=$($ip -4 addr show "$LAST_WAN_IFACE" 2>/dev/null | awk '/inet / {sub(/\/.*/, "", $2); print $2; exit}')
-    out=$($CONNTRACK_BIN -L -p tcp --dport 443 2>/dev/null | awk -v now="$now" -v after="$YT_DEAD_AFTER" -v sf="$YT_SEEN_FILE" -v gr="$YT_GRANGES" -v wip="$wip" '
+    out=$($CONNTRACK_BIN -L -p tcp --dport 443 2>/dev/null | awk -v now="$now" -v after="$YT_DEAD_AFTER" -v safter="$YT_SILENT_AFTER" -v smax="$YT_SILENT_MAX" -v sf="$YT_SEEN_FILE" -v gr="$YT_GRANGES" -v wip="$wip" '
         FILENAME == gr { gs[++ng] = $1; ge[ng] = $2; next }
-        FILENAME == sf { seen[$1] = $2; rep[$1] = $4; next }
+        FILENAME == sf { seen[$1] = $2; rep[$1] = $4; sbr[$1] = $5; stb[$1] = $6; next }
         / ESTABLISHED / {
             src = ""; dst = ""; rsrc = ""; sp = ""; po = -1; bo = -1; pr = -1; br = -1; mk = 0
             for (i = 1; i <= NF; i++) {
@@ -193,65 +267,88 @@ yt_dead_scan() {
             }
             # приложение -> AdGuard (REDIRECT): отвечает сам AdGuard, о сервере это ничего не говорит
             if (rsrc != dst) next
-            # не помечено как googlevideo — тогда только если сервер в сетях Google
-            marked = (int(mk / 268435456) % 2 == 1)
-            if (!marked) {
+            # yt — googlevideo.com, gv — gvt1.com (Play); не помечено — тогда
+            # только если сервер в сетях Google
+            yt = (int(mk / 268435456) % 2 == 1)
+            gv = (int(mk / 67108864) % 2 == 1)
+            if (!yt && !gv) {
                 if (src == wip) next
                 split(dst, o, "."); n = ((o[1] * 256 + o[2]) * 256 + o[3]) * 256 + o[4]; g = 0
                 for (j = 1; j <= ng; j++) if (n >= gs[j] && n <= ge[j]) { g = 1; break }
                 if (!g) next
             }
+            tag = (gv && !yt) ? "play" : "yt"
+            k = src ":" sp ">" dst
+            t0 = (k in seen) ? seen[k] : now
+            d = (k in rep) ? rep[k] : 0
+            # молчит после запроса: данные от сервера были (рукопожатие), но
+            # мало, и safter ни байта нового -> кандидат на проверку (каждый
+            # раз: повторы отсекают отбой и «живой» на 5 мин у демона)
+            if ((yt || gv) && bo >= 600 && br > 60 * pr && br <= smax) {
+                tb = (k in sbr && sbr[k] == br) ? stb[k] : now
+                if (now - tb >= safter) print "SIL", dst, tag
+                ns[k] = t0 " silent " d " " br " " tb
+                next
+            }
             # от сервера — только пустые пакеты (SYN-ACK 60 + ACK 52 байта): ни
             # одного байта данных. Порог по объёму путал с мёртвыми простаивающие
             # соединения с коротким ответом (возобновлённая TLS-сессия)
             if (bo < 600 || pr < 1 || br > 60 * pr) next
-            k = src ":" sp ">" dst
             kind = (pr <= 1) ? "stuck" : "dead"
             # застрявшие (сигнал сторожу) — только точно googlevideo.com
-            if (kind == "stuck" && !marked) next
-            t0 = (k in seen) ? seen[k] : now
-            d = (k in rep) ? rep[k] : 0
-            if (now - t0 >= after && d == 0) { print "HIT", kind, dst; d = 1 }
-            ns[k] = t0 " " kind " " d
+            if (kind == "stuck" && !yt) next
+            if (now - t0 >= after && d == 0) { print "HIT", kind, dst, tag; d = 1 }
+            ns[k] = t0 " " kind " " d " " br " " now
         }
         END { for (k in ns) print k, ns[k] > (sf ".new") }
     ' "$YT_GRANGES" "$YT_SEEN_FILE" - 2>/dev/null)
     if [ -f "$YT_SEEN_FILE.new" ]; then mv -f "$YT_SEEN_FILE.new" "$YT_SEEN_FILE"; else : > "$YT_SEEN_FILE"; fi
 
-    for dip in $(printf '%s\n' "$out" | awk '$1 == "HIT" && $2 == "dead" {print $3}' | sort -u); do
-        case "$dip" in *[!0-9.]*|'') continue ;; esac
-        net="$dip/32"; n24="${dip%.*}.0/24"
-        # уже открытые соединения телефона к нему — закрыть сразу: AdGuard и
-        # приложение переподключатся (с раздачи соединение доживёт до таймаута)
-        ss -K -tn dst "$dip" dport = :443 >/dev/null 2>&1
-        grep -q -e "^$net " -e "^$n24 " "$YT_DEAD_FILE" 2>/dev/null && continue
-        [ "$now" -lt "$YT_DEAD_PAUSE" ] && continue
-        # лавина (>=6 подсетей за минуту) — не мёртвые серверы, а сломанный
-        # обход или связь: отбив всё подряд, оставим плеер без серверов
-        keep=""
-        for t in $YT_DEAD_ADDS; do [ $((now - t)) -lt 60 ] && keep="$keep $t"; done
-        YT_DEAD_ADDS="$keep"
-        if [ "$(echo $YT_DEAD_ADDS | wc -w)" -ge 6 ]; then
-            YT_DEAD_PAUSE=$((now + 300))
-            log "WARNING: YouTube: слишком много «мёртвых» видеосерверов подряд — похоже, сломан обход или связь; 5 мин новые не отбиваю"
-            continue
-        fi
-        nlist=$(awk 'END {print NR}' "$YT_DEAD_FILE" 2>/dev/null)
-        [ "${nlist:-0}" -ge "$YT_DEAD_MAX" ] && continue
-        # второй мёртвый в той же /24 — отбиваем подсеть целиком (в записи —
-        # все замеченные адреса: по ним перепроверка поймёт, ожила ли она)
-        sib=$(awk -v p="${dip%.*}." 'index($1, p) == 1 && $1 ~ /\/32$/ { sub(/\/32$/, "", $1); printf "%s,", $1 }' "$YT_DEAD_FILE" 2>/dev/null)
-        if [ -n "$sib" ]; then
-            awk -v p="${dip%.*}." '!(index($1, p) == 1 && $1 ~ /\/32$/)' "$YT_DEAD_FILE" > "$YT_DEAD_FILE.tmp" && mv -f "$YT_DEAD_FILE.tmp" "$YT_DEAD_FILE"
-            echo "$n24 $((now + YT_DEAD_TTL)) $sib$dip" >> "$YT_DEAD_FILE"
-            log "YouTube: видеосервер $dip молчит после ClientHello — в $n24 это уже второй (${sib%,}), отбиваю подсеть на $((YT_DEAD_TTL / 60)) мин"
-        else
-            echo "$net $((now + YT_DEAD_TTL)) $dip" >> "$YT_DEAD_FILE"
-            log "YouTube: видеосервер $dip принял ClientHello и молчит ${YT_DEAD_AFTER}с — отбиваю его на $((YT_DEAD_TTL / 60)) мин"
-        fi
-        YT_DEAD_ADDS="$YT_DEAD_ADDS $now"
-        changed=1
+    # адрес_кто (не через "while read" из трубы: тот идёт в подоболочке)
+    for hit in $(printf '%s\n' "$out" | awk '$1 == "HIT" && $2 == "dead" && !s[$3]++ {print $3 "_" $4}'); do
+        dip="${hit%_*}"; tag="${hit#*_}"
+        yt_dead_add "$dip" "$(yt_dead_who "$tag")" "принял ClientHello и молчит ${YT_DEAD_AFTER}с" "$now" && changed=1
     done
+
+    # молчащие: итог фоновой проверки с прошлых вызовов -> отбой или
+    # «живой» на 5 мин; новые кандидаты -> в проверку (по 4 за раз)
+    if [ -f "$YT_SPROBE_FILE.done" ]; then
+        while read -r dip tag res; do
+            case "$dip" in *[!0-9.]*|'') continue ;; esac
+            if [ "$res" = ok ]; then
+                echo "$dip $((now + 300))" >> "$YT_SPROBE_FILE.ok"
+            else
+                yt_dead_add "$dip" "$(yt_dead_who "$tag")" "ответил на рукопожатие, а на запрос молчит ${YT_SILENT_AFTER}с, проверка не прошла" "$now" && changed=1
+            fi
+        done < "$YT_SPROBE_FILE.done"
+        rm -f "$YT_SPROBE_FILE.done"
+    fi
+    if [ -s "$YT_SPROBE_FILE.ok" ]; then
+        awk -v now="$now" '$2 > now' "$YT_SPROBE_FILE.ok" > "$YT_SPROBE_FILE.ok.tmp" 2>/dev/null && mv -f "$YT_SPROBE_FILE.ok.tmp" "$YT_SPROBE_FILE.ok"
+    fi
+    sil=$(printf '%s\n' "$out" | awk '$1 == "SIL" && !s[$2]++ {print $2, $3}')
+    if [ -n "$sil" ] && [ -n "$LAST_WAN_IFACE" ] && { [ -z "$YT_SPROBE_PID" ] || ! kill -0 "$YT_SPROBE_PID" 2>/dev/null; }; then
+        : > "$YT_SPROBE_FILE.in"
+        cnt=0
+        for hit in $(printf '%s\n' "$sil" | tr ' ' '_'); do
+            dip="${hit%_*}"
+            case "$dip" in *[!0-9.]*|'') continue ;; esac
+            # уже в отбое или недавно прошёл проверку — не трогаем
+            grep -q -e "^$dip/32 " -e "^${dip%.*}.0/24 " "$YT_DEAD_FILE" 2>/dev/null && continue
+            grep -q "^$dip " "$YT_SPROBE_FILE.ok" 2>/dev/null && continue
+            echo "$hit" | tr '_' ' ' >> "$YT_SPROBE_FILE.in"
+            cnt=$((cnt + 1)); [ "$cnt" -ge 4 ] && break
+        done
+        if [ -s "$YT_SPROBE_FILE.in" ]; then
+            (
+                while read -r dip tag; do
+                    echo "$dip $tag $(yt_probe_ip "$dip")"
+                done < "$YT_SPROBE_FILE.in" > "$YT_SPROBE_FILE.tmp"
+                mv -f "$YT_SPROBE_FILE.tmp" "$YT_SPROBE_FILE.done"
+            ) </dev/null >/dev/null 2>&1 &
+            YT_SPROBE_PID=$!
+        fi
+    fi
 
     # застрявшие на ClientHello — сигнал сторожу (держим последние 2 мин)
     keep=""
@@ -296,9 +393,7 @@ yt_dead_recheck() {
             res=dead
             for ip in $(echo "$ips" | tr ',' ' '); do
                 case "$ip" in *[!0-9.]*|'') continue ;; esac
-                cmd="curl -s -k -o /dev/null -m 3 --interface $LAST_WAN_IFACE --connect-to www.google.com:443:$ip:443 -w '%{http_code}' https://www.google.com/generate_204"
-                if [ "$DNSPROXY_SU_G" = "1" ]; then c=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else c=$(eval "$cmd" 2>/dev/null); fi
-                [ "$c" = 204 ] && { res=ok; break; }
+                [ "$(yt_probe_ip "$ip")" = ok ] && { res=ok; break; }
             done
             echo "$net $res"
         done < "$YT_RECHECK_FILE.in" > "$YT_RECHECK_FILE.tmp"
