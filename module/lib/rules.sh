@@ -558,7 +558,9 @@ $ip link set dev "$TUN_NAME" mtu "$tun_mtu" 2>/dev/null && \
         # (клиент без интернета) и выходим с ошибкой — apply_state попробует
         # снова. Раньше здесь молча получался рабочий direct.
         log "ERROR: VPN routing rules не встали, держу kill-switch (hard)"
-        update_status "blocked" "$(echo $tether_ifaces | tr ' ' '/')" "$CURRENT_NET_PROFILE"
+        # без kill-switch guard не ставится, а общий ACCEPT уже стоит — напрямую
+        if [ "$KILL_SWITCH" = "1" ]; then _m=blocked; else _m=direct; fi
+        update_status "$_m" "$(echo $tether_ifaces | tr ' ' '/')" "$CURRENT_NET_PROFILE"
         return 1
     fi
 

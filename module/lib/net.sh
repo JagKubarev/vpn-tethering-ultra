@@ -343,9 +343,12 @@ get_vpn_dns() {
     
     if command -v dumpsys >/dev/null 2>&1; then
         local dumpsys_out
-        # без запасного второго dumpsys: тот шёл без таймаута (код возврата —
-        # от grep, «блок не найден» = повтор) и мог повесить демон
+        # второй заход — на случай, если первый срезал таймаут (медленный
+        # dumpsys на старых телефонах), но тоже с таймаутом: раньше он шёл
+        # без него и мог повесить демон. На 13T dumpsys ~35 мс.
         dumpsys_out=$($TIMEOUT_CMD sh -c "dumpsys connectivity 2>/dev/null" | grep -A200 "VPN CONNECTED" | grep -B5 -A5 "InterfaceName: $TUN_NAME")
+        [ -z "$dumpsys_out" ] && [ -n "$TIMEOUT_CMD" ] && \
+            dumpsys_out=$(${TIMEOUT_CMD% 3} 8 sh -c "dumpsys connectivity 2>/dev/null" | grep -A200 "VPN CONNECTED" | grep -B5 -A5 "InterfaceName: $TUN_NAME")
         
         if [ -n "$dumpsys_out" ]; then
             log "VPN block found (first 80 chars): $(echo "$dumpsys_out" | head -1 | cut -b1-80)..."
