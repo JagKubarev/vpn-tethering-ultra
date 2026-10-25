@@ -168,7 +168,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 Нумерация `X.Y.Z`: **X** — этап, **Y** — заметная функция, **Z** — исправления.
 `versionCode` = X·10000 + Y·100 + Z (3.8.1 → 30801). До 23.10.2026 у модуля было две
 нумерации (внешняя 2.x и внутренняя 3.x-hybrid) — таблица соответствия в [`CHANGELOG.md`](CHANGELOG.md).
-Теги `v1.0` … `v3.16`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
+Теги `v1.0` … `v3.17`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
 
 <details>
 <summary>Кратко по версиям</summary>
