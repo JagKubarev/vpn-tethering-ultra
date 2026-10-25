@@ -100,10 +100,19 @@ on_exit() {
         : > "$OUT.sitesfail"
     fi
 }
+# уже идёт другой scan.sh (демон и WebUI в один такт): общие $TMP, очередь
+# и pid-файл — второй испортил бы первому данные и удалил его pid
+_p=$(cat "$OUT.pid" 2>/dev/null)
+if [ -n "$_p" ] && [ "$_p" != "$$" ] && kill -0 "$_p" 2>/dev/null; then
+    case "$(tr '\0' ' ' < "/proc/$_p/cmdline" 2>/dev/null)" in *zapret/scan.sh*) exit 0 ;; esac
+fi
 trap on_exit EXIT
 trap 'exit 0' INT TERM
 
 echo $$ > "$OUT.pid"
+# nfqws на нашей очереди от убитого (kill -9, OOM) прогона: иначе очередь
+# занята, все прогоны «nfqws: …», и сирота портит HTTPS от root
+for _p in $(pgrep -f "nfqws.*--qnum=$Q " 2>/dev/null); do kill -9 "$_p" 2>/dev/null; done
 : > "$OUT.results"
 S_done=0; S_total=0; S_blocked=""; S_started=$(date +%H:%M:%S)
 st state=running stage="подготовка" msg=""
@@ -222,7 +231,8 @@ st stage="проверяю, что заблокировано"
 test_sites
 BASE_OK=""; BLOCKED=""
 while read -r h ip; do
-    read -r v _ < "$TMP/r.$h"
+    # нет файла — не брать v от прошлого сайта
+    v=""; read -r v _ < "$TMP/r.$h" 2>/dev/null
     if [ "$v" = ok ]; then BASE_OK="$BASE_OK $h"; else BLOCKED="$BLOCKED $h"; fi
 done < "$TMP/ips"
 st blocked="$(echo $BLOCKED)"
@@ -267,7 +277,7 @@ run_strat() {
     test_sites
     kill "$NQPID" 2>/dev/null; wait "$NQPID" 2>/dev/null; NQPID=""
     while read -r h ip; do
-        read -r v t < "$TMP/r.$h"
+        v=""; t=""; read -r v t < "$TMP/r.$h" 2>/dev/null
         if [ "$v" = ok ]; then
             ok=$((ok + 1))
             sum=$(awk -v s="$sum" -v t="$t" 'BEGIN { printf "%d", s + t * 1000 }')

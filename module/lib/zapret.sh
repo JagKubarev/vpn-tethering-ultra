@@ -81,8 +81,21 @@ ZAPRET_EXCL_RUN=""
 zapret_alive() {
     local pid
     pid=$(cat "$ZAPRET_PID_FILE" 2>/dev/null)
-    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && grep -q nfqws "/proc/$pid/cmdline" 2>/dev/null
+    # своя очередь: nfqws подбора (203) или WebUI (202) с номером умершего
+    # основного сошёл бы за живой
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && grep -q "qnum=$ZAPRET_QNUM" "/proc/$pid/cmdline" 2>/dev/null
 }
+
+# Идёт подбор / сторож / проверка сайтов: pid жив и это scan.sh (pid-файл
+# с прошлой загрузки мог достаться чужому процессу — сторож молчал бы вечно)
+zscan_running() {
+    local pid
+    pid=$(cat "$ZSCAN_PID_FILE" 2>/dev/null)
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+    case "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" in *zapret/scan.sh*) return 0 ;; esac
+    return 1
+}
+ZSCAN_JUST_TS=0   # сторож только что запустил scan.sh (его pid-файла ещё нет)
 
 # Все nfqws на нашей очереди, в т.ч. оставшиеся от убитого демона
 zapret_kill_all() {
@@ -373,10 +386,10 @@ zapret_watchdog() {
         [ "$n" -ge 3 ] && [ $((now - ZWD_LAST)) -ge 180 ] || return 0
         log "zapret: $n соединений YouTube застряли на ClientHello — сторож проверяет стратегию"
     fi
-    pid=$(cat "$ZSCAN_PID_FILE" 2>/dev/null)
-    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && return 0   # уже идёт подбор/проверка
+    zscan_running && return 0   # уже идёт подбор/проверка
     ZWD_LAST=$now
     YT_STUCK=""
+    ZSCAN_JUST_TS=$now
     setsid sh "$ZAPRET_DIR/scan.sh" check </dev/null >/dev/null 2>&1 &
 }
 
@@ -395,8 +408,9 @@ zapret_sites_check() {
     [ "$ZSITES_LAST" -eq 0 ] && { ZSITES_LAST=$((now - ZAPRET_ALT_MIN * 60 + 600)); return 0; }
     [ "$now" -ge $((ZSITES_LAST + ZAPRET_ALT_MIN * 60)) ] || return 0
     vpn_up_now && return 0
-    pid=$(cat "$ZSCAN_PID_FILE" 2>/dev/null)
-    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && return 0   # идёт подбор/сторож
+    zscan_running && return 0   # идёт подбор/сторож
+    # сторож запустил scan.sh в этом же такте — его pid-файла ещё нет
+    [ $((now - ZSCAN_JUST_TS)) -lt 10 ] && return 0
     ZSITES_LAST=$now
     log "zapret: проверяю сайты из списков — кому нужна своя стратегия"
     setsid sh "$ZAPRET_DIR/scan.sh" sites </dev/null >/dev/null 2>&1 &
