@@ -201,12 +201,15 @@ yt_probe_ip() {
 #   yt_dead_add АДРЕС КТО ЧТО_С_НИМ NOW   (КТО и ЧТО — для журнала)
 # 0 — добавлен (цепочку отбоя надо пересобрать), 1 — нет.
 yt_dead_add() {
-    local dip="$1" who="$2" why="$3" now="$4" net n24 sib keep t nlist
+    local dip="$1" who="$2" why="$3" now="$4" kill="${5:-1}" net n24 sib keep t nlist
     case "$dip" in *[!0-9.]*|'') return 1 ;; esac
     net="$dip/32"; n24="${dip%.*}.0/24"
     # уже открытые соединения телефона к нему — закрыть сразу: AdGuard и
-    # приложение переподключатся (с раздачи соединение доживёт до таймаута)
-    ss -K -tn dst "$dip" dport = :443 >/dev/null 2>&1
+    # приложение переподключатся (с раздачи соединение доживёт до таймаута).
+    # Не для «молчит после запроса» ($5=0): так выглядит и простаивающее
+    # соединение с общим фронтендом Google — ss -K рвал поиск и YouTube
+    # (25.10 23:00, 173.194.165.4 / 173.194.190.72)
+    [ "$kill" = 1 ] && ss -K -tn dst "$dip" dport = :443 >/dev/null 2>&1
     grep -q -e "^$net " -e "^$n24 " "$YT_DEAD_FILE" 2>/dev/null && return 1
     [ "$now" -lt "$YT_DEAD_PAUSE" ] && return 1
     # лавина (>=6 подсетей за минуту) — не мёртвые серверы, а сломанный
@@ -306,7 +309,9 @@ yt_dead_scan() {
             # молчит после запроса: данные от сервера были (рукопожатие), но
             # мало, и safter ни байта нового -> кандидат на проверку (каждый
             # раз: повторы отсекают отбой и «живой» на 5 мин у демона)
+            # *.4 — фронтенды www.youtube/youtubei (их не трогает и ytslow)
             if ((yt || gv) && bo >= 600 && br > 60 * pr && br <= smax) {
+                if (dst ~ /\.4$/) next
                 tb = (k in sbr && sbr[k] == br) ? stb[k] : now
                 if (now - tb >= safter) print "SIL", dst, tag
                 ns[k] = t0 " silent " d " " br " " tb
@@ -340,7 +345,7 @@ yt_dead_scan() {
             if [ "$res" = ok ]; then
                 echo "$dip $((now + 300))" >> "$YT_SPROBE_FILE.ok"
             else
-                yt_dead_add "$dip" "$(yt_dead_who "$tag")" "ответил на рукопожатие, а на запрос молчит ${YT_SILENT_AFTER}с, проверка не прошла" "$now" && changed=1
+                yt_dead_add "$dip" "$(yt_dead_who "$tag")" "ответил на рукопожатие, а на запрос молчит ${YT_SILENT_AFTER}с, проверка не прошла" "$now" 0 && changed=1
             fi
         done < "$YT_SPROBE_FILE.done"
         rm -f "$YT_SPROBE_FILE.done"
