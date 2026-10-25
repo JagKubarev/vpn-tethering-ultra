@@ -164,7 +164,8 @@ yt_dead_apply() {
 yt_slow_reconcile() {
     local p
     if [ "$YT_SLOW_RETRY" = "1" ] && [ "$YT_DEAD_STATE" = "on" ]; then
-        [ -n "$YT_SLOW_PID" ] && kill -0 "$YT_SLOW_PID" 2>/dev/null && return 0
+        # свой ребёнок: PID умершего ytslow мог достаться чужому процессу
+        yt_bg_alive "$YT_SLOW_PID" && return 0
         # чужой/оставшийся экземпляр (демон перезапускали) — убрать
         for p in $(pgrep -f "zapret/ytslow.sh" 2>/dev/null); do kill "$p" 2>/dev/null; done
         [ -n "$YT_SLOW_PID" ] || log "YouTube: обрыв медленных видеосоединений включён — плеер переподключится и иногда попадёт на быстрое"
@@ -176,7 +177,7 @@ yt_slow_reconcile() {
     fi
 }
 yt_slow_stop() {
-    [ -n "$YT_SLOW_PID" ] && kill "$YT_SLOW_PID" 2>/dev/null
+    yt_bg_alive "$YT_SLOW_PID" && kill "$YT_SLOW_PID" 2>/dev/null
     YT_SLOW_PID=""
     rm -f "$YT_SLOW_STAT"
 }
@@ -269,11 +270,11 @@ yt_dead_scan() {
         FILENAME == gr { gs[++ng] = $1; ge[ng] = $2; next }
         FILENAME == sf { seen[$1] = $2; rep[$1] = $4; sbr[$1] = $5; stb[$1] = $6; next }
         / ESTABLISHED / {
-            src = ""; dst = ""; rsrc = ""; sp = ""; po = -1; bo = -1; pr = -1; br = -1; mk = 0
+            src = ""; dst = ""; rsrc = ""; rdst = ""; sp = ""; po = -1; bo = -1; pr = -1; br = -1; mk = 0
             for (i = 1; i <= NF; i++) {
                 split($i, kv, "=")
                 if (kv[1] == "src") { if (src == "") src = kv[2]; else if (rsrc == "") rsrc = kv[2] }
-                else if (kv[1] == "dst" && dst == "") dst = kv[2]
+                else if (kv[1] == "dst") { if (dst == "") dst = kv[2]; else if (rdst == "") rdst = kv[2] }
                 else if (kv[1] == "sport" && sp == "") sp = kv[2]
                 else if (kv[1] == "packets") { if (po < 0) po = kv[2]; else if (pr < 0) pr = kv[2] }
                 else if (kv[1] == "bytes") { if (bo < 0) bo = kv[2]; else if (br < 0) br = kv[2] }
@@ -286,7 +287,14 @@ yt_dead_scan() {
             yt = (int(mk / 268435456) % 2 == 1)
             gv = (int(mk / 67108864) % 2 == 1)
             if (!yt && !gv) {
-                if (src == wip) next
+                # без метки — только раздача, ушедшая наружу через WAN (ответ
+                # идёт на адрес телефона). Через VPN метки нет никогда: и
+                # раздача (ответ на адрес tun), и сам телефон (src — адрес
+                # tun) попадали сюда — ss -K по общим адресам Google и
+                # перепроверка мимо VPN (ревью 25.10)
+                if (wip == "" || rdst != wip || src == wip) next
+                # без метки бывает только «мёртв» — остальное не перебираем
+                if (bo < 600 || pr < 1 || br > 60 * pr) next
                 split(dst, o, "."); n = ((o[1] * 256 + o[2]) * 256 + o[3]) * 256 + o[4]; g = 0
                 for (j = 1; j <= ng; j++) if (n >= gs[j] && n <= ge[j]) { g = 1; break }
                 if (!g) next
