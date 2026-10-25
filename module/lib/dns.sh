@@ -418,6 +418,9 @@ dnsproxy_start() {
     done
     log "ERROR: dnsproxy не поднялся: $(tail -n 3 "$DNSPROXY_LOG" 2>/dev/null | tr '\n' ' ')"
     dnsproxy_stop
+    # сигнатуру — обратно: перезапуски обнуляют её перед стартом, и сторож
+    # с пустой поднимал бы dnsproxy без апстримов — DNAT навсегда (ревью DNS)
+    DNSPROXY_SIG="$sig"
     return 1
 }
 
@@ -465,7 +468,8 @@ direct_dns_servers() {
 # Ставит DNS для клиентов. Любой сбой dnsproxy -> старый DNAT.
 apply_dns_mode() {
     local mode="$1" servers="$2"
-    shift 2 2>/dev/null || shift $#
+    # ошибка shift в mksh прерывает функцию, а не уходит в ||
+    if [ $# -ge 2 ]; then shift 2; else shift $#; fi
     local ifaces="$*" want="" ups="" dns4
 
     if [ -z "$ifaces" ]; then
@@ -515,6 +519,25 @@ apply_dns_mode() {
         log "WARNING: dnsproxy не запустился ($(tail -n 2 "$DNSPROXY_LOG" 2>/dev/null | tr '\n' ' ' | cut -c1-160)), откат на обычный DNAT"
         dnsproxy_stop
         dnsproxy_port_guard_down
+    fi
+    if [ -n "$want" ] && [ -n "$ups" ] && [ -n "$DNSPROXY_BIN" ]; then
+        # сторож повторит раз в ~минуту (раньше — только до пересборки)
+        DNS_FAIL_SIG="$mode-$want|$ups"
+        DNS_FAIL_WANT="$want"
+        DNS_FAIL_RETRY=0
+        DNS_STATE_MODE="$mode"
+        DNS_STATE_IFACES="$ifaces"
+        if [ "$mode" = "direct" ]; then
+            # как dns_degrade: DNS раздачи (оператор), а не DNAT на 1.1.1.1 —
+            # net.dns1 с Android 8 пустой, а 1.1.1.1:53 ТСПУ отдаёт НСДИ, в
+            # белых списках он не отвечает вовсе
+            cleanup_dns_redirect
+            dns_conntrack_flush $ifaces
+        else
+            setup_dns_redirect "$servers" $ifaces
+        fi
+        DNS_STATE="DNAT (dnsproxy упал)"
+        return 0
     else
         dnsproxy_release
     fi
@@ -572,7 +595,9 @@ dns_watchdog() {
 
     log "WATCHDOG: dnsproxy не поднялся, DNS клиентов -> DNAT (повтор раз в ~минуту)"
     if [ "$DNS_STATE_MODE" = "direct" ]; then
-        setup_dns_redirect "$(direct_dns_servers)" $DNS_STATE_IFACES
+        # DNS раздачи (оператор), как dns_degrade, — не DNAT на 1.1.1.1
+        cleanup_dns_redirect
+        dns_conntrack_flush $DNS_STATE_IFACES
     else
         setup_dns_redirect "$(get_vpn_dns)" $DNS_STATE_IFACES
     fi
@@ -749,8 +774,10 @@ dns_primary_alive() {
     local u code
     set -- $DNS_UPSTREAMS
     u="$1"
-    case "$u" in https://*) ;; *) return 1 ;; esac
-    command -v curl >/dev/null 2>&1 || return 1
+    # проверить нечем — считаем «возможно, жив»: иначе запасной DoH навсегда
+    # (основной после переключения всё равно проверит dns_health)
+    case "$u" in https://*) ;; *) return 0 ;; esac
+    command -v curl >/dev/null 2>&1 || return 0
     case "$u" in *\?*) u="$u&" ;; *) u="$u?" ;; esac
     u="${u}dns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"
     if [ "$DNSPROXY_SU_G" = "1" ]; then
@@ -764,6 +791,8 @@ dns_primary_alive() {
 dns_alt_recheck() {
     local hold="$DNS_ALT_HOLD"
     [ -n "$DNS_ALT_UPS" ] && [ "$DNS_DEGRADED" = "0" ] || return 1
+    # только экземпляр direct: VPN-режим (cache/doh) затёрся бы wlrus
+    case "$DNSPROXY_SIG" in "direct-doh|"*) ;; *) return 1 ;; esac
     [ $(( $1 - DNS_ALT_LAST )) -ge "$DNS_HEALTH_RECOVER" ] || return 1
     DNS_ALT_LAST=$1
     # основной должен ответить 2 проверки подряд, и не раньше срока: иначе

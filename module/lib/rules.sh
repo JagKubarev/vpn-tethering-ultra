@@ -238,6 +238,11 @@ verify_active_rules() {
     $iptables -t nat -C POSTROUTING -j "$CHAIN_POST" 2>/dev/null || {
         log "WATCHDOG: хук nat POSTROUTING -> $CHAIN_POST пропал"; return 1; }
 
+    # DNS клиентов в VPN-режиме всегда через нашу цепочку (DNAT или dnsproxy);
+    # без хука клиенты спрашивали бы DNS раздачи — мимо VPN
+    $iptables -t nat -C PREROUTING -j "$CHAIN_DNS" 2>/dev/null || {
+        log "WATCHDOG: хук nat PREROUTING -> $CHAIN_DNS пропал"; return 1; }
+
     if [ "$KILL_SWITCH" = "1" ]; then
         $iptables -C FORWARD -j "$CHAIN_GUARD" 2>/dev/null || {
             log "WATCHDOG: kill-switch снят, переставляю"; return 1; }
