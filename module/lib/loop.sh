@@ -24,7 +24,8 @@ handle_change() {
         [ -z "$ack_token" ] && ack_token="noreq"
     fi
 
-    [ "$FORCE_UPDATE" -eq 0 ] && [ $((now - LAST_HANDLE_TS)) -lt $DEBOUNCE_SECS ] && { _NEED_UPDATE=1; return 0; }
+    # с ack_token — не выходить: токен локальный, ack потерялся бы
+    [ "$FORCE_UPDATE" -eq 0 ] && [ -z "$ack_token" ] && [ $((now - LAST_HANDLE_TS)) -lt $DEBOUNCE_SECS ] && { _NEED_UPDATE=1; return 0; }
 
     LAST_HANDLE_TS=$now
     IP_RULE_CACHE=$($ip rule show 2>/dev/null)
@@ -126,7 +127,7 @@ handle_change() {
         # now — это epoch-секунды, а цикл спит по 2с. Стоит фазе сползти на
         # нечётную (ping с timeout 3 это делает регулярно) — now%10 никогда
         # не станет нулём, и apply_state не вызывается ВООБЩЕ. Считаем итерации.
-        if [ $EMPTY_IFACE_DELAY -gt 5 ] && [ "$FORCE_UPDATE" -eq 0 ]; then
+        if [ $EMPTY_IFACE_DELAY -gt 5 ] && [ "$FORCE_UPDATE" -eq 0 ] && [ -z "$ack_token" ]; then
             [ $((EMPTY_IFACE_DELAY % 5)) -ne 0 ] && return 0
         fi
     else

@@ -33,6 +33,7 @@ is_our_daemon() {
     kill -0 "$pid" 2>/dev/null || return 1
     local cmd=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' ' ')
     case "$cmd" in
+        *"/vpn-to-hotspot-usb/service.sh"|*"/vpn-to-hotspot-usb/service.sh ") return 0 ;;
         *sh*|*magisk*|*ksu*) ;;
         *) return 1 ;;
     esac

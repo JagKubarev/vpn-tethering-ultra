@@ -125,6 +125,10 @@ detect_tun_name() {
         case "$iface" in
             lo|wlan*|rmnet*|rndis*|eth*|usb*|ccmni*|pdp*|swlan*|ap*|hotspot*|bond*|bridge*|dummy*|sit*|ip6*|ifb*|v4-*|clat*|ipsec*|p2p*|ppp*|pan*|bt-*)
                 continue ;;
+            # раздача USB (CDC-NCM на 13T) и прочие точки, мобильный Unisoc:
+            # без VPN третий проход брал ncm0 за tun — он выпадал из раздачи
+            ncm*|softap*|tether*|bnep*|qmi*|seth_*|sipa_*|tunl*)
+                continue ;;
         esac
         
         if $ip addr show "$iface" 2>/dev/null | grep -q "inet "; then
@@ -335,8 +339,9 @@ get_vpn_dns() {
     
     if command -v dumpsys >/dev/null 2>&1; then
         local dumpsys_out
-        dumpsys_out=$($TIMEOUT_CMD sh -c "dumpsys connectivity 2>/dev/null" | grep -A200 "VPN CONNECTED" | grep -B5 -A5 "InterfaceName: $TUN_NAME") || \
-        dumpsys_out=$(dumpsys connectivity 2>/dev/null | grep -A200 "VPN CONNECTED" | grep -B5 -A5 "InterfaceName: $TUN_NAME")
+        # без запасного второго dumpsys: тот шёл без таймаута (код возврата —
+        # от grep, «блок не найден» = повтор) и мог повесить демон
+        dumpsys_out=$($TIMEOUT_CMD sh -c "dumpsys connectivity 2>/dev/null" | grep -A200 "VPN CONNECTED" | grep -B5 -A5 "InterfaceName: $TUN_NAME")
         
         if [ -n "$dumpsys_out" ]; then
             log "VPN block found (first 80 chars): $(echo "$dumpsys_out" | head -1 | cut -b1-80)..."
@@ -351,18 +356,19 @@ get_vpn_dns() {
                 local raw_dns4=$(echo "$dns_content" | tr ',' '\n' | sed 's/^\///' | grep -E '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$')
                 log "IPv4 candidates: $(echo $raw_dns4 | tr '\n' ' ')"
                 
-                for ip in $raw_dns4; do
+                # не $ip: это путь к /system/bin/ip
+                for _a in $raw_dns4; do
                     [ -n "$dns4" ] && break
-                    dns4=$(_parse_ip4_safe "$ip")
+                    dns4=$(_parse_ip4_safe "$_a")
                     [ -n "$dns4" ] && log "Valid IPv4 DNS: $dns4"
                 done
                 
                 local raw_dns6=$(echo "$dns_content" | tr ',' '\n' | sed 's/^\///' | grep -E ':' | grep -v '^/$')
                 log "IPv6 candidates: $(echo $raw_dns6 | tr '\n' ' ')"
                 
-                for ip in $raw_dns6; do
+                for _a in $raw_dns6; do
                     [ -n "$dns6" ] && break
-                    dns6=$(_parse_ip6_safe "$ip")
+                    dns6=$(_parse_ip6_safe "$_a")
                     [ -n "$dns6" ] && log "Valid IPv6 DNS: $dns6"
                 done
             fi
