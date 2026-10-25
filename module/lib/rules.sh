@@ -154,7 +154,10 @@ guard_apply() {
     done
     # гарантированно первым: сначала снимаем хук, потом ставим в позицию 1
     $iptables -D FORWARD -j "$CHAIN_GUARD" 2>/dev/null
-    $iptables -I FORWARD 1 -j "$CHAIN_GUARD" 2>/dev/null
+    $iptables -I FORWARD 1 -j "$CHAIN_GUARD" 2>/dev/null || {
+        # занят xtables lock и т.п. — не делать вид, что kill-switch стоит
+        log "ERROR: Kill-switch: хук FORWARD -> $CHAIN_GUARD не встал ($mode [$ifaces])"
+        return 1; }
 
     # DNS к самому телефону. В armed его ловит DNAT в DNS VPN, а в hard
     # (пересборка / VPN не поднят) DNAT снят, и запросы клиента уходили
@@ -212,6 +215,11 @@ verify_active_rules() {
     [ -n "$LAST_TUN_INDEX" ] || return 0
 
     local iface rules
+    # tun пропал (VPN переподключается или выключен) — это работа гистерезиса
+    # в apply_state: hard на 1-м и 2-м промахе, direct — на 3-м. Иначе
+    # «таблица пустая» ставила FORCE_UPDATE, и на первом же промахе раздача
+    # уходила напрямую (25.10: 18:20:09, 19:03:38 — «упал (1 промахов подряд)»).
+    $ip addr show "$TUN_NAME" 2>/dev/null | grep -q "inet " || return 0
     rules=$($ip rule show 2>/dev/null)
 
     for iface in $LAST_TETHER_IFACES; do
@@ -242,7 +250,10 @@ cleanup_all_rules() {
     log "Full cleanup..."
 
     # Восстанавливаем оригинальный MTU перед сбросом
-    if [ -n "$ORIGINAL_TUN_MTU" ] && [ "$ORIGINAL_TUN_MTU" -gt 0 ] 2>/dev/null; then
+    # только тому же tun: если VPN-приложение пересоздало tun0 (смена
+    # приложения без паузы), MTU прошлого (NekoBox 9000) встал бы на новый (AWG 1280)
+    if [ -n "$ORIGINAL_TUN_MTU" ] && [ "$ORIGINAL_TUN_MTU" -gt 0 ] 2>/dev/null && \
+       [ "$(cat "/sys/class/net/$TUN_NAME/ifindex" 2>/dev/null)" = "$ORIGINAL_TUN_IFINDEX" ]; then
         $ip link set dev "$TUN_NAME" mtu "$ORIGINAL_TUN_MTU" 2>/dev/null || true
     fi
     ORIGINAL_TUN_MTU=""
@@ -453,6 +464,7 @@ setup_vpn_rules() {
     # Сохраняем оригинальный MTU в родительском процессе, а не в подоболочке
     if [ -z "$ORIGINAL_TUN_MTU" ]; then
         ORIGINAL_TUN_MTU=$($ip link show "$TUN_NAME" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="mtu"){print $(i+1); exit}}')
+        ORIGINAL_TUN_IFINDEX=$(cat "/sys/class/net/$TUN_NAME/ifindex" 2>/dev/null)
         log "Original TUN MTU saved: $ORIGINAL_TUN_MTU"
     fi
     
@@ -521,7 +533,7 @@ $ip link set dev "$TUN_NAME" mtu "$tun_mtu" 2>/dev/null && \
         # (клиент без интернета) и выходим с ошибкой — apply_state попробует
         # снова. Раньше здесь молча получался рабочий direct.
         log "ERROR: VPN routing rules не встали, держу kill-switch (hard)"
-        update_status "direct" "$(echo $tether_ifaces | tr ' ' '/')" "$CURRENT_NET_PROFILE"
+        update_status "blocked" "$(echo $tether_ifaces | tr ' ' '/')" "$CURRENT_NET_PROFILE"
         return 1
     fi
 

@@ -64,7 +64,22 @@ BB=/data/adb/ksu/bin/busybox
 daemon_pid() {
     local pid
     pid=$(cat "$PID_FILE" 2>/dev/null)
-    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo "$pid"
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
+    # pid-файл от упавшего демона: номер мог достаться чужому процессу, а
+    # USR1 по умолчанию его завершает
+    case "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" in
+        *vpn-to-hotspot-usb/service.sh*) echo "$pid" ;;
+    esac
+}
+
+# идёт подбор / сторож / проверка сайтов (scan.sh): их curl от root попал бы
+# в очередь проверки сайта со своей стратегией и испортил вердикт
+zscan_busy() {
+    local pid
+    pid=$(cat "$ZSCAN.pid" 2>/dev/null)
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+    case "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" in *zapret/scan.sh*) return 0 ;; esac
+    return 1
 }
 
 # Текущая сеть: "<ключ>|<название>" (zapret/netid.sh по WAN из status)
@@ -383,6 +398,7 @@ case "$1" in
 
     sitetest)
         # Открывается ли сайт мимо VPN: без обхода и с текущей стратегией.
+        zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
         h=$(printf '%s' "$2" | tr 'A-Z' 'a-z')
         h=${h#http://}; h=${h#https://}; h=${h%%/*}
         case "$h" in ''|*[!a-z0-9.-]*|*..*|.*) echo "ERR адрес"; exit 1 ;; esac
@@ -432,6 +448,7 @@ case "$1" in
         ;;
 
     ytspeed)
+        zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
         # Скорость видео мимо VPN. ТСПУ режет по имени видеосервера в TLS (SNI),
         # а у настоящих видеосерверов нет большого файла без подписанной ссылки.
         # Поэтому: сервер Google (dl.google.com), имя в SNI — googlevideo.com,

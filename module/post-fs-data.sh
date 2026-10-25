@@ -16,6 +16,9 @@ fi
 # pid демона с прошлой загрузки: номер мог достаться чужому процессу, и
 # webctl.sh до старта демона считал бы его демоном (и слал бы ему USR1)
 rm -f /data/local/tmp/vpn_tether.pid
+# то же для подбора zapret (scan.sh убит перезагрузкой): иначе WebUI вечно
+# «идёт подбор», а «Стоп» шлёт TERM чужому процессу
+rm -f /data/local/tmp/vpn_tether_zscan.pid
 v=$(sed -n 's/^[[:space:]]*TETHER_STEALTH[[:space:]]*=[[:space:]]*["'\'']*\([01]\).*/\1/p' "$CONF" 2>/dev/null | tail -n 1)
 [ "$v" = "0" ] && exit 0
 for r in /data/adb/ksu/bin/resetprop /data/adb/magisk/resetprop /data/adb/ap/bin/resetprop resetprop; do

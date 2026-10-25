@@ -284,7 +284,6 @@ handle_usr1() {
 
 cleanup_on_exit() {
     log "Exiting, cleaning up..."
-    [ "$STATUS_IN_DESCRIPTION" = "1" ] && set_description "$MODULE_DESC_DEFAULT"
     cleanup_all_rules
     phone_dns_rules_off
     PHONE_DNS_ON=0
@@ -295,6 +294,9 @@ cleanup_on_exit() {
     dnsproxy_port_guard_down
     guard_down
     restore_hw_offload
+    # в конце: zapret_down -> phone_status_refresh -> update_status писал
+    # описание заново («Раздача через VPN…» после выхода демона)
+    [ "$STATUS_IN_DESCRIPTION" = "1" ] && set_description "$MODULE_DESC_DEFAULT"
     rm -f "$PID_FILE" "$RULES_FILE"
     rm -f "$PID_LOCK/pid"
     rmdir "$PID_LOCK" 2>/dev/null || rm -rf "$PID_LOCK" 2>/dev/null

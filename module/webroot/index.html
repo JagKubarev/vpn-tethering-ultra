@@ -648,7 +648,8 @@ async function ctlBg(args) {
   const f = '/data/local/tmp/vpn_tether_webjob_' + Date.now() + '_' + (cbSeq++);
   const st = await exec('(' + CTL + ' ' + args + ' >' + f + '.out 2>' + f + '.err; echo $? >' + f + '.rc) </dev/null >/dev/null 2>&1 &');
   if (st.errno) return st;
-  for (;;) {
+  // .rc так и не появился (процесс убит, нет места) — иначе кнопка ждала бы вечно
+  for (let n = 0; n < 600; n++) {
     await new Promise((r) => setTimeout(r, 500));
     // без exit: оболочка KernelSU от него падает, и ответ приходит пустым
     const r = await exec('if [ -s ' + f + '.rc ]; then cat ' + f + '.rc ' + f + '.out; rm -f ' + f + '.rc ' + f + '.out ' + f + '.err; else echo WAIT; fi');
@@ -657,6 +658,8 @@ async function ctlBg(args) {
     const i = r.out.indexOf('\n');
     return { errno: parseInt(r.out.slice(0, i), 10) || 0, out: r.out.slice(i + 1), err: '' };
   }
+  await exec('rm -f ' + f + '.rc ' + f + '.out ' + f + '.err');
+  return { errno: 124, out: 'ERR нет ответа за 5 мин', err: '' };
 }
 
 function toast(msg) {

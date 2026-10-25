@@ -101,6 +101,10 @@ stealth_apply() {
     elif [ "$STEALTH_STATE" = "on" ]; then
         stealth_off
         log "Скрытие раздачи выключено: TTL 64, проверка раздачи у оператора — как в системе"
+    else
+        # хуки от убитого (kill -9) демона: при TETHER_TTL_STRICT=1 это REJECT
+        # всей раздачи с чужим TTL до перезагрузки
+        stealth_rules_off
     fi
 }
 

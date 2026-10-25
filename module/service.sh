@@ -462,6 +462,17 @@
 #     режиме «напрямую» (dns_degrade); фоновые проверки отбоя — kill и
 #     «ещё идёт» только по своему ребёнку (yt_bg_alive: PID переиспользуется);
 #     «Сбросить кэш DNS» в откате честно говорит, что кэш не используется.
+#   - ревью rules/stealth: сторож правил при пропавшем tun больше не ставит
+#     FORCE_UPDATE (гистерезис на падение VPN снова работает — 3 промаха под
+#     hard, а не direct на первом); MTU восстанавливается только тому же tun
+#     (ifindex); ошибка хука kill-switch — в лог; при ошибке ip rule статус
+#     blocked; хуки TTL от убитого демона снимаются и при выключенном скрытии.
+#   - ревью service/webctl/WebUI: описание модуля на выходе — после снятия
+#     всего (zapret_down писал «Раздача через VPN» заново); webctl шлёт USR1
+#     только своему демону (cmdline), проверка сайта и скорость видео не
+#     идут во время подбора/сторожа; pid подбора чистится при загрузке;
+#     is_our_daemon без пустого MODULE_DIR и без «status» где угодно;
+#     апстримы DNS не начинаются с «-»; ctlBg ждёт не дольше 5 мин.
 # ============================================================================
 # ============================================================================
 
@@ -710,7 +721,9 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 2 ] && [ "$val" -le 600 ] || ok=0 ;; esac ;;
         DNS_UPSTREAMS|DNS_FALLBACKS|DNS_VPN_UPSTREAMS|DNS_BOOTSTRAP|DNS_META_UPSTREAMS)
             # только адреса апстримов: буквы, цифры, : / . - _ [ ] и пробелы
-            case "$val" in ''|*[!A-Za-z0-9:/._\ \[\]-]*) ok=0 ;; esac ;;
+            case "$val" in ''|*[!A-Za-z0-9:/._\ \[\]-]*) ok=0 ;; esac
+            # и не флаг dnsproxy (токен с «-»: «-o /data/…»)
+            case " $val" in *" -"*) ok=0 ;; esac ;;
         QUIC_BLOCK_APPS)
             # имена пакетов; пусто — допустимо (выключить)
             case "$val" in *[!A-Za-z0-9._\ ]*) ok=0 ;; esac ;;
@@ -891,12 +904,15 @@ is_our_daemon() {
         *"/vpn-to-hotspot-usb/service.sh"|*"/vpn-to-hotspot-usb/service.sh ") return 0 ;;
     esac
 
-    if ls -l "/proc/$pid/fd" 2>/dev/null | grep -qE "vpn_tether.log|status"; then
+    # «status» без пути ловил любой процесс с таким файлом
+    if ls -l "/proc/$pid/fd" 2>/dev/null | grep -qE "vpn_tether\.log|vpn-to-hotspot-usb/status"; then
         return 0
     fi
     
+    # MODULE_DIR тут ещё пуст: процесс, умерший между kill -0 и ls (cwd пустой),
+    # считался бы нашим демоном — и настоящий не стартовал бы
     local cwd=$(ls -l "/proc/$pid/cwd" 2>/dev/null | awk '{print $NF}')
-    if [ "$cwd" = "$MODULE_DIR" ]; then
+    if [ -n "$MODULE_DIR" ] && [ "$cwd" = "$MODULE_DIR" ]; then
         return 0
     fi
     
@@ -939,6 +955,7 @@ EMPTY_TETHER_COUNT=0
 
 # Сохраняем оригинальный MTU при первом чтении (защита от каскада)
 ORIGINAL_TUN_MTU=""
+ORIGINAL_TUN_IFINDEX=""   # чей это MTU: восстанавливаем только тому же tun
 
 TETHER_IFACES="wlan2 wlan1 wlan0 ap0 hotspot swlan0 swlan1 swlan2 rndis0 usb0 eth0 bt-pan bnep0 ncm0 wwan0 tether0 qmi0"
 
