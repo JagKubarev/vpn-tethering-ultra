@@ -312,6 +312,44 @@ case "$1" in
         fi
         ;;
 
+    clients)
+        # Устройства в раздаче: "ip|mac|состояние|имя|соединений|байт|1=заблокировано".
+        # IP и MAC — ip neigh по интерфейсам раздачи; имя — из журнала DHCP
+        # раздачи (dumpsys network_stack); соединения и байты — открытые
+        # записи conntrack от этого IP. Заблокированные, которых сейчас нет, —
+        # тоже (чтобы можно было разблокировать).
+        ifs=$(sed -n 's/^ifaces=//p' "$STATUS_FILE" 2>/dev/null | tr '/,' '  ')
+        BL=/data/adb/vpn_tether_blocked
+        CT="$MODDIR/bin/conntrack-arm64"; [ -x "$CT" ] || CT="$MODDIR/bin/conntrack-arm"
+        { for i in $ifs; do ip -4 neigh show dev "$i" 2>/dev/null | awk '/lladdr/ {print "N", $1, $3, $NF}'; done
+          dumpsys network_stack 2>/dev/null | sed -n 's/.*hwAddr: \([0-9a-f:]*\),.*hostname: \([^,]*\).*/H \1 \2/p'
+          [ -x "$CT" ] && "$CT" -L 2>/dev/null | awk '{s=""; b=0; for(i=1;i<=NF;i++){ if($i ~ /^src=/ && s=="") s=substr($i,5); if($i ~ /^bytes=/) b+=substr($i,7) } if(s!="") print "C", s, b}'
+          sed 's/|/ /; s/^/B /' "$BL" 2>/dev/null
+        } | awk '
+            $1 == "N" { ip[$3] = $2; st[$3] = $4; ord[++n] = $3 }
+            $1 == "H" { nm[$2] = $3 }
+            $1 == "C" { c[$2]++; by[$2] += $3 }
+            $1 == "B" { bl[$2] = 1; if (!($2 in nm) && $3 != "") nm[$2] = $3 }
+            END {
+                for (k = 1; k <= n; k++) { m = ord[k]; if (seen[m]++) continue
+                    print ip[m] "|" m "|" st[m] "|" nm[m] "|" (c[ip[m]] + 0) "|" (by[ip[m]] + 0) "|" (bl[m] ? 1 : 0) }
+                for (m in bl) if (!seen[m]) print "|" m "|-|" nm[m] "|0|0|1"
+            }'
+        ;;
+    client-block|client-unblock)
+        m=$(printf '%s' "$2" | tr 'A-F' 'a-f')
+        case "$m" in [0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]) ;; *) echo "ERR неверный MAC"; exit 1 ;; esac
+        BL=/data/adb/vpn_tether_blocked
+        # имя — только для показа: буквы, цифры, пробел, . _ -
+        nm=$(printf '%s' "$3" | tr -cd 'A-Za-z0-9 ._-' | cut -c1-40)
+        if [ "$1" = client-block ]; then
+            grep -q "^$m|" "$BL" 2>/dev/null || echo "$m|$nm" >> "$BL"
+        else
+            [ -f "$BL" ] && { grep -v "^$m|" "$BL" > "$BL.tmp"; mv -f "$BL.tmp" "$BL"; }
+        fi
+        # демон подхватит по stat файла за ~2 с (block_reconcile)
+        echo "OK" ;;
+
     # --- zapret ------------------------------------------------------------
     zlist)      cat "$ZLIST_USER" 2>/dev/null ;;
     zdefault)   cat "$MODDIR/zapret/list-default.txt" 2>/dev/null ;;
@@ -429,15 +467,32 @@ case "$1" in
         # адрес — через DoH (обычный DNS мимо VPN оператор может подменить)
         ip=$(curl -s -m 6 --capath "$CA" -H 'accept: application/dns-json' \
             "https://1.1.1.1/dns-query?name=$h&type=A" 2>/dev/null | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')
-        [ -n "$ip" ] || ip=$("$BB" nslookup "$h" 1.1.1.1 2>/dev/null | sed -n '/^Name/,$p' | grep -oE 'Address 1: [0-9.]+' | awk '{print $3}')
-        [ -n "$ip" ] || { echo "ERR не удалось узнать адрес $h"; exit 1; }
+        # запасной nslookup: только IPv4 — «Address 1: 2a06:…» давал «ip 2»
+        [ -n "$ip" ] || ip=$("$BB" nslookup "$h" 1.1.1.1 2>/dev/null | sed -n '/^Name/,$p' | grep -oE 'Address [0-9]+: [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1 | awk '{print $3}')
+        case "$ip" in *.*.*.*) ;; *) echo "ERR не удалось узнать адрес $h"; exit 1 ;; esac
+        # "код время rc байт" — байт нужны, чтобы увидеть обрыв после ~16 КБ
         one() {
-            curl -s -o /dev/null -m 8 --interface "$wan" --capath "$CA" --resolve "$h:443:$ip" \
-                -w '%{http_code} %{time_total}' "https://$h/" 2>/dev/null
-            echo " $?"
+            local o rc
+            o=$(curl -s -o /dev/null -m 8 --interface "$wan" --capath "$CA" --resolve "$h:443:$ip" \
+                -w '%{http_code} %{time_total} %{size_download}' "https://$h/" 2>/dev/null)
+            rc=$?
+            set -- $o
+            echo "${1:-000} ${2:-0} $rc ${3:-0}"
         }
         echo "ip $ip"
-        echo "direct $(one)"
+        d=$(one)
+        echo "direct $d"
+        # Без обхода не открылось чисто — какой тип блокировки (мимо обхода):
+        # TCP до адреса (нет — блок по IP) и TLS на тот же адрес с нейтральным
+        # именем (проходит — режут именно имя сайта, DPI). Обрыв после ~16 КБ
+        # видно по байтам в direct. "probe <tcp 0|1> <tls_нейтральное 0|1>"
+        case "$d" in
+            "000 "*|*" 28 "*|*" 35 "*|*" 56 "*)
+                tcp=0; curl -v -s -o /dev/null -m 4 --interface "$wan" "http://$ip:443/" 2>&1 | grep -q "Connected to" && tcp=1
+                neu=0; [ "$tcp" = 1 ] && curl -v -sk -o /dev/null -m 5 --interface "$wan" --resolve "example.com:443:$ip" \
+                    https://example.com/ 2>&1 | grep -qE "SSL connection using|TLS handshake, Finished" && neu=1
+                echo "probe $tcp $neu" ;;
+        esac
         iptables -w 2 -t mangle -I POSTROUTING 1 $RULE_NFQ
         nk=$(cur_net); nl=${nk#*"|"}; nk=${nk%%"|"*}
         # группа 3998 (ZAPRET_GID): основной zapret пропускает её пакеты, даже

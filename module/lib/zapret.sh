@@ -443,11 +443,50 @@ zapret_down() {
     phone_status_refresh
 }
 
+# --- белые списки оператора: обход на паузу ---
+# В белых списках открываются только разрешённые (российские) адреса: обход
+# ничего не откроет, а сторож видит «стратегия не открывает» и каждые 15 мин
+# гоняет подбор (~4 мин, сотни TLS), проверка сайтов срывается, отбой YouTube
+# отбивает всё подряд. Признак дешёвый и только после отката DNS (DoH и
+# запасные молчат): мимо обхода TLS до 1.1.1.1 и 9.9.9.9 не проходит, а до
+# Яндекса проходит. Раз в минуту; ожил любой зарубежный — обход обратно.
+zapret_tls_ok() {   # $1 — IP; мимо обхода и AdGuard (группа dnsproxy), через WAN
+    local cmd c
+    cmd="curl -sk -o /dev/null -m 4 --interface $LAST_WAN_IFACE -w %{http_code} https://$1/"
+    if [ "$DNSPROXY_SU_G" = "1" ]; then c=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else c=$(eval "$cmd" 2>/dev/null); fi
+    [ -n "$c" ] && [ "$c" != "000" ]
+}
+zapret_whitelist_check() {
+    local now
+    [ "$ZAPRET_ENABLE" = "1" ] && [ -n "$LAST_WAN_IFACE" ] || { ZAPRET_WL=0; return 0; }
+    # VPN: прямой путь не проверить, и обход раздаче не нужен
+    vpn_up_now && { ZAPRET_WL=0; return 0; }
+    [ "$ZAPRET_WL" = "1" ] || [ "$DNS_DEGRADED" = "1" ] || return 0
+    now=$(date +%s)
+    [ $((now - ZAPRET_WL_LAST)) -ge 60 ] || return 0
+    ZAPRET_WL_LAST=$now
+    if zapret_tls_ok 1.1.1.1 || zapret_tls_ok 9.9.9.9; then
+        [ "$ZAPRET_WL" = "1" ] && log "zapret: зарубежные адреса снова открываются — белых списков нет, обход включаю"
+        ZAPRET_WL=0
+    elif zapret_tls_ok 77.88.55.242; then
+        [ "$ZAPRET_WL" = "1" ] || log "zapret: похоже, белые списки оператора (Яндекс открывается, 1.1.1.1 и 9.9.9.9 — нет) — обход на паузе, проверяю раз в минуту"
+        ZAPRET_WL=1
+    fi
+    # не отвечает и Яндекс — нет связи вообще: состояние не меняем
+}
+
 # Каждая итерация цикла. Дорогое (dumpsys, stat пакетов) — раз в ~30с.
 zapret_reconcile() {
     local args excl
     if [ "$ZAPRET_ENABLE" != "1" ] || [ -z "$NFQWS_BIN" ]; then
         [ "$ZAPRET_STATE" != "off" ] && zapret_down
+        return 0
+    fi
+    if [ "$ZAPRET_WL" = "1" ]; then
+        [ "$ZAPRET_STATE" = "wl" ] && return 0
+        zapret_down
+        ZAPRET_STATE="wl"
+        phone_status_refresh
         return 0
     fi
     if [ "$ZAPRET_RETRY" -gt 0 ]; then

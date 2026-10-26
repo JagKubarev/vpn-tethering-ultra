@@ -295,6 +295,7 @@ cleanup_on_exit() {
     dnsproxy_port_guard_down
     guard_down
     restore_hw_offload
+    block_down
     # в конце: zapret_down -> phone_status_refresh -> update_status писал
     # описание заново («Раздача через VPN…» после выхода демона)
     [ "$STATUS_IN_DESCRIPTION" = "1" ] && set_description "$MODULE_DESC_DEFAULT"
@@ -339,6 +340,8 @@ monitor_loop() {
         elif [ -n "$LAST_TETHER_IFACES$LAST_WAN_IFACE" ]; then
             bpf_offload_detach $LAST_TETHER_IFACES $LAST_WAN_IFACE
         fi
+        block_reconcile
+        zapret_whitelist_check
         zapret_reconcile
         [ $((_loop_count % 2)) -eq 1 ] && yt_dead_scan
         [ $((_loop_count % 30)) -eq 17 ] && yt_dead_recheck

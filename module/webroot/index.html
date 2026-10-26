@@ -272,6 +272,11 @@ details.more > summary { color: var(--muted); }
     <label class="sw"><input type="checkbox" data-key="TETHER_TTL_STRICT"><span></span></label>
   </div>
 </details>
+<h2>Устройства в раздаче</h2>
+<div class="card">
+  <div id="clients"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
+</div>
+<div class="hint" style="margin-top:-4px">Заблокированное устройство остаётся подключённым к точке, но без интернета. Трафик — в открытых сейчас соединениях.</div>
 <div class="hint">Подробные настройки — во вкладках «Обход» и «Сеть», проверки и журналы — в «Инструментах».</div>
 
 </section>
@@ -788,6 +793,7 @@ function renderStatus(s) {
     }
   }
   else if (s.zapret === 'fail') h += kvRow('Обход блокировок', 'nfqws не запустился, повтор через минуту', 'red');
+  else if (s.zapret === 'wl') h += kvRow('Обход блокировок', 'пауза: похоже, белые списки оператора — обход не поможет, нужен VPN', 'amber');
   if (s.dnsproxy_enable === '1' && s.meta_eu === '1') {
     if (s.meta_eu_on === '1') h += kvRow('Instagram и Facebook', 'как из Европы (ECS ' + esc(s.meta_ecs) + ')', 'green');
     else if (s.vpn_up === '1') h += kvRow('Instagram и Facebook', 'через VPN, Европа не нужна', '');
@@ -902,6 +908,38 @@ $$('[data-key]').forEach((el) => {
   });
 });
 $('#zlist').addEventListener('input', () => { $('#zlistErr').style.display = 'none'; renderBar(); });
+
+// ---------------------------------------------------------------- устройства в раздаче (3.18)
+// "ip|mac|состояние|имя|соединений|байт|1=заблокировано" (webctl clients)
+const fmtBytes = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + ' МБ' : b >= 1024 ? Math.round(b / 1024) + ' КБ' : b + ' Б';
+function clientRow(f) {
+  const [ip, mac, st, name, c, by, bl] = f, blocked = bl === '1';
+  const nm = name && name !== 'null' ? name : 'Без имени';
+  const on = st === 'REACHABLE' || st === 'DELAY' || st === 'PROBE';
+  let info = (ip ? ip + ' · ' : '') + mac;
+  if (blocked) info += ' · заблокировано';
+  else if (st === '-') info += ' · не подключено';
+  else info += ' · ' + (on ? 'в сети' : 'был недавно') + (+c ? ' · соединений: ' + c + ' · ' + fmtBytes(+by) : '');
+  return '<div class="row" style="gap:8px"><span class="dot ' + (blocked ? 'red' : on ? 'green' : '') + '"></span>' +
+    '<div class="txt"><div class="t">' + esc(nm) + '</div><div class="s">' + esc(info) + '</div></div>' +
+    '<button class="btn small" data-cmac="' + esc(mac) + '" data-cname="' + esc(nm) + '" data-cbl="' + (blocked ? '1' : '0') + '">' +
+    (blocked ? 'Разблокировать' : 'Блок') + '</button></div>';
+}
+async function loadClients() {
+  const r = await ctl('clients');
+  const rows = (r.out || '').split('\n').filter((l) => l.split('|').length >= 7).map((l) => l.split('|'));
+  $('#clients').innerHTML = rows.length ? rows.map(clientRow).join('')
+    : '<div class="row"><div class="txt"><div class="s">Сейчас никто не подключён к раздаче.</div></div></div>';
+}
+$('#clients').addEventListener('click', async (e) => {
+  const b = e.target.closest && e.target.closest('button[data-cmac]'); if (!b) return;
+  const unblock = b.dataset.cbl === '1';
+  b.disabled = true;
+  const r = await ctl((unblock ? 'client-unblock ' : 'client-block ') + q(b.dataset.cmac) + ' ' + q(b.dataset.cname));
+  toast(isOk(r) ? (unblock ? 'Разблокировано: ' : 'Заблокировано: ') + b.dataset.cname : errText(r, 'Не получилось'));
+  // демон применяет за ~2 с
+  setTimeout(loadClients, 2500);
+});
 
 // ---------------------------------------------------------------- вкладки (3.10)
 function showTab(t) {
@@ -1217,6 +1255,19 @@ function stLine(label, v) {
   const t = ok ? 'открывается, ' + (+m[2]).toFixed(1) + ' с' : (ST_RC[m[3]] || 'ошибка ' + esc(m[3]));
   return '<div class="st-line"><span class="dot ' + (ok ? 'green' : 'red') + '"></span>' + label + ': ' + t + '</div>';
 }
+// тип блокировки (3.18): по байтам direct и замерам probe "<tcp> <tls с нейтральным именем>"
+function stKind(o) {
+  const d = /^(\d{3}) ([\d.]+) (\d+) ?(\d*)/.exec(o.direct || '');
+  if (!d) return '';
+  const size = +d[4] || 0;
+  if (d[1] !== '000' && d[3] === '28' && size > 0 && size < 40000)
+    return 'Тип: обрыв после ~' + Math.max(1, Math.round(size / 1024)) + ' КБ — ТСПУ режет объём; обход помогает не всегда, надёжно — VPN';
+  if (!o.probe) return '';
+  const p = o.probe.split(' ');
+  if (p[0] === '0') return 'Тип: блок по IP — до адреса не устанавливается даже TCP; обход не поможет, нужен VPN';
+  if (p[1] === '1') return 'Тип: блок по имени сайта (DPI) — тот же адрес с другим именем открывается; это и лечит обход';
+  return 'Тип: TLS к этому адресу не проходит ни с каким именем — похоже на блок по адресу; обход вряд ли поможет';
+}
 // sitetest и ytspeed в webctl.sh берут одну очередь NFQUEUE 202 и одни правила
 // iptables — вместе они ломают друг другу замер, поэтому обе кнопки гасим разом
 const stLock = (on) => { $('#stBtn').disabled = $('#ytBtn').disabled = on; };
@@ -1235,8 +1286,9 @@ $('#stBtn').addEventListener('click', async () => {
     }
     const o = {};
     out.split('\n').forEach((l) => { const i = l.indexOf(' '); if (i > 0) o[l.slice(0, i)] = l.slice(i + 1); });
-    const dOk = stOk(o.direct), zOk = stOk(o.zapret);
+    const dOk = stOk(o.direct), zOk = stOk(o.zapret), kind = stKind(o);
     res.innerHTML = stLine('Без обхода', o.direct) + stLine('С обходом', o.zapret) +
+      (kind ? '<div class="st-line"><span class="dot amber"></span>' + kind + '</div>' : '') +
       '<div class="muted mt8" style="font-size:13px">' + (dOk ? 'Сайт и так открывается, обход не нужен.'
         : zOk ? 'Обход помогает. В режиме «из списка» добавьте сайт в «Дополнительные сайты», если его нет во встроенном списке.'
         : 'С этой стратегией не помогло. Можно подобрать сайту свою — остальные сайты останутся на прежней. Если не поможет ни одна — скорее всего, блок по IP, тут нужен VPN.') + '</div>' +
@@ -1471,6 +1523,8 @@ $('#metaBtn').addEventListener('click', async () => {
   scRefresh();
   loadApps().then(renderChips);
   setInterval(() => { if (!document.hidden && !busy && !stBusy) loadStatus(); }, 3000);
+  loadClients();
+  setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="home"]').classList.contains('on')) loadClients(); }, 15000);
   // вернулись на страницу — сразу свежий статус, не ждать тика
   document.addEventListener('visibilitychange', () => { if (!document.hidden && !busy) { loadStatus(); scRefresh(); } });
 })();
@@ -1504,6 +1558,8 @@ function mockExec(cmd) {
   if (a === 'ack') return { errno: 0, out: M.ack };
   if (a === 'apps') return { errno: 0, out: 'com.avito.android\nru.ozon.app.android\norg.telegram.messenger\ncom.google.android.youtube\n' };
   if (a === 'doh') return { errno: 0, out: 'ok 184' };
+  if (a === 'clients') return { errno: 0, out: '192.168.43.77|e0:2b:e9:75:60:84|REACHABLE|DESKTOP-LAPTOP|31|21545980|0\n192.168.43.67|42:96:f4:ac:3a:91|STALE|realme-9-Pro-5G|2|7553|0\n|00:27:15:ec:84:bd|-|android-tv|0|0|1\n' };
+  if (/^client-(un)?block /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'dnsflush') return { errno: 0, out: 'OK кэш сброшен (dnsproxy перезапущен). На ноутбуке — ещё ipconfig /flushdns' };
   if (a === 'zlist') return { errno: 0, out: M.zlist };
   if (a === 'zdefault') return { errno: 0, out: 'youtube.com\ngooglevideo.com\ndiscord.com\nx.com\n' };
@@ -1524,7 +1580,7 @@ function mockExec(cmd) {
     '0|10|2|0|--dpi-desync=fake,multisplit --dpi-desync-autottl --dpi-desync-split-pos=1 --dpi-desync-fake-tls=@G|быстрый| ya.ru:x28 google.com:x28\n' };
   if (/^zscan-start /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'zscan-stop') return { errno: 0, out: 'OK' };
-  if (/^sitetest /.test(a)) return { errno: 0, out: 'ip 142.251.155.4\ndirect 000 8.001 28\nzapret 200 1.02 0\n' };
+  if (/^sitetest /.test(a)) return { errno: 0, out: 'ip 142.251.155.4\ndirect 000 8.001 28 0\nprobe 1 1\nzapret 200 1.02 0 18342\n' };
   if (a === 'ytspeed') return { errno: 0, out: 'ip 64.233.161.190\ndirect 000 0 28\nzapret 200 6912000 0\n' };
   if (/^log/.test(a)) return { errno: 0, out: '[20:15:01] Toggle signal received\n[20:15:02] VPN setup complete\n' };
   return { errno: 1, out: 'ERR' };

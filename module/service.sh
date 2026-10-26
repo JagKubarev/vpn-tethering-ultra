@@ -508,6 +508,17 @@
 #   пакет) у gvt1.com — мёртвый сервер, а не DPI (имя gvt1 YOTA не режет):
 #   отбой и ss -K, Play уходит на другой узел. 26.10: Play висел на
 #   172.217.133.234 / 173.194.188.42 (TLS нет и с www.google.com).
+# v3.18 — идеи из похожих модулей (nfqws2-android, VPNHotspot):
+#   - устройства в раздаче: WebUI-список (имя из DHCP, IP, MAC, соединения),
+#     блокировка по MAC — цепочка VPN_TETHER_BLOCK в mangle PREROUTING
+#     (BLOCK_FILE, block_reconcile по stat файла);
+#   - белые списки оператора: после отката DNS раз в минуту TLS мимо обхода
+#     до 1.1.1.1, 9.9.9.9 и Яндекса; Яндекс да, зарубежные нет — обход на
+#     паузе (ZAPRET_STATE=wl), ожил зарубежный — обратно;
+#   - «Проверить сайт»: тип блокировки (по IP / по имени / обрыв ~16 КБ);
+#     запасной nslookup — только IPv4;
+#   - списки: threads, substack, udemy, coursera, grammarly, digitalocean,
+#     nicovideo, hetzner; встроенный плеер YouTube — в список YouTube.
 # ============================================================================
 # ============================================================================
 
@@ -1004,6 +1015,10 @@ CHAIN_MSS="VPN_BASE_MSS"
 CHAIN_DNS="VPN_TETHER_DNS"
 CHAIN_DNS6="VPN_TETHER_DNS6"
 CHAIN_GUARD="VPN_TETHER_GUARD"
+CHAIN_BLOCK="VPN_TETHER_BLOCK"   # mangle PREROUTING: устройства раздачи, заблокированные в WebUI
+BLOCK_FILE="/data/adb/vpn_tether_blocked"   # "MAC|имя" — переживает перезагрузку
+BLOCK_STAMP="-"        # stat файла при последнем применении («-» — ещё не применяли)
+BLOCK_TICK=0
 CHAIN_GUARD_IN="VPN_TETHER_GUARD_IN"
 
 VPN_DOWN_COUNT=0
@@ -1142,7 +1157,9 @@ ZAPRET_OWNER_TUN="-"    # для какого tun уже узнали владе
 # VPN-клиенты: их собственное соединение с сервером (часто TLS на 443) zapret
 # трогать не должен — иначе можно сломать переподключение VPN.
 VPN_CLIENT_PKGS="llc.itdev.incy com.happproxy org.amnezia.vpn org.amnezia.awg com.wireguard.android com.zaneschepke.wireguardautotunnel com.zaneschepke.wireguardautotunnel.nightly com.v2ray.ang app.hiddify.com moe.nb4a io.nekohasekai.sfa com.github.dyhkwong.sagernet io.github.saeeddev94.xray com.github.kr328.clash com.github.metacubex.clash.meta de.blinkt.openvpn net.openvpn.openvpn org.outline.android.client com.cloudflare.onedotonedotonedotone com.v2raytun.android dev.hexasoftware.v2box com.exclave.exclave"
-ZAPRET_STATE="off"     # off | on | fail
+ZAPRET_STATE="off"     # off | on | fail | wl (пауза: белые списки оператора)
+ZAPRET_WL=0            # 1 = похоже на белые списки — обход на паузе (zapret_whitelist_check)
+ZAPRET_WL_LAST=0       # когда последний раз проверяли
 ZAPRET_SIG=""          # аргументы + исключения запущенного экземпляра
 ZAPRET_RETRY=0
 ZAPRET_TICK=0
@@ -1260,7 +1277,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.17.1 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.18 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное

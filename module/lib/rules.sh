@@ -360,6 +360,60 @@ opera_leftovers_cleanup() {
     return 0
 }
 
+# --- заблокированные устройства раздачи (WebUI «Устройства в раздаче») ---
+# По MAC в mangle PREROUTING: раньше FORWARD/INPUT (наш guard и правила netd
+# там переставляются), DROP режет и форвард, и DNS/DHCP к самому телефону —
+# устройство видит сеть без интернета. IPv6 — тем же списком.
+block_down() {
+    local t _n
+    for t in "$iptables" "$ip6tables"; do
+        _n=0; while [ $_n -lt 8 ] && $t -t mangle -D PREROUTING -j "$CHAIN_BLOCK" 2>/dev/null; do _n=$((_n + 1)); done
+        $t -t mangle -F "$CHAIN_BLOCK" 2>/dev/null; $t -t mangle -X "$CHAIN_BLOCK" 2>/dev/null
+    done
+}
+block_apply() {
+    local t m n=0 a
+    block_down
+    [ -s "$BLOCK_FILE" ] || return 0
+    for t in "$iptables" "$ip6tables"; do
+        $t -t mangle -N "$CHAIN_BLOCK" 2>/dev/null || continue
+        for m in $(cut -d'|' -f1 "$BLOCK_FILE"); do
+            case "$m" in [0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:*) ;; *) continue ;; esac
+            $t -t mangle -A "$CHAIN_BLOCK" -m mac --mac-source "$m" -j DROP 2>/dev/null
+        done
+        $t -t mangle -I PREROUTING 1 -j "$CHAIN_BLOCK" 2>/dev/null
+    done
+    # открытые соединения — сразу: по записи conntrack ответы ещё доходили бы
+    for m in $(cut -d'|' -f1 "$BLOCK_FILE"); do
+        case "$m" in [0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:*) n=$((n + 1)) ;; *) continue ;; esac
+        [ -n "$CONNTRACK_BIN" ] || continue
+        for a in $($ip -4 neigh show 2>/dev/null | awk -v m="$m" '$0 ~ ("lladdr " m) {print $1}'); do
+            "$CONNTRACK_BIN" -D --orig-src "$a" >/dev/null 2>&1
+        done
+    done
+    log "Устройства раздачи: заблокировано $n (по MAC)"
+}
+# каждую итерацию — дёшево: stat файла; хук (netd/чужие модули) — раз в ~30 с
+block_reconcile() {
+    local st
+    st=$(stat -c '%Y %s' "$BLOCK_FILE" 2>/dev/null)
+    if [ "$st" != "$BLOCK_STAMP" ]; then
+        # было непусто, стало пусто/удалён — снять; при старте без файла молчим
+        if [ -s "$BLOCK_FILE" ]; then block_apply
+        elif [ "$BLOCK_STAMP" = "-" ]; then block_down   # хвосты убитого демона
+        elif [ -n "$BLOCK_STAMP" ]; then block_down; log "Устройства раздачи: блокировки сняты"
+        fi
+        BLOCK_STAMP="$st"
+        return 0
+    fi
+    [ -s "$BLOCK_FILE" ] || return 0
+    BLOCK_TICK=$((BLOCK_TICK + 1))
+    [ "$BLOCK_TICK" -ge 15 ] || return 0
+    BLOCK_TICK=0
+    $iptables -t mangle -C PREROUTING -j "$CHAIN_BLOCK" 2>/dev/null || {
+        log "WATCHDOG: хук блокировки устройств пропал, ставлю заново"; block_apply; }
+}
+
 apply_iface_optimizations() {
     local tun_mtu=""
     case "$1" in
