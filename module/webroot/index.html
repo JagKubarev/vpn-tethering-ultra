@@ -196,9 +196,11 @@ pre.log { margin: 0; padding: 12px 14px; background: var(--input); font: 12px/1.
 .tab { display: none; }
 .tab.on { display: block; }
 .tabbar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); z-index: 11; touch-action: none; padding-bottom: calc(env(safe-area-inset-bottom) + var(--tabbar-pad)); }
-.tabbar .in { max-width: 640px; margin: 0 auto; display: flex; height: var(--tabbar-h); padding: 0 14px; }
+.tabbar .in { max-width: 640px; margin: 0 auto; display: flex; height: var(--tabbar-h); padding: 0 6px; }
 .tabbar button { flex: 1; min-width: 0; background: none; border: 0; padding: 6px 2px 0; color: var(--muted); font: 500 12px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; cursor: pointer; }
 .tabbar button svg { width: 27px; height: 27px; }
+/* пять вкладок: при крупном системном шрифте подпись не налезает на соседнюю */
+.tabbar button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tabbar button.on { color: var(--accent); font-weight: 600; }
 details.more { margin-top: 18px; }
 details.kvbox { margin: 14px -16px -16px; border-top: 1px solid var(--line); }
@@ -277,7 +279,7 @@ details.more > summary { color: var(--muted); }
   <div id="clients"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
 </div>
 <div class="hint" style="margin-top:-4px">Заблокированное устройство остаётся подключённым к точке, но без интернета (до конца аренды адреса, потом может отключиться само; после разблокировки иногда нужно переподключить). Новый «случайный» MAC блокировку обходит. Трафик — в открытых сейчас соединениях.</div>
-<div class="hint">Подробные настройки — во вкладках «Обход» и «Сеть», проверки и журналы — в «Инструментах».</div>
+<div class="hint">Подробные настройки — во вкладках «Обход» и «Сеть», проверки и журналы — в «Сервисе».</div>
 
 </section>
 
@@ -659,7 +661,7 @@ details.more > summary { color: var(--muted); }
   <button data-tab="bypass"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11l-3-3"/><path d="M20 17H9l3 3"/></svg><span>Обход</span></button>
   <button data-tab="net"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg><span>Сеть</span></button>
   <button data-tab="warp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18h10.5a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.6 9.1 4.5 4.5 0 0 0 7 18z"/></svg><span>WARP</span></button>
-  <button data-tab="tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>Инструменты</span></button>
+  <button data-tab="tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>Сервис</span></button>
 </div></nav>
 
 <div class="applybar" id="applybar"><div class="in">
@@ -773,7 +775,7 @@ function renderStatus(s) {
   }
   if (s.daemon !== '1') {
     dot.className = 'dot big red'; title.textContent = 'Модуль не запущен';
-    sub.textContent = 'Перезагрузите телефон. Если не поможет — отправьте логи (Инструменты).';
+    sub.textContent = 'Перезагрузите телефон. Если не поможет — отправьте логи (вкладка «Сервис»).';
     $('#kv').innerHTML = ''; btn.disabled = true; btn.textContent = 'Переключить';
     return;
   }
