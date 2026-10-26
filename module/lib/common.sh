@@ -47,7 +47,7 @@ is_vpn_tether_enabled() { [ "$VPN_TARGET" = "1" ]; }
 
 is_excluded_iface() {
     case "$1" in
-        tun*|wg*|awg*|vpn*|ppp*|lo|rmnet*|r_rmnet*|ccmni*|wwan*|pdp*|stnet*|epdg*|dummy*|sit*|ip6*|ifb*|v4-*|clat*|ipsec*|bond*|bridge*|pan*|bt-*|veth*|docker*|lxc*|virbr*|macvlan*|ipvlan*|vlan*|p2p*)
+        tun*|wg*|awg*|vpn*|warp*|ppp*|lo|rmnet*|r_rmnet*|ccmni*|wwan*|pdp*|stnet*|epdg*|dummy*|sit*|ip6*|ifb*|v4-*|clat*|ipsec*|bond*|bridge*|pan*|bt-*|veth*|docker*|lxc*|virbr*|macvlan*|ipvlan*|vlan*|p2p*)
             # p2p* — Wi-Fi Direct / Quick Share (свой DHCP), не раздача
             return 0 ;;
     esac
@@ -138,6 +138,9 @@ update_status() {
         echo "meta_eu_on=$DNSPROXY_META_ON"
         echo "meta_ecs=$DNS_META_ECS"
         echo "wan=$LAST_WAN_IFACE"
+        echo "warp=$([ "$WARP_ENABLE" = 1 ] && echo "$WARP_STATE" || echo disabled)"
+        echo "warp_conf=$WARP_CUR"
+        echo "warp_note=$WARP_NOTE"
         echo "conf_note=$USER_CONF_NOTE"
         echo "updated=$(date '+%H:%M:%S')"
     } > "$STATUS_FILE.tmp" 2>/dev/null && mv -f "$STATUS_FILE.tmp" "$STATUS_FILE"

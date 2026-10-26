@@ -680,6 +680,12 @@ ZAPRET_ALT_MIN=180
 # Автосписок (режим «из списка»): после скольких сбоев за минуту nfqws
 # добавляет сайт. Причины пишутся в ZAPRET_AUTO_LOG, WebUI их показывает (3.9).
 ZAPRET_AUTO_FAIL=3
+# WARP (AmneziaWG) в режиме «напрямую»: туннель до Cloudflare, конфиги —
+# /data/adb/vpn_tether_warp (WebUI: создать, импортировать, удалить). При
+# первом включении модуль создаёт 3 сам. Поднимается, только когда VPN на
+# телефоне не поднят; не отвечает — следующий конфиг.
+WARP_ENABLE=0
+WARP_CONF=""            # предпочтительный конфиг (имя); пусто — по порядку
 # Скрыть раздачу от оператора (3.2; раньше — модуль tether_unblock).
 #  - net.tethering.noprovisioning: Android не спрашивает оператора, можно ли
 #    раздавать (иначе оператор может не дать включить точку или оборвать);
@@ -749,7 +755,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY)
+        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
@@ -758,6 +764,9 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
         ZAPRET_AUTO_FAIL)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 2 ] && [ "$val" -le 10 ] || ok=0 ;; esac ;;
         ZAPRET_MODE)     case "$val" in list|all) ;; *) ok=0 ;; esac ;;
+        WARP_CONF)       # имя конфига, как в warp/warp.sh; пусто — по порядку
+            case "$val" in *[!A-Za-z0-9_.-]*|.*) ok=0 ;; esac
+            [ ${#val} -le 40 ] || ok=0 ;;
         ZAPRET_STRATEGY) zapret_strategy_valid "$val" || ok=0 ;;
         ZAPRET_ARGS)     zapret_args_valid "$val" || ok=0 ;;
         DNS_META_ECS)    _ip4_valid "$val" || ok=0 ;;
@@ -804,7 +813,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -1095,6 +1104,17 @@ NFQWS_BIN=""
 for _c in $_NQ_CANDIDATES; do
     [ -x "$_c" ] && NFQWS_BIN="$_c" && break
 done
+# --- WARP (AmneziaWG) ---
+case "$(uname -m 2>/dev/null)" in
+    aarch64|arm64) _WG_ARCH="arm64" ;;
+    armv*|arm)     _WG_ARCH="arm" ;;
+    *)             _WG_ARCH="arm64 arm" ;;
+esac
+AWG_BIN=""; AWG_GO_BIN=""
+for _c in $_WG_ARCH; do
+    [ -x "$MODULE_DIR/bin/awg-$_c" ] && [ -x "$MODULE_DIR/bin/amneziawg-go-$_c" ] && {
+        AWG_BIN="$MODULE_DIR/bin/awg-$_c"; AWG_GO_BIN="$MODULE_DIR/bin/amneziawg-go-$_c"; break; }
+done
 ZAPRET_DIR="$MODULE_DIR/zapret"
 ZAPRET_LIST_DEFAULT="$ZAPRET_DIR/list-default.txt"
 ZAPRET_LIST_YT="$ZAPRET_DIR/list-youtube.txt"        # своя стратегия YouTube (3.4)
@@ -1265,6 +1285,8 @@ LOG_REPEAT_THRESHOLD=5
 . "$MODULE_DIR/lib/stealth.sh"
 # shellcheck source=lib/rules.sh
 . "$MODULE_DIR/lib/rules.sh"
+# shellcheck source=lib/warp.sh
+. "$MODULE_DIR/lib/warp.sh"
 # shellcheck source=lib/loop.sh
 . "$MODULE_DIR/lib/loop.sh"
 
@@ -1316,6 +1338,7 @@ TUN_NAME=$(detect_tun_name)
 log "TUN: $TUN_NAME"
 
 dnsproxy_kill_strays
+warp_down                  # туннель от убитого демона
 phone_dns_rules_off
 rm -f "$DNSPROXY_PID_FILE" /data/local/tmp/vpn_tether_probe.*
 dnsproxy_port_guard_down
