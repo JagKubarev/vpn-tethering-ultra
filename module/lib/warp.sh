@@ -183,7 +183,10 @@ warp_reconcile() {
     now=$(date +%s)
     case "$WARP_STATE" in
         off|fail)
-            [ "$WARP_STATE" = fail ] && [ "$now" -lt "$WARP_RETRY_TS" ] && return 0
+            if [ "$WARP_STATE" = fail ] && [ "$now" -lt "$WARP_RETRY_TS" ]; then
+                # конфиги создали/импортировали в WebUI — сразу, не через 5 мин
+                [ "$WARP_NOTE" = "нет конфигов" ] && [ -n "$(warp_conf_names)" ] || return 0
+            fi
             [ -n "$WARP_ENSURE_PID" ] && return 0   # конфиги ещё создаются
             if ! n=$(warp_pick); then
                 if [ -z "$(warp_conf_names)" ]; then

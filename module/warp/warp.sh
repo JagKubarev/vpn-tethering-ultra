@@ -10,6 +10,7 @@
 #   warp.sh ensure [N]           первый запуск: нет ни одного — создать N (3)
 #   warp.sh del ИМЯ
 #   warp.sh export ИМЯ           текст конфига
+#   warp.sh save ИМЯ             копия в «Загрузки» (ИМЯ.conf) -> «OK путь»
 #
 # Регистрация — по тому же API, что у warp-generation.github.io и
 # zapret2-android (идея оттуда, реализация своя): POST reg с публичным
@@ -220,6 +221,14 @@ case "$1" in
     export)
         valid_name "$2" && [ -f "$WARP_DIR/$2.conf" ] || { echo "ERR нет такого"; exit 1; }
         sed '1{/^# vpn_tether:/d;}' "$WARP_DIR/$2.conf" ;;
+    save)
+        # для AmneziaVPN и других устройств; в файле закрытый ключ
+        valid_name "$2" && [ -f "$WARP_DIR/$2.conf" ] || { echo "ERR нет такого"; exit 1; }
+        F="/storage/emulated/0/Download/$2.conf"
+        sed '1{/^# vpn_tether:/d;}' "$WARP_DIR/$2.conf" > "$F" 2>/dev/null && [ -s "$F" ] || { echo "ERR не удалось записать в «Загрузки»"; exit 1; }
+        chmod 644 "$F" 2>/dev/null
+        content call --uri content://media --method scan_file --arg "$F" >/dev/null 2>&1
+        echo "OK $F" ;;
     *)
         echo "ERR команда"; exit 1 ;;
 esac

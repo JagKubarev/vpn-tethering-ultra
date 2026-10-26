@@ -527,6 +527,65 @@ details.more > summary { color: var(--muted); }
 </details>
 </section>
 
+<section class="tab" data-tab="warp">
+<h2>WARP</h2>
+<div class="card">
+  <div class="row">
+    <div class="txt"><div class="t">Туннель WARP</div>
+      <div class="s">Бесплатный туннель Cloudflare (AmneziaWG) для того, что не открывает обход: Telegram, сайты с блокировкой по IP или по стране. Работает, когда VPN на телефоне выключен.</div></div>
+    <label class="sw"><input type="checkbox" data-key="WARP_ENABLE"><span></span></label>
+  </div>
+  <div class="row" data-dep="WARP_ENABLE" style="gap:10px"><span class="dot" id="warpDot"></span>
+    <div class="txt"><div class="t" id="warpTitle">—</div><div class="s" id="warpSub"></div></div></div>
+</div>
+
+<h2>Что идёт через WARP</h2>
+<div class="card">
+  <div class="row" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Telegram</div>
+      <div class="s">Сети Telegram: приложение, веб-версия, звонки. Без VPN Telegram закрыт по IP.</div></div>
+    <label class="sw"><input type="checkbox" data-key="WARP_TELEGRAM"><span></span></label>
+  </div>
+  <div class="row" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Google</div>
+      <div class="s">Поиск, YouTube, Play — когда оператор режет Google волнами. Скорость — как у WARP (у нас 30–40 Мбит/с).</div></div>
+    <label class="sw"><input type="checkbox" data-key="WARP_GOOGLE"><span></span></label>
+  </div>
+  <div class="row col" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Сайты</div>
+      <div class="s">Домены через пробел. Сайты на общих CDN (Cloudflare, Akamai, Fastly, CloudFront) так не направить: на тех же адресах тысячи чужих сайтов — для них обход или VPN.</div></div>
+    <input type="text" data-key="WARP_DOMAINS" placeholder="example.com example.org" autocapitalize="off" autocorrect="off" spellcheck="false">
+  </div>
+  <div class="row col" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Приложения целиком</div>
+      <div class="s">Весь трафик выбранных приложений телефона. Если приложение фильтрует AdGuard, его HTTPS пойдёт мимо — исключите приложение в AdGuard.</div></div>
+    <div class="chips" id="warpChips"></div>
+    <div class="mt8"><button class="btn small" id="warpAdd">Добавить приложение</button></div>
+  </div>
+  <div class="row" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Для самого телефона</div>
+      <div class="s">Telegram, Google и сайты — через WARP и у приложений телефона, не только у устройств раздачи.</div></div>
+    <label class="sw"><input type="checkbox" data-key="WARP_PHONE"><span></span></label>
+  </div>
+</div>
+
+<h2>Конфиги</h2>
+<div class="card">
+  <div id="warpList"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
+  <div class="row btn-row eq">
+    <button class="btn small" id="warpGen">Создать</button>
+    <button class="btn small" id="warpImp">Импорт файла</button>
+    <button class="btn small" id="warpPaste">Вставить текст</button>
+  </div>
+  <div class="row col" id="warpPasteBox" style="display:none">
+    <textarea id="warpPasteText" rows="6" placeholder="[Interface]&#10;PrivateKey = …" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+    <div class="inline"><input type="text" id="warpPasteName" placeholder="имя (латиницей)" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="warpPasteOk">Добавить</button></div>
+  </div>
+  <input type="file" id="warpFile" accept=".conf,.zip,text/plain,application/zip" multiple style="display:none">
+</div>
+<div class="hint">«Создать» регистрирует новый конфиг в Cloudflare прямо с телефона. Импорт — файлы .conf из AmneziaVPN или WireGuard и zip-экспорт AmneziaVPN. Если конфиг перестаёт отвечать, модуль сам переходит на следующий. «Сохранить» кладёт конфиг в «Загрузки» — в нём закрытый ключ, не публикуйте его.</div>
+</section>
+
 <section class="tab" data-tab="tools">
 <h2>Диагностика сети</h2>
 <div class="card">
@@ -599,6 +658,7 @@ details.more > summary { color: var(--muted); }
   <button data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg><span>Главная</span></button>
   <button data-tab="bypass"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11l-3-3"/><path d="M20 17H9l3 3"/></svg><span>Обход</span></button>
   <button data-tab="net"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg><span>Сеть</span></button>
+  <button data-tab="warp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18h10.5a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.6 9.1 4.5 4.5 0 0 0 7 18z"/></svg><span>WARP</span></button>
   <button data-tab="tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>Инструменты</span></button>
 </div></nav>
 
@@ -800,6 +860,9 @@ function renderStatus(s) {
     else h += kvRow('Instagram и Facebook', 'обычный: DoH без VPN сейчас не используется', '');
   }
   if (s.zapret_per_net === '1' && s.net_key && s.net_key !== ZN.cur && !znetLoading) loadZnet();
+  const w = warpState(s);
+  renderWarpState(w);
+  if (s.warp && s.warp !== 'disabled') h += kvRow('WARP', esc(w.t + (w.s ? ' · ' + w.s : '')), w.d);
   if (s.quic_uids) h += kvRow('Без QUIC', esc(String(s.quic_uids.split(' ').length)) + ' прил.');
   const bad = (s.conf_note || '').split(' ').filter((x) => x[0] === '!' || x[0] === '?');
   if (bad.length) h += kvRow('Конфиг', 'пропущено: ' + esc(bad.join(', ')), 'amber');
@@ -825,7 +888,8 @@ const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAM
   'DNS_BOOTSTRAP','DNS_HEALTH_INTERVAL','DNS_HEALTH_RECOVER','KILL_SWITCH','KILL_SWITCH_STRICT','NET_PROFILE_ADAPTIVE',
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK',
   'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK','YT_DEAD_FAILFAST','ZAPRET_WATCHDOG','ZAPRET_WATCHDOG_MIN',
-  'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','YT_SLOW_RETRY','ZAPRET_AUTO_FAIL'];   // = CONF_KEYS в service.sh
+  'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','YT_SLOW_RETRY','ZAPRET_AUTO_FAIL',
+  'WARP_ENABLE','WARP_CONF','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE'];   // = CONF_KEYS в service.sh
 // интервал в минутах человеческим языком: 15 -> «15 минут», 180 -> «3 часа»
 function fmtMin(v, def) {
   const m = +v || def;
@@ -971,20 +1035,27 @@ $('#upCustom').addEventListener('input', () => setCur('DNS_UPSTREAMS', upValue()
 // ---------------------------------------------------------------- QUIC: приложения
 let APPS = null;   // [{pkg, label}]
 const label = (pkg) => { const a = (APPS || []).find((x) => x.pkg === pkg); return a ? a.label : pkg; };
-const quicList = () => (CUR.QUIC_BLOCK_APPS || '').split(/\s+/).filter(Boolean);
+// один выбор приложений на две настройки: QUIC_BLOCK_APPS и WARP_APPS
+let SHEET_KEY = 'QUIC_BLOCK_APPS';
+const appKeyList = (k) => (CUR[k] || '').split(/\s+/).filter(Boolean);
+const quicList = () => appKeyList(SHEET_KEY);
+const CHIPS = { QUIC_BLOCK_APPS: ['#quicChips', 'Нет приложений — QUIC ни у кого не закрыт.'],
+  WARP_APPS: ['#warpChips', 'Нет — только Telegram, Google и сайты выше.'] };
 
 function renderChips() {
-  const list = quicList();
-  $('#quicChips').innerHTML = list.length
-    ? list.map((p) => '<span class="chip"><span>' + esc(label(p)) + '</span><button data-rm="' + esc(p) + '" aria-label="Убрать">×</button></span>').join('')
-    : '<div class="empty">Нет приложений — QUIC ни у кого не закрыт.</div>';
+  Object.keys(CHIPS).forEach((k) => {
+    const list = appKeyList(k);
+    $(CHIPS[k][0]).innerHTML = list.length
+      ? list.map((p) => '<span class="chip"><span>' + esc(label(p)) + '</span><button data-rm="' + esc(p) + '" data-rk="' + k + '" aria-label="Убрать">×</button></span>').join('')
+      : '<div class="empty">' + CHIPS[k][1] + '</div>';
+  });
 }
-$('#quicChips').addEventListener('click', (e) => {
-  const p = e.target.dataset && e.target.dataset.rm;
-  if (!p) return;
-  setCur('QUIC_BLOCK_APPS', quicList().filter((x) => x !== p).join(' '));
+['#quicChips', '#warpChips'].forEach((id) => $(id).addEventListener('click', (e) => {
+  const p = e.target.dataset && e.target.dataset.rm, k = e.target.dataset && e.target.dataset.rk;
+  if (!p || !k) return;
+  setCur(k, appKeyList(k).filter((x) => x !== p).join(' '));
   renderChips();
-});
+}));
 
 async function loadApps() {
   if (APPS) return APPS;
@@ -1019,14 +1090,16 @@ function renderAppList() {
 $('#appList').addEventListener('click', (e) => {
   const row = e.target.closest('.app'); if (!row) return;
   const p = row.dataset.pkg, list = quicList();
-  setCur('QUIC_BLOCK_APPS', (list.includes(p) ? list.filter((x) => x !== p) : list.concat(p)).join(' '));
+  setCur(SHEET_KEY, (list.includes(p) ? list.filter((x) => x !== p) : list.concat(p)).join(' '));
   row.classList.toggle('sel');
   renderChips();
 });
 function openSheet(on) {
   $('#sheet').classList.toggle('show', on); $('#sheetBg').classList.toggle('show', on);
 }
-$('#quicAdd').addEventListener('click', async () => {
+$('#warpAdd').addEventListener('click', () => { SHEET_KEY = 'WARP_APPS'; $('#quicAdd').click(); });
+$('#quicAdd').addEventListener('click', async (e) => {
+  if (e.isTrusted) SHEET_KEY = 'QUIC_BLOCK_APPS';
   $('#appSearch').value = ''; $('#appList').innerHTML = '<div class="empty" style="padding:0 16px">Загружаю список…</div>';
   openSheet(true);
   await loadApps(); renderAppList(); renderChips();
@@ -1042,6 +1115,12 @@ function validate() {
   $('#upErr').style.display = bad ? '' : 'none';
   $('#upErr').textContent = bad ? 'Нужен адрес вида https://сервер/dns-query' : '';
   if (bad) { toast('Сервер DNS: нужен адрес вида https://сервер/dns-query'); return false; }
+  // домены WARP: регистр, запятые, http(s):// и пути — к виду «a.com b.org»
+  const wd = (CUR.WARP_DOMAINS || '').toLowerCase().split(/[\s,;]+/).filter(Boolean)
+    .map((d) => d.replace(/^https?:\/\//, '').replace(/[/?#].*$/, '').replace(/^\.+|\.+$/g, ''));
+  const wbad = wd.find((d) => !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d));
+  if (wbad) { toast('WARP, сайты: «' + wbad + '» — не домен'); return false; }
+  CUR.WARP_DOMAINS = Array.from(new Set(wd)).join(' ');
   const ecs = CUR.DNS_META_ECS || '';
   if (!/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(ecs) || ecs.split('.').some((o) => +o > 255)) {
     toast('Meta: адрес «откуда спрашиваем» — нужен IPv4, например 185.15.56.0'); return false;
@@ -1081,7 +1160,7 @@ $('#applyBtn').addEventListener('click', async () => {
     if (!m) { toast('Сохранено. Применится после перезагрузки (' + errText(r, 'демон не ответил') + ')'); }
     else if (await waitAck(m[1], 25)) toast('Настройки применены');
     else toast('Сохранено, но модуль не ответил за 25 с');
-    await loadConf(); await loadZ(); await loadStatus();
+    await loadConf(); await loadZ(); await loadStatus(); loadWarp();
   } finally {
     busy = false; $('#applyBtn').disabled = false; renderBar();
   }
@@ -1124,6 +1203,121 @@ $('#dnsFlushBtn').addEventListener('click', async () => {
     if (/^OK/.test(r)) el.innerHTML = '<span class="dot green"></span> ' + esc(r.replace(/^OK /, ''));
     else el.innerHTML = '<span class="dot red"></span> ' + esc(errText({ out: r }, 'не получилось'));
   } finally { btn.disabled = false; }
+});
+
+// ---------------------------------------------------------------- WARP
+// статус демона -> {d: цвет, t: заголовок, s: пояснение}
+function warpState(s) {
+  const c = s.warp_conf ? ' · ' + s.warp_conf : '';
+  switch (s.warp) {
+    case 'up': return { d: 'green', t: 'Работает' + c, s: '' };
+    case 'starting': return { d: 'amber', t: 'Подключается' + c, s: '' };
+    case 'fail': return s.warp_note === 'нет конфигов'
+      ? { d: 'red', t: 'Нет конфигов', s: 'Создайте или импортируйте ниже' }
+      : { d: 'red', t: 'Ни один конфиг не поднялся', s: 'Повтор через 5 минут. Если так постоянно — оператор режет WARP, нужен другой конфиг или порт' };
+    case 'off': return s.vpn_up === '1' ? { d: '', t: 'Пауза: включён VPN', s: 'Без VPN включится сам' }
+      : { d: 'amber', t: 'Запускается…', s: '' };
+    default: return { d: '', t: 'Выключен', s: '' };
+  }
+}
+function renderWarpState(w) {
+  $('#warpDot').className = 'dot ' + w.d; $('#warpTitle').textContent = w.t; $('#warpSub').textContent = w.s;
+}
+
+// "имя|endpoint|gen/import|дата" (webctl warp-list)
+let WARP_N = 0;
+async function loadWarp() {
+  const r = await ctl('warp-list');
+  const rows = (r.out || '').split('\n').filter((l) => l.split('|').length >= 4).map((l) => l.split('|'));
+  WARP_N = rows.length;
+  const main = CUR.WARP_CONF || '', run = ST.warp === 'up' || ST.warp === 'starting' ? ST.warp_conf : '';
+  $('#warpList').innerHTML = rows.length ? rows.map(([n, ep, src, dt]) =>
+    // кнопки — под текстом: на телефоне три в ряд с текстом не помещаются
+    '<div class="row col"><div class="head" style="gap:8px"><span class="dot ' + (n === run ? 'green' : '') + '"></span>' +
+    '<div class="txt"><div class="t">' + esc(n) + (n === main ? '<span class="badge">основной</span>' : '') + '</div>' +
+    '<div class="s">' + esc(ep) + ' · ' + (src === 'gen' ? 'создан' : 'импорт') + ' ' + esc(dt) + (n === run ? ' · в работе' : '') + '</div></div></div>' +
+    '<div class="btn-row mt8">' + (n === main ? '' : '<button class="btn small" data-wmain="' + esc(n) + '">Основной</button>') +
+    '<button class="btn small" data-wsave="' + esc(n) + '">Сохранить</button>' +
+    '<button class="btn small" data-wdel="' + esc(n) + '">Удалить</button></div></div>').join('')
+    : '<div class="row"><div class="txt"><div class="s">Конфигов нет. При включении WARP модуль сам создаст три, или создайте/импортируйте ниже.</div></div></div>';
+}
+$('#warpList').addEventListener('click', async (e) => {
+  const b = e.target.closest && e.target.closest('button'); if (!b) return;
+  if (b.dataset.wmain) { setCur('WARP_CONF', b.dataset.wmain); loadWarp(); toast('Нажмите «Применить», чтобы переключиться'); return; }
+  if (b.dataset.wsave) {
+    const r = await ctl('warp-save ' + q(b.dataset.wsave));
+    toast(isOk(r) ? 'Сохранено: Загрузки/' + b.dataset.wsave + '.conf' : errText(r, 'Не получилось'));
+    return;
+  }
+  if (b.dataset.wdel) {
+    const n = b.dataset.wdel;
+    if (!confirm('Удалить конфиг «' + n + '»? Восстановить его не получится (только создать новый).')) return;
+    const r = await ctl('warp-del ' + q(n));
+    if (!isOk(r)) { toast(errText(r, 'Не получилось')); return; }
+    if (CUR.WARP_CONF === n) setCur('WARP_CONF', '');
+    toast('Удалено' + (ST.warp_conf === n ? ' — модуль перейдёт на другой, когда этот перестанет отвечать' : ''));
+    loadWarp();
+  }
+});
+$('#warpGen').addEventListener('click', async () => {
+  const b = $('#warpGen'); b.disabled = true; b.textContent = 'Регистрирую…';
+  try {
+    const r = await ctlBg('warp-gen 1');
+    toast(isOk(r) ? 'Создан: ' + r.out.trim().slice(3) : 'Не получилось: ' + errText(r, 'нет ответа'));
+    loadWarp();
+  } finally { b.disabled = false; b.textContent = 'Создать'; }
+});
+
+// имя файла -> имя конфига: латиница, цифры, _ . - (как в warp.sh)
+const warpName = (f) => (f.replace(/^.*[\\/]/, '').replace(/\.conf$/i, '').replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/^[._]+/, '') || 'warp').slice(0, 40);
+const b64 = (t) => { const u = new TextEncoder().encode(t); let s = ''; u.forEach((c) => { s += String.fromCharCode(c); }); return btoa(s); };
+async function warpImport(list) {   // [{name, text}]
+  let ok = 0; const bad = [];
+  for (const it of list) {
+    const r = await ctl('warp-import ' + q(warpName(it.name)) + ' ' + q(b64(it.text.replace(/^\uFEFF/, ''))));
+    if (isOk(r)) ok++; else bad.push(warpName(it.name) + ': ' + errText(r, 'ошибка'));
+  }
+  toast((ok ? 'Добавлено: ' + ok : 'Ничего не добавлено') + (bad.length ? ' · пропущено: ' + bad.length + ' (' + bad[0] + (bad.length > 1 ? ' …' : '') + ')' : ''));
+  loadWarp();
+}
+// zip-экспорт AmneziaVPN: .conf из архива (stored / deflate через DecompressionStream)
+async function unzipConfs(buf) {
+  const dv = new DataView(buf), out = [], dec = new TextDecoder();
+  let e = buf.byteLength - 22;
+  while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
+  if (e < 0) throw new Error('не zip');
+  let p = dv.getUint32(e + 16, true);
+  for (let i = dv.getUint16(e + 10, true); i > 0 && dv.getUint32(p, true) === 0x02014b50; i--) {
+    const m = dv.getUint16(p + 10, true), cs = dv.getUint32(p + 20, true), nl = dv.getUint16(p + 28, true);
+    const off = dv.getUint32(p + 42, true), name = dec.decode(new Uint8Array(buf, p + 46, nl));
+    p += 46 + nl + dv.getUint16(p + 30, true) + dv.getUint16(p + 32, true);
+    if (!/\.conf$/i.test(name)) continue;
+    const data = new Uint8Array(buf, off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true), cs);
+    let raw = null;
+    if (m === 0) raw = data;
+    else if (m === 8) raw = new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+    if (raw) out.push({ name, text: dec.decode(raw) });
+  }
+  return out;
+}
+$('#warpImp').addEventListener('click', () => $('#warpFile').click());
+$('#warpFile').addEventListener('change', async (e) => {
+  const list = [];
+  try {
+    for (const f of Array.from(e.target.files || [])) {
+      if (/\.zip$/i.test(f.name)) list.push(...await unzipConfs(await f.arrayBuffer()));
+      else list.push({ name: f.name, text: await f.text() });
+    }
+  } catch (err) { toast('Не прочитался файл: ' + err.message); }
+  e.target.value = '';
+  if (list.length) warpImport(list); else toast('В файлах нет конфигов .conf');
+});
+$('#warpPaste').addEventListener('click', () => { const b = $('#warpPasteBox'); b.style.display = b.style.display ? '' : 'none'; });
+$('#warpPasteOk').addEventListener('click', async () => {
+  const t = $('#warpPasteText').value.trim();
+  if (!/\[Interface\]/i.test(t)) { toast('Вставьте текст конфига: [Interface] … [Peer] …'); return; }
+  await warpImport([{ name: $('#warpPasteName').value.trim() || 'warp', text: t }]);
+  $('#warpPasteText').value = ''; $('#warpPasteName').value = ''; $('#warpPasteBox').style.display = 'none';
 });
 
 async function loadLog() {
@@ -1526,6 +1720,8 @@ $('#metaBtn').addEventListener('click', async () => {
   setInterval(() => { if (!document.hidden && !busy && !stBusy) loadStatus(); }, 3000);
   loadClients();
   setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="home"]').classList.contains('on')) loadClients(); }, 15000);
+  loadWarp();
+  setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="warp"]').classList.contains('on')) loadWarp(); }, 10000);
   // вернулись на страницу — сразу свежий статус, не ждать тика
   document.addEventListener('visibilitychange', () => { if (!document.hidden && !busy) { loadStatus(); scRefresh(); } });
 })();
@@ -1546,8 +1742,8 @@ function mockExec(cmd) {
   }
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=предпросмотр\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
-    '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.wlrus.cfd/dns-query\nD DNS_FALLBACKS=https://dns.dagami.ru/dns-query https://not-a-dns.quic.best/dns-query https://dns.comss.one/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=180\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\n' +
+    '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nwarp=up\nwarp_conf=warp-2\nwarp_note=\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.wlrus.cfd/dns-query\nD DNS_FALLBACKS=https://dns.dagami.ru/dns-query https://not-a-dns.quic.best/dns-query https://dns.comss.one/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=180\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\n' +
     Object.keys(M.usr).map((k) => 'U ' + k + '=' + M.usr[k] + '\n').join('') };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +
@@ -1559,6 +1755,12 @@ function mockExec(cmd) {
   if (a === 'ack') return { errno: 0, out: M.ack };
   if (a === 'apps') return { errno: 0, out: 'com.avito.android\nru.ozon.app.android\norg.telegram.messenger\ncom.google.android.youtube\n' };
   if (a === 'doh') return { errno: 0, out: 'ok 184' };
+  if (a === 'warp-list') return { errno: 0, out: (M.warp || (M.warp = ['warp|engage.cloudflareclient.com:4500|gen|2026-10-26 23:41',
+    'warp-2|engage.cloudflareclient.com:4500|gen|2026-10-26 23:41', 'WARP_STR1693|engage.cloudflareclient.com:4500|import|2026-10-27 00:10'])).join('\n') + '\n' };
+  if (/^warp-gen/.test(a)) { M.warp.push('warp-' + (M.warp.length + 1) + '|engage.cloudflareclient.com:4500|gen|2026-10-27 00:20'); return { errno: 0, out: 'OK warp-' + M.warp.length }; }
+  if (/^warp-import /.test(a)) { const n = /^warp-import '([^']+)'/.exec(a)[1]; M.warp.push(n + '|engage.cloudflareclient.com:4500|import|2026-10-27 00:21'); return { errno: 0, out: 'OK ' + n }; }
+  if (/^warp-del /.test(a)) { const n = a.slice(10).replace(/'/g, ''); M.warp = M.warp.filter((l) => l.split('|')[0] !== n); return { errno: 0, out: 'OK' }; }
+  if (/^warp-save /.test(a)) return { errno: 0, out: 'OK /storage/emulated/0/Download/x.conf' };
   if (a === 'clients') return { errno: 0, out: '192.168.43.77|e0:2b:e9:75:60:84|REACHABLE|DESKTOP-LAPTOP|31|21545980|0\n192.168.43.67|42:96:f4:ac:3a:91|STALE|realme-9-Pro-5G|2|7553|0\n|00:27:15:ec:84:bd|-|android-tv|0|0|1\n' };
   if (/^client-(un)?block /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'dnsflush') return { errno: 0, out: 'OK кэш сброшен (dnsproxy перезапущен). На ноутбуке — ещё ipconfig /flushdns' };
