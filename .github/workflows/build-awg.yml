@@ -1,0 +1,66 @@
+# Сборка amneziawg-go (MIT) и awg из amneziawg-tools (GPL-2.0) под Android
+# (arm64 и armv7) для WARP-туннеля модуля. Исходники — официальные теги
+# amnezia-vpn, артефакты — бинарники + тарболы исходников (GPL: исходники
+# кладём рядом, как у conntrack в third_party/).
+# Каталог управляющего сокета на Android: /var/run нет — /data/local/tmp/amneziawg
+# (amneziawg-go — через -X ipc.socketDirectory, awg — через RUNSTATEDIR).
+name: build-awg
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [warp-awg]
+    paths: ['.github/workflows/build-awg.yml']
+
+env:
+  AWG_GO_TAG: v3.1.20260828
+  AWG_TOOLS_TAG: v3.1.20260812
+  SOCK_DIR: /data/local/tmp
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Исходники
+        run: |
+          git clone --depth 1 --branch "$AWG_GO_TAG" https://github.com/amnezia-vpn/amneziawg-go.git
+          git clone --depth 1 --branch "$AWG_TOOLS_TAG" https://github.com/amnezia-vpn/amneziawg-tools.git
+          mkdir -p out
+          tar czf "out/amneziawg-go-$AWG_GO_TAG.tar.gz" --exclude=.git amneziawg-go
+          tar czf "out/amneziawg-tools-$AWG_TOOLS_TAG.tar.gz" --exclude=.git amneziawg-tools
+
+      - name: amneziawg-go (статический, Go)
+        working-directory: amneziawg-go
+        run: |
+          LD="-s -w -X github.com/amnezia-vpn/amneziawg-go/v3/ipc.socketDirectory=$SOCK_DIR/amneziawg"
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$LD" -o ../out/amneziawg-go-arm64 .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags "$LD" -o ../out/amneziawg-go-arm .
+
+      - name: awg (Android NDK)
+        working-directory: amneziawg-tools/src
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          for a in aarch64-linux-android:arm64 armv7a-linux-androideabi:arm; do
+            t=${a%%:*}; n=${a##*:}
+            make clean >/dev/null 2>&1 || true
+            make -j4 CC="$TC/${t}24-clang" RUNSTATEDIR="$SOCK_DIR" \
+              WITH_BASHCOMPLETION=no WITH_WGQUICK=no WITH_SYSTEMDUNITS=no \
+              CFLAGS="-O2 -DRUNSTATEDIR=\\\"$SOCK_DIR\\\"" LDFLAGS="-static" awg
+            "$TC/llvm-strip" awg
+            cp awg "../../out/awg-$n"
+          done
+
+      - name: Проверка
+        run: |
+          file out/*
+          sha256sum out/* | tee out/SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: awg-android
+          path: out/
