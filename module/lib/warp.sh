@@ -28,6 +28,7 @@ WARP_CRASH=""            # конфиг, упавший сразу после п
 WARP_BAD=""              # «имя:epoch …»
 WARP_RETRY_TS=0
 WARP_NOTE=""             # почему fail — для лога и WebUI
+WARP_PUB=""              # «состояние|заметка», уже записанные в status
 WARP_ENSURE_PID=""
 WARP_ENSURE_DONE=0
 WARP_SU_G=""             # su -g работает (проверка — мимо прокси AdGuard)
@@ -157,8 +158,11 @@ warp_ensure() {
 }
 
 warp_set_state() {   # состояние [заметка] — со статусом для WebUI
-    [ "$WARP_STATE|$WARP_NOTE" = "$1|$2" ] && return 0
     WARP_STATE="$1"; WARP_NOTE="$2"
+    # сверяем с тем, что уже в status: warp_down сам ставит off, и сравнение
+    # с WARP_STATE оставляло в status «up» после снятия туннеля
+    [ "$WARP_PUB" = "$1|$2" ] && return 0
+    WARP_PUB="$1|$2"
     phone_status_refresh
 }
 
@@ -191,7 +195,7 @@ warp_reconcile() {
                 WARP_BAD=""; WARP_RETRY_TS=$((now + WARP_RETRY_SECS))
                 return 0
             fi
-            warp_start "$n" && phone_status_refresh ;;
+            warp_start "$n" && warp_set_state starting "" ;;
         starting)
             if warp_probe; then
                 log "WARP: $WARP_CUR поднят за $(( $(date +%s) - WARP_TS )) с"
