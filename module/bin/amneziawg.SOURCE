@@ -1,7 +1,13 @@
 amneziawg-go v3.1.20260828 (MIT, см. amneziawg-go.LICENSE) и awg из
 amneziawg-tools v3.1.20260812 (GPL-2.0, см. awg.LICENSE) — https://github.com/amnezia-vpn
-Собраны в GitHub Actions: .github/workflows/build-awg.yml (ветка warp-awg), из
-официальных тегов; копии исходников — third_party/amneziawg/ (SHA256SUMS там же).
+Собраны в GitHub Actions: .github/workflows/build-awg.yml, из официальных тегов
+(amneziawg-go — коммит b5928efb6ca19f0153958460c3d141f04abc5c2e, Go 1.25).
+Исходники (в zip модуля не входят — условие GPL-2 для awg):
+  https://github.com/JagKubarev/vpn-tethering-ultra/tree/main/third_party/amneziawg
+  https://github.com/amnezia-vpn/amneziawg-go/tree/v3.1.20260828
+  https://github.com/amnezia-vpn/amneziawg-tools/tree/v3.1.20260812
+Внутри amneziawg-go — стандартная библиотека Go и golang.org/x/crypto v0.42.0,
+x/net v0.44.0, x/sys v0.36.0 (BSD-3-Clause, см. golang.LICENSE).
   amneziawg-go: CGO_ENABLED=0 go build -trimpath (Go 1.25), GOARCH=arm64 / arm GOARM=7,
     -ldflags "-s -w -X github.com/amnezia-vpn/amneziawg-go/v3/ipc.socketDirectory=/data/local/tmp/amneziawg"
   awg: Android NDK r30, динамически с системной libc, API 21 (статический bionic
