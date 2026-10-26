@@ -1160,6 +1160,7 @@ VPN_CLIENT_PKGS="llc.itdev.incy com.happproxy org.amnezia.vpn org.amnezia.awg co
 ZAPRET_STATE="off"     # off | on | fail | wl (пауза: белые списки оператора)
 ZAPRET_WL=0            # 1 = похоже на белые списки — обход на паузе (zapret_whitelist_check)
 ZAPRET_WL_LAST=0       # когда последний раз проверяли
+ZAPRET_WL_WAN=""       # на каком WAN проверяли (сменился — проверить сразу)
 ZAPRET_SIG=""          # аргументы + исключения запущенного экземпляра
 ZAPRET_RETRY=0
 ZAPRET_TICK=0

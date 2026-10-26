@@ -320,16 +320,18 @@ case "$1" in
         # тоже (чтобы можно было разблокировать).
         ifs=$(sed -n 's/^ifaces=//p' "$STATUS_FILE" 2>/dev/null | tr '/,' '  ')
         BL=/data/adb/vpn_tether_blocked
-        CT="$MODDIR/bin/conntrack-arm64"; [ -x "$CT" ] || CT="$MODDIR/bin/conntrack-arm"
+        # по архитектуре: в zip оба бинаря с +x, а arm64 на armv7 не исполняется
+        case "$(uname -m)" in aarch64|arm64) CT="$MODDIR/bin/conntrack-arm64" ;; *) CT="$MODDIR/bin/conntrack-arm" ;; esac
         { for i in $ifs; do ip -4 neigh show dev "$i" 2>/dev/null | awk '/lladdr/ {print "N", $1, $3, $NF}'; done
           dumpsys network_stack 2>/dev/null | sed -n 's/.*hwAddr: \([0-9a-f:]*\),.*hostname: \([^,]*\).*/H \1 \2/p'
           [ -x "$CT" ] && "$CT" -L 2>/dev/null | awk '{s=""; b=0; for(i=1;i<=NF;i++){ if($i ~ /^src=/ && s=="") s=substr($i,5); if($i ~ /^bytes=/) b+=substr($i,7) } if(s!="") print "C", s, b}'
           sed 's/|/ /; s/^/B /' "$BL" 2>/dev/null
         } | awk '
             $1 == "N" { ip[$3] = $2; st[$3] = $4; ord[++n] = $3 }
-            $1 == "H" { nm[$2] = $3 }
+            # имя — весь хвост строки (бывает с пробелами), без «|» (разделитель)
+            $1 == "H" { s = $0; sub(/^H [^ ]* /, "", s); gsub(/\|/, "", s); nm[$2] = s }
             $1 == "C" { c[$2]++; by[$2] += $3 }
-            $1 == "B" { bl[$2] = 1; if (!($2 in nm) && $3 != "") nm[$2] = $3 }
+            $1 == "B" { bl[$2] = 1; s = $0; sub(/^B [^ ]* ?/, "", s); gsub(/\|/, "", s); if (!($2 in nm) && s != "") nm[$2] = s }
             END {
                 for (k = 1; k <= n; k++) { m = ord[k]; if (seen[m]++) continue
                     print ip[m] "|" m "|" st[m] "|" nm[m] "|" (c[ip[m]] + 0) "|" (by[ip[m]] + 0) "|" (bl[m] ? 1 : 0) }
@@ -339,13 +341,15 @@ case "$1" in
     client-block|client-unblock)
         m=$(printf '%s' "$2" | tr 'A-F' 'a-f')
         case "$m" in [0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]) ;; *) echo "ERR неверный MAC"; exit 1 ;; esac
+        # нулевой и групповой (младший бит первого байта) — это не устройство
+        case "$m" in 00:00:00:00:00:00|?[13579bdf]:*) echo "ERR это не адрес устройства"; exit 1 ;; esac
         BL=/data/adb/vpn_tether_blocked
         # имя — только для показа: буквы, цифры, пробел, . _ -
         nm=$(printf '%s' "$3" | tr -cd 'A-Za-z0-9 ._-' | cut -c1-40)
         if [ "$1" = client-block ]; then
             grep -q "^$m|" "$BL" 2>/dev/null || echo "$m|$nm" >> "$BL"
         else
-            [ -f "$BL" ] && { grep -v "^$m|" "$BL" > "$BL.tmp"; mv -f "$BL.tmp" "$BL"; }
+            [ -f "$BL" ] && { grep -v "^$m|" "$BL" > "$BL.tmp.$$"; mv -f "$BL.tmp.$$" "$BL"; }
         fi
         # демон подхватит по stat файла за ~2 с (block_reconcile)
         echo "OK" ;;
@@ -468,7 +472,7 @@ case "$1" in
         ip=$(curl -s -m 6 --capath "$CA" -H 'accept: application/dns-json' \
             "https://1.1.1.1/dns-query?name=$h&type=A" 2>/dev/null | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')
         # запасной nslookup: только IPv4 — «Address 1: 2a06:…» давал «ip 2»
-        [ -n "$ip" ] || ip=$("$BB" nslookup "$h" 1.1.1.1 2>/dev/null | sed -n '/^Name/,$p' | grep -oE 'Address [0-9]+: [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1 | awk '{print $3}')
+        [ -n "$ip" ] || ip=$("$BB" nslookup "$h" 1.1.1.1 2>/dev/null | sed -n '/^Name/,$p' | grep -oE 'Address( [0-9]+)?:[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1 | awk '{print $NF}')
         case "$ip" in *.*.*.*) ;; *) echo "ERR не удалось узнать адрес $h"; exit 1 ;; esac
         # "код время rc байт" — байт нужны, чтобы увидеть обрыв после ~16 КБ
         one() {
@@ -490,7 +494,9 @@ case "$1" in
             "000 "*|*" 28 "*|*" 35 "*|*" 56 "*)
                 tcp=0; curl -v -s -o /dev/null -m 4 --interface "$wan" "http://$ip:443/" 2>&1 | grep -q "Connected to" && tcp=1
                 neu=0; [ "$tcp" = 1 ] && curl -v -sk -o /dev/null -m 5 --interface "$wan" --resolve "example.com:443:$ip" \
-                    https://example.com/ 2>&1 | grep -qE "SSL connection using|TLS handshake, Finished" && neu=1
+                    https://example.com/ 2>&1 | grep -qiE "Server hello|SSL connection using|TLS handshake, Finished|alert" && neu=1
+                # «ответил сервер» — и ServerHello, и alert (Cloudflare на чужое имя): блок по
+                # IP и DPI на нейтральном имени дают тайм-аут или RST, а не ответ
                 echo "probe $tcp $neu" ;;
         esac
         iptables -w 2 -t mangle -I POSTROUTING 1 $RULE_NFQ

@@ -372,17 +372,19 @@ block_down() {
     done
 }
 block_apply() {
-    local t m n=0 a
+    local t m n=0 ok=0 a
     block_down
     [ -s "$BLOCK_FILE" ] || return 0
     for t in "$iptables" "$ip6tables"; do
         $t -t mangle -N "$CHAIN_BLOCK" 2>/dev/null || continue
         for m in $(cut -d'|' -f1 "$BLOCK_FILE"); do
             case "$m" in [0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:*) ;; *) continue ;; esac
-            $t -t mangle -A "$CHAIN_BLOCK" -m mac --mac-source "$m" -j DROP 2>/dev/null
+            $t -t mangle -A "$CHAIN_BLOCK" -m mac --mac-source "$m" -j DROP 2>/dev/null && ok=$((ok + 1))
         done
         $t -t mangle -I PREROUTING 1 -j "$CHAIN_BLOCK" 2>/dev/null
     done
+    # нет xt_mac в ядре — правила не встали, а лог говорил бы «заблокировано»
+    [ "$ok" -gt 0 ] || { log "WARNING: Устройства раздачи: правило по MAC не встало (нет -m mac в ядре?) — блокировка не работает"; return 0; }
     # открытые соединения — сразу: по записи conntrack ответы ещё доходили бы
     for m in $(cut -d'|' -f1 "$BLOCK_FILE"); do
         case "$m" in [0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:*) n=$((n + 1)) ;; *) continue ;; esac
@@ -396,7 +398,8 @@ block_apply() {
 # каждую итерацию — дёшево: stat файла; хук (netd/чужие модули) — раз в ~30 с
 block_reconcile() {
     local st
-    st=$(stat -c '%Y %s' "$BLOCK_FILE" 2>/dev/null)
+    # %y — с долями секунды, %i — mv в webctl даёт новый inode
+    st=$(stat -c '%y %s %i' "$BLOCK_FILE" 2>/dev/null)
     if [ "$st" != "$BLOCK_STAMP" ]; then
         # было непусто, стало пусто/удалён — снять; при старте без файла молчим
         if [ -s "$BLOCK_FILE" ]; then block_apply

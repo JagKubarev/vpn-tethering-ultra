@@ -276,7 +276,7 @@ details.more > summary { color: var(--muted); }
 <div class="card">
   <div id="clients"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
 </div>
-<div class="hint" style="margin-top:-4px">Заблокированное устройство остаётся подключённым к точке, но без интернета. Трафик — в открытых сейчас соединениях.</div>
+<div class="hint" style="margin-top:-4px">Заблокированное устройство остаётся подключённым к точке, но без интернета (до конца аренды адреса, потом может отключиться само; после разблокировки иногда нужно переподключить). Новый «случайный» MAC блокировку обходит. Трафик — в открытых сейчас соединениях.</div>
 <div class="hint">Подробные настройки — во вкладках «Обход» и «Сеть», проверки и журналы — в «Инструментах».</div>
 
 </section>
@@ -919,7 +919,7 @@ function clientRow(f) {
   let info = (ip ? ip + ' · ' : '') + mac;
   if (blocked) info += ' · заблокировано';
   else if (st === '-') info += ' · не подключено';
-  else info += ' · ' + (on ? 'в сети' : 'был недавно') + (+c ? ' · соединений: ' + c + ' · ' + fmtBytes(+by) : '');
+  else info += ' · ' + (on ? 'в сети' : 'был недавно') + (+c ? ' · соединений: ' + c + (+by ? ' · ' + fmtBytes(+by) : '') : '');
   return '<div class="row" style="gap:8px"><span class="dot ' + (blocked ? 'red' : on ? 'green' : '') + '"></span>' +
     '<div class="txt"><div class="t">' + esc(nm) + '</div><div class="s">' + esc(info) + '</div></div>' +
     '<button class="btn small" data-cmac="' + esc(mac) + '" data-cname="' + esc(nm) + '" data-cbl="' + (blocked ? '1' : '0') + '">' +
@@ -1276,7 +1276,7 @@ $('#stBtn').addEventListener('click', async () => {
   const host = $('#stHost').value.trim();
   if (!host) return;
   const res = $('#stRes');
-  stLock(true); res.innerHTML = '<span class="muted">Проверяю, до 20 секунд…</span>';
+  stLock(true); res.innerHTML = '<span class="muted">Проверяю, до 40 секунд…</span>';
   try {
     const r = await ctlBg('sitetest ' + q(host));
     const out = r.out.trim();
@@ -1286,7 +1286,8 @@ $('#stBtn').addEventListener('click', async () => {
     }
     const o = {};
     out.split('\n').forEach((l) => { const i = l.indexOf(' '); if (i > 0) o[l.slice(0, i)] = l.slice(i + 1); });
-    const dOk = stOk(o.direct), zOk = stOk(o.zapret), kind = stKind(o);
+    // обрыв после ~16 КБ — HTTP-ответ был, но сайт не открывается
+    const kind = stKind(o), dOk = stOk(o.direct) && !/^Тип: обрыв/.test(kind), zOk = stOk(o.zapret);
     res.innerHTML = stLine('Без обхода', o.direct) + stLine('С обходом', o.zapret) +
       (kind ? '<div class="st-line"><span class="dot amber"></span>' + kind + '</div>' : '') +
       '<div class="muted mt8" style="font-size:13px">' + (dOk ? 'Сайт и так открывается, обход не нужен.'

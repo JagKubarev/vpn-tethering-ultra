@@ -452,27 +452,48 @@ zapret_down() {
 # Яндекса проходит. Раз в минуту; ожил любой зарубежный — обход обратно.
 zapret_tls_ok() {   # $1 — IP; мимо обхода и AdGuard (группа dnsproxy), через WAN
     local cmd c
-    cmd="curl -sk -o /dev/null -m 4 --interface $LAST_WAN_IFACE -w %{http_code} https://$1/"
+    cmd="curl -sk -o /dev/null -m 3 --interface $LAST_WAN_IFACE -w %{http_code} https://$1/"
     if [ "$DNSPROXY_SU_G" = "1" ]; then c=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else c=$(eval "$cmd" 2>/dev/null); fi
     [ -n "$c" ] && [ "$c" != "000" ]
 }
+ZAPRET_WL_HITS=0       # подряд проверок «похоже на белые списки» (вход — со второй)
 zapret_whitelist_check() {
-    local now
-    [ "$ZAPRET_ENABLE" = "1" ] && [ -n "$LAST_WAN_IFACE" ] || { ZAPRET_WL=0; return 0; }
+    local now f p1 p2
+    # дешёвое — первым: без отката DNS и без паузы делать нечего
+    [ "$ZAPRET_WL" = "1" ] || [ "$DNS_DEGRADED" = "1" ] || { ZAPRET_WL_HITS=0; return 0; }
+    [ "$ZAPRET_ENABLE" = "1" ] && [ -n "$NFQWS_BIN" ] && [ -n "$LAST_WAN_IFACE" ] || { ZAPRET_WL=0; ZAPRET_WL_HITS=0; return 0; }
     # VPN: прямой путь не проверить, и обход раздаче не нужен
-    vpn_up_now && { ZAPRET_WL=0; return 0; }
-    [ "$ZAPRET_WL" = "1" ] || [ "$DNS_DEGRADED" = "1" ] || return 0
+    vpn_up_now && { ZAPRET_WL=0; ZAPRET_WL_HITS=0; return 0; }
+    # DoH ожил — белых списков нет (в них молчат все DoH), даже если 1.1.1.1 и
+    # 9.9.9.9 оператор закрыл отдельно (как 8.8.8.8 3 июля) — иначе пауза навсегда
+    if [ "$ZAPRET_WL" = "1" ] && [ "$DNS_DEGRADED" != "1" ]; then
+        log "zapret: DoH снова отвечает — белых списков нет, обход включаю"
+        ZAPRET_WL=0; ZAPRET_WL_HITS=0; return 0
+    fi
+    # сменилась сеть — проверить сразу, а не через минуту
+    [ "$LAST_WAN_IFACE" != "$ZAPRET_WL_WAN" ] && { ZAPRET_WL_WAN="$LAST_WAN_IFACE"; ZAPRET_WL_LAST=0; }
     now=$(date +%s)
     [ $((now - ZAPRET_WL_LAST)) -ge 60 ] || return 0
     ZAPRET_WL_LAST=$now
-    if zapret_tls_ok 1.1.1.1 || zapret_tls_ok 9.9.9.9; then
+    # зарубежные — параллельно: цикл демона стоит, пока идёт проверка
+    f="/data/local/tmp/vpn_tether_wl.$$"
+    rm -f "$f".1 "$f".2
+    ( zapret_tls_ok 1.1.1.1 && : > "$f".1 ) </dev/null >/dev/null 2>&1 & p1=$!
+    ( zapret_tls_ok 9.9.9.9 && : > "$f".2 ) </dev/null >/dev/null 2>&1 & p2=$!
+    wait $p1 $p2
+    if [ -f "$f".1 ] || [ -f "$f".2 ]; then
         [ "$ZAPRET_WL" = "1" ] && log "zapret: зарубежные адреса снова открываются — белых списков нет, обход включаю"
-        ZAPRET_WL=0
+        ZAPRET_WL=0; ZAPRET_WL_HITS=0
     elif zapret_tls_ok 77.88.55.242; then
-        [ "$ZAPRET_WL" = "1" ] || log "zapret: похоже, белые списки оператора (Яндекс открывается, 1.1.1.1 и 9.9.9.9 — нет) — обход на паузе, проверяю раз в минуту"
-        ZAPRET_WL=1
+        ZAPRET_WL_HITS=$((ZAPRET_WL_HITS + 1))
+        # вход — со второй проверки подряд (минута): одна неудача — не повод
+        if [ "$ZAPRET_WL" != "1" ] && [ "$ZAPRET_WL_HITS" -ge 2 ]; then
+            log "zapret: похоже, белые списки оператора (Яндекс открывается, 1.1.1.1 и 9.9.9.9 — нет, 2 проверки подряд) — обход на паузе, проверяю раз в минуту"
+            ZAPRET_WL=1
+        fi
     fi
     # не отвечает и Яндекс — нет связи вообще: состояние не меняем
+    rm -f "$f".1 "$f".2
 }
 
 # Каждая итерация цикла. Дорогое (dumpsys, stat пакетов) — раз в ~30с.
