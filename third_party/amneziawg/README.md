@@ -12,4 +12,4 @@
 | `amneziawg-go-v3.1.20260828.tar.gz` | MIT | `amneziawg-go-arm64`, `amneziawg-go-arm` |
 | `amneziawg-tools-v3.1.20260812.tar.gz` | GPL-2.0 | `awg-arm64`, `awg-arm` |
 
-`awg` слинкован статически с bionic libc из Android NDK (BSD-подобная лицензия AOSP).
+`awg` слинкован динамически с системной libc Android (bionic).
