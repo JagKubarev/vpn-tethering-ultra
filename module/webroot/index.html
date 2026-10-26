@@ -550,7 +550,7 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row" data-dep="WARP_ENABLE">
     <div class="txt"><div class="t">Google</div>
-      <div class="s">Поиск, YouTube, Play — когда оператор режет Google волнами. Скорость — как у WARP (у нас 30–40 Мбит/с).</div></div>
+      <div class="s">Поиск, YouTube, Play — когда оператор режет Google волнами. Скорость — как у WARP (в замерах — 30–40 Мбит/с).</div></div>
     <label class="sw"><input type="checkbox" data-key="WARP_GOOGLE"><span></span></label>
   </div>
   <div class="row col" data-dep="WARP_ENABLE">
@@ -577,15 +577,15 @@ details.more > summary { color: var(--muted); }
   <div class="row btn-row eq">
     <button class="btn small" id="warpGen">Создать</button>
     <button class="btn small" id="warpImp">Импорт файла</button>
-    <button class="btn small" id="warpPaste">Вставить текст</button>
+    <button class="btn small" id="warpPaste" aria-expanded="false" aria-controls="warpPasteBox">Вставить текст</button>
   </div>
   <div class="row col" id="warpPasteBox" style="display:none">
-    <textarea id="warpPasteText" rows="6" placeholder="[Interface]&#10;PrivateKey = …" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
-    <div class="inline"><input type="text" id="warpPasteName" placeholder="имя (латиницей)" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="warpPasteOk">Добавить</button></div>
+    <textarea id="warpPasteText" rows="6" aria-label="Текст конфига" placeholder="[Interface]&#10;PrivateKey = …" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+    <div class="inline"><input type="text" id="warpPasteName" placeholder="имя" aria-label="Имя конфига, латиницей" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="warpPasteOk">Добавить</button></div>
   </div>
   <input type="file" id="warpFile" accept=".conf,.zip,text/plain,application/zip" multiple style="display:none">
 </div>
-<div class="hint">«Создать» регистрирует новый конфиг в Cloudflare прямо с телефона. Импорт — файлы .conf из AmneziaVPN или WireGuard и zip-экспорт AmneziaVPN. Если конфиг перестаёт отвечать, модуль сам переходит на следующий. «Сохранить» кладёт конфиг в «Загрузки» — в нём закрытый ключ, не публикуйте его.</div>
+<div class="hint">«Создать» регистрирует новый конфиг в Cloudflare прямо с телефона. Импорт — файлы .conf из AmneziaVPN или WireGuard и zip-экспорт AmneziaVPN. «Основной» пробуется первым; если конфиг перестаёт отвечать, модуль сам переходит на следующий. «Сохранить» кладёт конфиг в «Загрузки» — в нём закрытый ключ, не публикуйте его.</div>
 </section>
 
 <section class="tab" data-tab="tools">
@@ -674,7 +674,7 @@ details.more > summary { color: var(--muted); }
 <div class="sheet" id="sheet">
   <div class="head">
     <div style="display:flex;justify-content:space-between;align-items:center">
-      <b>Выберите приложения</b><button class="btn small" id="sheetDone">Готово</button>
+      <b id="sheetTitle">Выберите приложения</b><button class="btn small" id="sheetDone">Готово</button>
     </div>
     <input type="search" id="appSearch" placeholder="Поиск">
   </div>
@@ -1102,6 +1102,7 @@ function openSheet(on) {
 $('#warpAdd').addEventListener('click', () => { SHEET_KEY = 'WARP_APPS'; $('#quicAdd').click(); });
 $('#quicAdd').addEventListener('click', async (e) => {
   if (e.isTrusted) SHEET_KEY = 'QUIC_BLOCK_APPS';
+  $('#sheetTitle').textContent = SHEET_KEY === 'WARP_APPS' ? 'Приложения через WARP' : 'Приложения без QUIC';
   $('#appSearch').value = ''; $('#appList').innerHTML = '<div class="empty" style="padding:0 16px">Загружаю список…</div>';
   openSheet(true);
   await loadApps(); renderAppList(); renderChips();
@@ -1170,11 +1171,11 @@ $('#applyBtn').addEventListener('click', async () => {
 $('#revertBtn').addEventListener('click', () => {
   KEYS.forEach((k) => { CUR[k] = saved(k); }); $('#zlist').value = ZL_SAVED;
   $('#upErr').style.display = 'none'; $('#zlistErr').style.display = 'none';
-  renderForm();
+  renderForm(); loadWarp();
 });
 $('#resetAll').addEventListener('click', () => {
   if (!confirm('Вернуть все настройки к значениям по умолчанию?')) return;
-  KEYS.forEach((k) => { CUR[k] = DEF[k] || ''; }); renderForm();
+  KEYS.forEach((k) => { CUR[k] = DEF[k] || ''; }); renderForm(); loadWarp();
 });
 
 // ---------------------------------------------------------------- переключение
@@ -1216,9 +1217,12 @@ function warpState(s) {
     case 'starting': return { d: 'amber', t: 'Подключается' + c, s: '' };
     case 'fail': return s.warp_note === 'нет конфигов'
       ? { d: 'red', t: 'Нет конфигов', s: 'Создайте или импортируйте ниже' }
-      : { d: 'red', t: 'Ни один конфиг не поднялся', s: 'Повтор через 5 минут. Если так постоянно — оператор режет WARP, нужен другой конфиг или порт' };
-    case 'off': return s.vpn_up === '1' ? { d: '', t: 'Пауза: включён VPN', s: 'Без VPN включится сам' }
-      : { d: 'amber', t: 'Запускается…', s: '' };
+      : { d: 'red', t: 'Ни один конфиг не поднялся', s: 'Повтор через 5 минут. Если так постоянно — создайте новый или импортируйте конфиг с другим Endpoint' };
+    case 'off':
+      if (s.vpn_up === '1' || s.warp_note === 'поднят VPN') return { d: '', t: 'Пауза: включён VPN', s: 'Без VPN включится сам' };
+      if (s.warp_note === 'нет сети') return { d: '', t: 'Ждёт сеть', s: '' };
+      if (s.warp_note === 'нет бинарей') return { d: 'red', t: 'Нет файлов AmneziaWG', s: 'Переустановите модуль' };
+      return { d: 'amber', t: 'Запускается…', s: '' };
     default: return { d: '', t: 'Выключен', s: '' };
   }
 }
@@ -1227,21 +1231,23 @@ function renderWarpState(w) {
 }
 
 // "имя|endpoint|gen/import|дата" (webctl warp-list)
-let WARP_N = 0;
+let WARP_N = 0, WARP_HTML = '';
 async function loadWarp() {
   const r = await ctl('warp-list');
   const rows = (r.out || '').split('\n').filter((l) => l.split('|').length >= 4).map((l) => l.split('|'));
   WARP_N = rows.length;
   const main = CUR.WARP_CONF || '', run = ST.warp === 'up' || ST.warp === 'starting' ? ST.warp_conf : '';
-  $('#warpList').innerHTML = rows.length ? rows.map(([n, ep, src, dt]) =>
+  const html = rows.length ? rows.map(([n, ep, src, dt]) =>
     // кнопки — под текстом: на телефоне три в ряд с текстом не помещаются
     '<div class="row col"><div class="head" style="gap:8px"><span class="dot ' + (n === run ? 'green' : '') + '"></span>' +
     '<div class="txt"><div class="t">' + esc(n) + (n === main ? '<span class="badge">основной</span>' : '') + '</div>' +
     '<div class="s">' + esc(ep) + ' · ' + (src === 'gen' ? 'создан' : 'импорт') + ' ' + esc(dt) + (n === run ? ' · в работе' : '') + '</div></div></div>' +
-    '<div class="btn-row mt8">' + (n === main ? '' : '<button class="btn small" data-wmain="' + esc(n) + '">Основной</button>') +
-    '<button class="btn small" data-wsave="' + esc(n) + '">Сохранить</button>' +
-    '<button class="btn small" data-wdel="' + esc(n) + '">Удалить</button></div></div>').join('')
-    : '<div class="row"><div class="txt"><div class="s">Конфигов нет. При включении WARP модуль сам создаст три, или создайте/импортируйте ниже.</div></div></div>';
+    '<div class="btn-row mt8">' + (n === main ? '' : '<button class="btn small" data-wmain="' + esc(n) + '" aria-label="Сделать основным ' + esc(n) + '">Основной</button>') +
+    '<button class="btn small" data-wsave="' + esc(n) + '" aria-label="Сохранить ' + esc(n) + ' в Загрузки">Сохранить</button>' +
+    '<button class="btn small" data-wdel="' + esc(n) + '" aria-label="Удалить ' + esc(n) + '">Удалить</button></div></div>').join('')
+    : '<div class="row"><div class="txt"><div class="s">Конфигов нет. Нажмите «Создать» или импортируйте свой.</div></div></div>';
+  // перерисовка без изменений сбивала фокус и съедала нажатие в момент обновления
+  if (html !== WARP_HTML) { WARP_HTML = html; $('#warpList').innerHTML = html; }
 }
 $('#warpList').addEventListener('click', async (e) => {
   const b = e.target.closest && e.target.closest('button'); if (!b) return;
@@ -1256,7 +1262,11 @@ $('#warpList').addEventListener('click', async (e) => {
     if (!confirm('Удалить конфиг «' + n + '»? Восстановить его не получится (только создать новый).')) return;
     const r = await ctl('warp-del ' + q(n));
     if (!isOk(r)) { toast(errText(r, 'Не получилось')); return; }
-    if (CUR.WARP_CONF === n) setCur('WARP_CONF', '');
+    if (saved('WARP_CONF') === n || CUR.WARP_CONF === n) {
+      // иначе следующий «Создать» с тем же именем молча стал бы основным
+      await ctl('unset WARP_CONF'); delete USR.WARP_CONF; setCur('WARP_CONF', '');
+      if (!busy) ctl('apply');
+    }
     toast('Удалено' + (ST.warp_conf === n ? ' — модуль перейдёт на другой, когда этот перестанет отвечать' : ''));
     loadWarp();
   }
@@ -1276,6 +1286,8 @@ const b64 = (t) => { const u = new TextEncoder().encode(t); let s = ''; u.forEac
 async function warpImport(list) {   // [{name, text}]
   let ok = 0; const bad = [];
   for (const it of list) {
+    // конфиг — 0,5–3 КБ; больше 24 КБ — не тот файл (и аргумент ksu.exec не резиновый)
+    if (it.text.length > 24000) { bad.push(warpName(it.name) + ': больше 24 КБ — это не конфиг'); continue; }
     const r = await ctl('warp-import ' + q(warpName(it.name)) + ' ' + q(b64(it.text.replace(/^\uFEFF/, ''))));
     if (isOk(r)) ok++; else bad.push(warpName(it.name) + ': ' + errText(r, 'ошибка'));
   }
@@ -1285,9 +1297,11 @@ async function warpImport(list) {   // [{name, text}]
 // zip-экспорт AmneziaVPN: .conf из архива (stored / deflate через DecompressionStream)
 async function unzipConfs(buf) {
   const dv = new DataView(buf), out = [], dec = new TextDecoder();
+  // конец архива — в последних 22 + 65535 байт (комментарий zip не длиннее)
   let e = buf.byteLength - 22;
-  while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
-  if (e < 0) throw new Error('не zip');
+  const lo = Math.max(0, buf.byteLength - 65557);
+  while (e >= lo && dv.getUint32(e, true) !== 0x06054b50) e--;
+  if (e < lo) throw new Error('не zip');
   let p = dv.getUint32(e + 16, true);
   for (let i = dv.getUint16(e + 10, true); i > 0 && dv.getUint32(p, true) === 0x02014b50; i--) {
     const m = dv.getUint16(p + 10, true), cs = dv.getUint32(p + 20, true), nl = dv.getUint16(p + 28, true);
@@ -1297,6 +1311,7 @@ async function unzipConfs(buf) {
     const data = new Uint8Array(buf, off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true), cs);
     let raw = null;
     if (m === 0) raw = data;
+    else if (m === 8 && typeof DecompressionStream === 'undefined') throw new Error('этот WebView не умеет распаковывать zip — распакуйте его и выберите файлы .conf');
     else if (m === 8) raw = new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
     if (raw) out.push({ name, text: dec.decode(raw) });
   }
@@ -1307,19 +1322,25 @@ $('#warpFile').addEventListener('change', async (e) => {
   const list = [];
   try {
     for (const f of Array.from(e.target.files || [])) {
+      if (f.size > 1 << 20) { toast(f.name + ': больше 1 МБ — это не конфиг'); continue; }
       if (/\.zip$/i.test(f.name)) list.push(...await unzipConfs(await f.arrayBuffer()));
       else list.push({ name: f.name, text: await f.text() });
     }
-  } catch (err) { toast('Не прочитался файл: ' + err.message); }
+  } catch (err) { toast('Не прочитался файл: ' + (err instanceof RangeError ? 'zip повреждён' : err.message)); }
   e.target.value = '';
   if (list.length) warpImport(list); else toast('В файлах нет конфигов .conf');
 });
-$('#warpPaste').addEventListener('click', () => { const b = $('#warpPasteBox'); b.style.display = b.style.display ? '' : 'none'; });
+$('#warpPaste').addEventListener('click', () => {
+  const b = $('#warpPasteBox'); b.style.display = b.style.display ? '' : 'none';
+  $('#warpPaste').setAttribute('aria-expanded', b.style.display ? 'false' : 'true');
+});
 $('#warpPasteOk').addEventListener('click', async () => {
   const t = $('#warpPasteText').value.trim();
   if (!/\[Interface\]/i.test(t)) { toast('Вставьте текст конфига: [Interface] … [Peer] …'); return; }
-  await warpImport([{ name: $('#warpPasteName').value.trim() || 'warp', text: t }]);
+  const b = $('#warpPasteOk'); if (b.disabled) return; b.disabled = true;
+  try { await warpImport([{ name: $('#warpPasteName').value.trim() || 'warp', text: t }]); } finally { b.disabled = false; }
   $('#warpPasteText').value = ''; $('#warpPasteName').value = ''; $('#warpPasteBox').style.display = 'none';
+  $('#warpPaste').setAttribute('aria-expanded', 'false');
 });
 
 async function loadLog() {

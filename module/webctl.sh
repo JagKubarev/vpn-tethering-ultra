@@ -86,6 +86,9 @@ zscan_busy() {
     return 1
 }
 
+# идёт регистрация WARP (warp/warp.sh gen): её nfqws тоже ловит curl от root
+warpgen_busy() { [ -d /data/local/tmp/vpn_tether_warpgen.lock ]; }
+
 # Текущая сеть: "<ключ>|<название>" (zapret/netid.sh по WAN из status)
 cur_net() {
     local wan
@@ -445,6 +448,7 @@ case "$1" in
     sitetest)
         # Открывается ли сайт мимо VPN: без обхода и с текущей стратегией.
         zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
+        warpgen_busy && { echo "ERR идёт создание конфига WARP — повторите через минуту"; exit 1; }
         h=$(printf '%s' "$2" | tr 'A-Z' 'a-z')
         h=${h#http://}; h=${h#https://}; h=${h%%/*}
         case "$h" in ''|*[!a-z0-9.-]*|*..*|.*) echo "ERR адрес"; exit 1 ;; esac
@@ -514,6 +518,7 @@ case "$1" in
 
     ytspeed)
         zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
+        warpgen_busy && { echo "ERR идёт создание конфига WARP — повторите через минуту"; exit 1; }
         # Скорость видео мимо VPN. ТСПУ режет по имени видеосервера в TLS (SNI),
         # а у настоящих видеосерверов нет большого файла без подписанной ссылки.
         # Поэтому: сервер Google (dl.google.com), имя в SNI — googlevideo.com,

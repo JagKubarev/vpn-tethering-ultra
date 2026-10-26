@@ -203,7 +203,8 @@ case "$1" in
 ' "$c" | sed -n 's/^PrivateKey = //p')
         d=$(grep -Flx "PrivateKey = $pk" "$WARP_DIR"/*.conf 2>/dev/null | head -1)
         [ -z "$d" ] || { d=${d##*/}; echo "ERR этот конфиг уже есть: ${d%.conf}"; exit 1; }
-        n=$(free_name "$n")
+        # free_name допишет «-2», «-3»: оставляем место, чтобы имя осталось в 40
+        n=$(free_name "$(printf '%s' "$n" | cut -c1-36)")
         { echo "# vpn_tether: import $(date '+%Y-%m-%d %H:%M')"; printf '%s\n' "$c"; } > "$WARP_DIR/.$n.tmp" \
             && mv -f "$WARP_DIR/.$n.tmp" "$WARP_DIR/$n.conf" || { echo "ERR запись"; exit 1; }
         echo "OK $n${sk:+ (пропущено строк: $sk)}" ;;
@@ -227,7 +228,7 @@ case "$1" in
         F="/storage/emulated/0/Download/$2.conf"
         sed '1{/^# vpn_tether:/d;}' "$WARP_DIR/$2.conf" > "$F" 2>/dev/null && [ -s "$F" ] || { echo "ERR не удалось записать в «Загрузки»"; exit 1; }
         chmod 644 "$F" 2>/dev/null
-        content call --uri content://media --method scan_file --arg "$F" >/dev/null 2>&1
+        ( content call --uri content://media --method scan_file --arg "$F" >/dev/null 2>&1 & )
         echo "OK $F" ;;
     *)
         echo "ERR команда"; exit 1 ;;

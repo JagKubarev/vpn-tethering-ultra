@@ -177,7 +177,8 @@ warp_reconcile() {
     fi
     [ "$WARP_ENABLE" = "1" ] && [ -n "$AWG_BIN" ] && warp_ensure
     if [ -n "$why" ]; then
-        if [ "$WARP_STATE" != off ]; then warp_down "$why"; WARP_BAD=""; WARP_RETRY_TS=0; warp_set_state off; fi
+        if [ "$WARP_STATE" != off ]; then warp_down "$why"; WARP_BAD=""; WARP_RETRY_TS=0; fi
+        warp_set_state off "$why"   # повторы отсекает WARP_PUB
         return 0
     fi
     now=$(date +%s)
