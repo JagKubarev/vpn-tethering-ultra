@@ -42,6 +42,7 @@ warp_kill_strays() {
 }
 
 warp_down() {   # [причина] — пусто: молча
+    warp_routes_off
     $ip rule del oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     $ip -6 rule del oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     $ip route flush table $WARP_TABLE 2>/dev/null
@@ -201,6 +202,7 @@ warp_reconcile() {
                 log "WARP: $WARP_CUR поднят за $(( $(date +%s) - WARP_TS )) с"
                 WARP_TS=$(date +%s); WARP_CHECK_TS=$WARP_TS; WARP_FAILS=0
                 warp_set_state up ""
+                warp_routes_reconcile""
             else
                 WARP_FAILS=$((WARP_FAILS + 1))
                 # 3 проверки по 5 с + такты цикла ≈ 20 с (свежий поднимается за ~0,7 с)
@@ -224,6 +226,7 @@ warp_reconcile() {
                 fi
                 warp_down; warp_set_state off ""; return 0
             fi
+            warp_routes_reconcile
             [ $((now - WARP_CHECK_TS)) -lt $WARP_CHECK_SECS ] && return 0
             WARP_CHECK_TS=$now
             if warp_probe; then
@@ -239,4 +242,203 @@ warp_reconcile() {
                 fi
             fi ;;
     esac
+}
+
+# ============================================================================
+# Что идёт в WARP. Новые соединения к адресам групп (Google, Telegram, домены
+# из WARP_DOMAINS не на общих CDN) — от раздачи и (WARP_PHONE=1) от
+# приложений телефона, плюс всё от приложений WARP_APPS:
+#  - mangle OUTPUT/PREROUTING: NEW к адресу группы -> connmark WARP_MARK,
+#    пакеты соединения с ним -> fwmark; ip rule «fwmark -> WARP_TABLE»;
+#    уже открытые соединения не переезжают (иначе рвались бы посреди);
+#  - nat MASQUERADE на warp0, FORWARD раздача <-> warp0 (до tetherctrl с его
+#    DROP), MSS 1240 (MTU 1280; фиксированный, не clamp-to-pmtu — уроки);
+#  - IPv6: NAT для v6 в ядре нет — v6 к адресам групп и v6 приложений
+#    WARP_APPS телефону отбиваем, приложение уходит на v4 и в туннель.
+# Только по адресам, которые принадлежат самим сервисам (урок 3.15).
+# Root (uid 0: dnsproxy, сам amneziawg-go, проверки) — никогда.
+# ============================================================================
+WARP_MARK=0x8000000
+WARP_MARK_PREF=2979
+WARP_MSS=1240
+CHAIN_WARP_OUT="VPN_WARP_OUT"     # mangle OUTPUT
+CHAIN_WARP_PRE="VPN_WARP_PRE"     # mangle PREROUTING
+CHAIN_WARP_DST="VPN_WARP_DST"     # адреса групп -> VPN_WARP_SET
+CHAIN_WARP_SET="VPN_WARP_SET"     # connmark + fwmark
+CHAIN_WARP_NAT="VPN_WARP_NAT"     # nat POSTROUTING
+CHAIN_WARP_FWD="VPN_WARP_FWD"     # filter FORWARD
+CHAIN_WARP_V6="VPN_WARP_V6"       # filter OUTPUT (v6): отбить
+WARP_DOM_SECS=600                 # домены перерезолвить раз в 10 мин
+WARP_RT_ON=0
+WARP_RT_SIG=""                    # что стоит: группы|раздача|uid|адреса доменов
+WARP_DOM_TS=0
+WARP_DOM_IPS=""
+WARP_DOM_SKIP=0
+WARP_APP_UIDS=""
+WARP_APP_TS=0
+
+# Домен -> IPv4 через наш dnsproxy (те же ответы, что у клиентов); его нет —
+# через 1.1.1.1. Свой разбор ответа: у busybox nslookup нет -port, dig нет.
+warp_dq() {
+    local q="" l srv=127.0.0.1 port="$DNSPROXY_PORT"
+    [ -n "$DNSPROXY_BIN" ] && [ -n "$port" ] || { srv=1.1.1.1; port=53; }
+    for l in $(echo "$1" | tr '.' ' '); do q="$q$(printf '\\%03o' ${#l})$l"; done
+    # shellcheck disable=SC2059
+    printf "\\022\\064\\001\\000\\000\\001\\000\\000\\000\\000\\000\\000$q\\000\\000\\001\\000\\001" | \
+        timeout 3 toybox nc -u -q 1 -W 1 "$srv" "$port" 2>/dev/null | od -An -tu1 -v | \
+        awk -v skip=$((12 + ${#1} + 2 + 4)) '{ for (i = 1; i <= NF; i++) b[n++] = $i }
+            END { if (n < 12 || b[3] % 16 != 0) exit
+                  i = skip
+                  while (i + 10 < n) {
+                      if (b[i] >= 192) i += 2; else { while (i < n && b[i] != 0) i += b[i] + 1; i++ }
+                      t = b[i] * 256 + b[i+1]; len = b[i+8] * 256 + b[i+9]; i += 10
+                      if (t == 1 && len == 4) print b[i] "." b[i+1] "." b[i+2] "." b[i+3]
+                      i += len
+                  } }'
+}
+
+# Адреса WARP_DOMAINS без общих CDN -> WARP_DOM_IPS (вместе с прошлым набором:
+# ответы DNS скачут, открытое соединение не должно терять маршрут)
+warp_domains_refresh() {
+    local d ips="" out
+    WARP_DOM_TS=$(date +%s)
+    [ -n "$WARP_DOMAINS" ] || { WARP_DOM_IPS=""; WARP_DOM_SKIP=0; return 0; }
+    for d in $WARP_DOMAINS; do ips="$ips $(warp_dq "$d" | tr '\n' ' ')"; done
+    out=$(echo $ips $WARP_DOM_IPS | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -u | \
+        awk 'function n(s,  a) { split(s, a, "."); return ((a[1] * 256 + a[2]) * 256 + a[3]) * 256 + a[4] }
+             FNR == NR { if ($1 ~ /^[0-9]/) { split($1, c, "/"); lo[k] = n(c[1]); sz[k++] = 2 ^ (32 - c[2]) } next }
+             { v = n($1); for (j = 0; j < k; j++) if (v >= lo[j] && v < lo[j] + sz[j]) { skip++; next }; print }
+             END { print "skip " skip + 0 }' "$MODULE_DIR/warp/cdn-ipv4.txt" -)
+    WARP_DOM_SKIP=$(echo "$out" | sed -n 's/^skip //p')
+    WARP_DOM_IPS=$(echo "$out" | grep -v '^skip ' | tr '\n' ' ')
+    WARP_DOM_IPS=${WARP_DOM_IPS% }
+}
+
+warp_app_uids() {
+    local p u out=""
+    for p in $WARP_APPS; do
+        u=$(stat -c %u "/data/data/$p" 2>/dev/null)
+        case "$u" in ''|*[!0-9]*) continue ;; esac
+        [ "$u" -ge 10000 ] && out="$out $u"
+    done
+    echo "${out# }"
+}
+
+# Адреса групп по строке: google/telegram из файлов, домены
+warp_dst4() {
+    local a
+    [ "$WARP_GOOGLE" = "1" ] && grep -E '^[0-9]+\.' "$ZAPRET_DIR/google-ipv4.txt" 2>/dev/null
+    [ "$WARP_TELEGRAM" = "1" ] && grep -E '^[0-9]+\.' "$MODULE_DIR/warp/telegram.txt" 2>/dev/null
+    for a in $WARP_DOM_IPS; do echo "$a/32"; done
+}
+warp_dst6() {
+    [ "$WARP_GOOGLE" = "1" ] && grep -E '^[0-9a-f]+:' "$ZAPRET_DIR/google-ipv6.txt" 2>/dev/null
+    [ "$WARP_TELEGRAM" = "1" ] && grep -E '^[0-9a-f]+:' "$MODULE_DIR/warp/telegram.txt" 2>/dev/null
+}
+
+warp_routes_off() {   # [force] — снять, даже если по флагу не стоят
+    local t c _n
+    [ "$WARP_RT_ON" = "1" ] || [ "$1" = "force" ] || return 0
+    $ip rule del fwmark $WARP_MARK/$WARP_MARK lookup $WARP_TABLE pref $WARP_MARK_PREF 2>/dev/null
+    for t in "$iptables" "$ip6tables"; do
+        _n=0; while [ $_n -lt 8 ] && $t -t mangle -D OUTPUT -j "$CHAIN_WARP_OUT" 2>/dev/null; do _n=$((_n + 1)); done
+        _n=0; while [ $_n -lt 8 ] && $t -t mangle -D PREROUTING -j "$CHAIN_WARP_PRE" 2>/dev/null; do _n=$((_n + 1)); done
+        for c in "$CHAIN_WARP_OUT" "$CHAIN_WARP_PRE" "$CHAIN_WARP_DST" "$CHAIN_WARP_SET"; do
+            $t -t mangle -F "$c" 2>/dev/null; $t -t mangle -X "$c" 2>/dev/null
+        done
+        $t -t mangle -D POSTROUTING -o $WARP_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $WARP_MSS 2>/dev/null
+        $t -t mangle -D PREROUTING -i $WARP_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $WARP_MSS 2>/dev/null
+    done
+    _n=0; while [ $_n -lt 8 ] && $iptables -t nat -D POSTROUTING -j "$CHAIN_WARP_NAT" 2>/dev/null; do _n=$((_n + 1)); done
+    $iptables -t nat -F "$CHAIN_WARP_NAT" 2>/dev/null; $iptables -t nat -X "$CHAIN_WARP_NAT" 2>/dev/null
+    _n=0; while [ $_n -lt 8 ] && $iptables -D FORWARD -j "$CHAIN_WARP_FWD" 2>/dev/null; do _n=$((_n + 1)); done
+    $iptables -F "$CHAIN_WARP_FWD" 2>/dev/null; $iptables -X "$CHAIN_WARP_FWD" 2>/dev/null
+    _n=0; while [ $_n -lt 8 ] && $ip6tables -D OUTPUT -j "$CHAIN_WARP_V6" 2>/dev/null; do _n=$((_n + 1)); done
+    $ip6tables -F "$CHAIN_WARP_V6" 2>/dev/null; $ip6tables -X "$CHAIN_WARP_V6" 2>/dev/null
+    [ "$WARP_RT_ON" = "1" ] && log "WARP: маршруты в туннель сняты"
+    WARP_RT_ON=0; WARP_RT_SIG=""
+}
+
+warp_routes_apply() {   # ифейсы раздачи
+    local tif="$1" uids="$WARP_APP_UIDS" f="$WARP_RUN.rules" c i u m n4 n6 what=""
+    # mangle v4: адреса групп одним iptables-restore (~150 правил за раз)
+    {
+        echo "*mangle"
+        for c in "$CHAIN_WARP_OUT" "$CHAIN_WARP_PRE" "$CHAIN_WARP_DST" "$CHAIN_WARP_SET"; do echo ":$c - [0:0]"; done
+        echo "-A $CHAIN_WARP_SET -j CONNMARK --set-xmark $WARP_MARK/$WARP_MARK"
+        echo "-A $CHAIN_WARP_SET -j MARK --set-xmark $WARP_MARK/$WARP_MARK"
+        warp_dst4 | while read -r m; do echo "-A $CHAIN_WARP_DST -d $m -j $CHAIN_WARP_SET"; done
+        # соединение уже в WARP -> метка каждому пакету; новое -> по адресу.
+        # В PREROUTING — только со стороны раздачи: ответы из warp0 с той же
+        # connmark иначе получили бы метку и ушли обратно в туннель
+        echo "-A $CHAIN_WARP_OUT -m connmark --mark $WARP_MARK/$WARP_MARK -j MARK --set-xmark $WARP_MARK/$WARP_MARK"
+        echo "-A $CHAIN_WARP_OUT -m connmark --mark $WARP_MARK/$WARP_MARK -j RETURN"
+        echo "-A $CHAIN_WARP_OUT -o lo -j RETURN"
+        echo "-A $CHAIN_WARP_OUT -m owner --uid-owner 0 -j RETURN"
+        echo "-A $CHAIN_WARP_OUT -m conntrack ! --ctstate NEW -j RETURN"
+        for u in $uids; do echo "-A $CHAIN_WARP_OUT -m owner --uid-owner $u -j $CHAIN_WARP_SET"; done
+        [ "$WARP_PHONE" = "1" ] && echo "-A $CHAIN_WARP_OUT -j $CHAIN_WARP_DST"
+        for i in $tif; do
+            echo "-A $CHAIN_WARP_PRE -i $i -m connmark --mark $WARP_MARK/$WARP_MARK -j MARK --set-xmark $WARP_MARK/$WARP_MARK"
+            echo "-A $CHAIN_WARP_PRE -i $i -m conntrack --ctstate NEW -j $CHAIN_WARP_DST"
+        done
+        echo "COMMIT"
+    } > "$f"
+    if ! ${iptables%% *}-restore -w 2 --noflush < "$f" 2>>"$WARP_RUN.log"; then
+        log "WARNING: WARP: правила маршрутов не встали ($(tail -1 "$WARP_RUN.log" | cut -c1-120))"
+        rm -f "$f"; warp_routes_off force; return 1
+    fi
+    rm -f "$f"
+    $iptables -t mangle -C OUTPUT -j "$CHAIN_WARP_OUT" 2>/dev/null || $iptables -t mangle -A OUTPUT -j "$CHAIN_WARP_OUT"
+    $iptables -t mangle -C PREROUTING -j "$CHAIN_WARP_PRE" 2>/dev/null || $iptables -t mangle -A PREROUTING -j "$CHAIN_WARP_PRE"
+    $ip rule del fwmark $WARP_MARK/$WARP_MARK lookup $WARP_TABLE pref $WARP_MARK_PREF 2>/dev/null
+    $ip rule add fwmark $WARP_MARK/$WARP_MARK lookup $WARP_TABLE pref $WARP_MARK_PREF
+    # NAT и FORWARD
+    $iptables -t nat -N "$CHAIN_WARP_NAT" 2>/dev/null; $iptables -t nat -F "$CHAIN_WARP_NAT"
+    $iptables -t nat -A "$CHAIN_WARP_NAT" -o $WARP_IF -j MASQUERADE
+    $iptables -t nat -C POSTROUTING -j "$CHAIN_WARP_NAT" 2>/dev/null || $iptables -t nat -I POSTROUTING 1 -j "$CHAIN_WARP_NAT"
+    $iptables -N "$CHAIN_WARP_FWD" 2>/dev/null; $iptables -F "$CHAIN_WARP_FWD"
+    for i in $tif; do
+        $iptables -A "$CHAIN_WARP_FWD" -i "$i" -o $WARP_IF -j ACCEPT
+        $iptables -A "$CHAIN_WARP_FWD" -i $WARP_IF -o "$i" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    done
+    $iptables -C FORWARD -j "$CHAIN_WARP_FWD" 2>/dev/null || $iptables -I FORWARD 1 -j "$CHAIN_WARP_FWD"
+    # MSS: туда и обратно (SYN-ACK к телефону и клиентам)
+    $iptables -t mangle -C POSTROUTING -o $WARP_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $WARP_MSS 2>/dev/null || \
+        $iptables -t mangle -I POSTROUTING 1 -o $WARP_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $WARP_MSS
+    $iptables -t mangle -C PREROUTING -i $WARP_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $WARP_MSS 2>/dev/null || \
+        $iptables -t mangle -I PREROUTING 1 -i $WARP_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $WARP_MSS
+    # IPv6 телефона: отбить (tcp — RST, остальное — недоступен), уйдёт на v4
+    $ip6tables -N "$CHAIN_WARP_V6" 2>/dev/null; $ip6tables -F "$CHAIN_WARP_V6"
+    $ip6tables -A "$CHAIN_WARP_V6" -m owner --uid-owner 0 -j RETURN
+    {
+        for u in $uids; do echo "-m owner --uid-owner $u"; done
+        [ "$WARP_PHONE" = "1" ] && warp_dst6 | while read -r m; do echo "-d $m"; done
+    } | while read -r m; do
+        $ip6tables -A "$CHAIN_WARP_V6" $m -p tcp -j REJECT --reject-with tcp-reset
+        $ip6tables -A "$CHAIN_WARP_V6" $m -j REJECT --reject-with icmp6-adm-prohibited
+    done
+    $ip6tables -C OUTPUT -j "$CHAIN_WARP_V6" 2>/dev/null || $ip6tables -I OUTPUT 1 -j "$CHAIN_WARP_V6"
+    n4=$(warp_dst4 | grep -c .); n6=$(warp_dst6 | grep -c .)
+    [ "$WARP_GOOGLE" = 1 ] && what="$what Google,"
+    [ "$WARP_TELEGRAM" = 1 ] && what="$what Telegram,"
+    [ -n "$WARP_DOMAINS" ] && what="$what домены ($(echo $WARP_DOM_IPS | wc -w) адр.$([ "${WARP_DOM_SKIP:-0}" -gt 0 ] && echo ", общий CDN мимо: $WARP_DOM_SKIP")),"
+    [ -n "$WARP_APPS" ] && what="$what приложения $WARP_APPS (uid ${uids:-не установлены}),"
+    WARP_RT_ON=1
+    log "WARP: в туннель —${what:- ничего,} $n4 сетей v4, v6 отбито: $n6; для:$([ "$WARP_PHONE" = 1 ] && echo ' телефона')${tif:+ раздачи [$tif]}"
+}
+
+# Из цикла, пока туннель поднят: пересобрать, если что-то поменялось
+warp_routes_reconcile() {
+    local now sig tif
+    now=$(date +%s)
+    [ $((now - WARP_DOM_TS)) -ge $WARP_DOM_SECS ] && warp_domains_refresh
+    if [ $((now - WARP_APP_TS)) -ge 30 ]; then WARP_APP_UIDS=$(warp_app_uids); WARP_APP_TS=$now; fi
+    tif="$LAST_TETHER_IFACES"
+    sig="$WARP_GOOGLE$WARP_TELEGRAM$WARP_PHONE|$tif|$WARP_APP_UIDS|$WARP_DOM_IPS"
+    # netd мог перетряхнуть цепочки — проверяем, что хук на месте
+    [ "$WARP_RT_ON" = "1" ] && [ "$sig" = "$WARP_RT_SIG" ] && \
+        $iptables -t mangle -C OUTPUT -j "$CHAIN_WARP_OUT" 2>/dev/null && \
+        $iptables -C FORWARD -j "$CHAIN_WARP_FWD" 2>/dev/null && return 0
+    warp_routes_apply "$tif" && WARP_RT_SIG="$sig"
 }

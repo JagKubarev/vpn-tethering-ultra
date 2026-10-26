@@ -686,6 +686,12 @@ ZAPRET_AUTO_FAIL=3
 # телефоне не поднят; не отвечает — следующий конфиг.
 WARP_ENABLE=0
 WARP_CONF=""            # предпочтительный конфиг (имя); пусто — по порядку
+# Что пускать в WARP (только по адресам самих сервисов, не общих CDN):
+WARP_GOOGLE=0           # сети Google (goog.json) — в «волны» ТСПУ
+WARP_TELEGRAM=1         # сети Telegram (заблокирован по IP)
+WARP_APPS=""            # приложения телефона целиком (пакеты через пробел)
+WARP_DOMAINS=""         # домены; их адреса на Cloudflare/Akamai/Fastly/CloudFront — мимо
+WARP_PHONE=1            # группы — и для приложений телефона, не только раздачи
 # Скрыть раздачу от оператора (3.2; раньше — модуль tether_unblock).
 #  - net.tethering.noprovisioning: Android не спрашивает оператора, можно ли
 #    раздавать (иначе оператор может не дать включить точку или оборвать);
@@ -755,7 +761,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE)
+        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
@@ -782,7 +788,11 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
             # bootstrap — только ip:порт: имя в -b dnsproxy не примет и не стартует
             # (tls://1.1.1.1 с IP он принял бы, но ip:порт — проще и хватает)
             [ "$key" = "DNS_BOOTSTRAP" ] && case "$val" in *[!0-9a-fA-F.:\ \[\]]*) ok=0 ;; esac ;;
-        QUIC_BLOCK_APPS)
+        WARP_DOMAINS)
+            # домены через пробел; пусто — выключить
+            case "$val" in *[!a-z0-9.\ -]*) ok=0 ;; esac
+            [ ${#val} -le 2000 ] || ok=0 ;;
+        QUIC_BLOCK_APPS|WARP_APPS)
             # имена пакетов; пусто — допустимо (выключить)
             case "$val" in *[!A-Za-z0-9._\ ]*) ok=0 ;; esac ;;
         *) ok=0 ;;
@@ -813,7 +823,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -1338,7 +1348,8 @@ TUN_NAME=$(detect_tun_name)
 log "TUN: $TUN_NAME"
 
 dnsproxy_kill_strays
-warp_down                  # туннель от убитого демона
+warp_routes_off force      # туннель и его маршруты от убитого демона
+warp_down
 phone_dns_rules_off
 rm -f "$DNSPROXY_PID_FILE" /data/local/tmp/vpn_tether_probe.*
 dnsproxy_port_guard_down

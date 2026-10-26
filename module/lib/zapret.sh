@@ -322,6 +322,7 @@ zapret_rules_on() {
         $t -t mangle -N "$CHAIN_ZAPRET" 2>/dev/null
         $t -t mangle -F "$CHAIN_ZAPRET" 2>/dev/null
         $t -t mangle -A "$CHAIN_ZAPRET" -o tun+ -j RETURN 2>/dev/null
+        $t -t mangle -A "$CHAIN_ZAPRET" -o warp+ -j RETURN 2>/dev/null
         $t -t mangle -A "$CHAIN_ZAPRET" -o lo -j RETURN 2>/dev/null
         $t -t mangle -A "$CHAIN_ZAPRET" -d "$lan" -j RETURN 2>/dev/null
         $t -t mangle -A "$CHAIN_ZAPRET" -m mark --mark "$ZAPRET_MARK/$ZAPRET_MARK" -j RETURN 2>/dev/null
@@ -347,6 +348,7 @@ zapret_rules_on() {
         $t -t mangle -N "$CHAIN_ZAPRET_IN" 2>/dev/null
         $t -t mangle -F "$CHAIN_ZAPRET_IN" 2>/dev/null
         $t -t mangle -A "$CHAIN_ZAPRET_IN" -i tun+ -j RETURN 2>/dev/null
+        $t -t mangle -A "$CHAIN_ZAPRET_IN" -i warp+ -j RETURN 2>/dev/null
         $t -t mangle -A "$CHAIN_ZAPRET_IN" -i lo -j RETURN 2>/dev/null
         $t -t mangle -A "$CHAIN_ZAPRET_IN" -s "$lan" -j RETURN 2>/dev/null
         $t -t mangle -A "$CHAIN_ZAPRET_IN" -p tcp --sport 443 \
@@ -360,6 +362,7 @@ zapret_rules_on() {
         $t -F "$CHAIN_ZAPRET_QUIC" 2>/dev/null
         if [ "$ZAPRET_QUIC_BLOCK" = "1" ]; then
             $t -A "$CHAIN_ZAPRET_QUIC" -o tun+ -j RETURN 2>/dev/null
+            $t -A "$CHAIN_ZAPRET_QUIC" -o warp+ -j RETURN 2>/dev/null
             $t -A "$CHAIN_ZAPRET_QUIC" -p udp --dport 443 -j REJECT --reject-with "$rj" 2>/dev/null
             $t -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null || \
                 $t -I FORWARD 1 -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null
