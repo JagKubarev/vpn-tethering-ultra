@@ -17,6 +17,8 @@ zapret_ggc_hooks_off() {
 
 zapret_ggc_on() {
     local t f p n st=""
+    # ядро без string — нечем узнать googlevideo.com (zapret_caps)
+    zapret_cap str || { [ -n "$GGC_STATE" ] && zapret_ggc_off; GGC_STATE=""; return 0; }
     for t in "$iptables" "$ip6tables"; do
         zapret_ggc_hooks_off "$t"
         if [ "$t" = "$iptables" ]; then f="$ZAPRET_DIR/google-ipv4.txt"; else f="$ZAPRET_DIR/google-ipv6.txt"; fi
@@ -41,6 +43,8 @@ zapret_ggc_on() {
         $t -A "$CHAIN_ZAPRET_GGC" -p tcp -j REJECT --reject-with tcp-reset 2>/dev/null
         $t -I FORWARD 1 $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null
         [ "$ZAPRET_PHONE" = "1" ] && $t -I OUTPUT 1 $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null
+        # хук не встал — не считаем включённым: иначе сторож ставил бы его по кругу
+        $t -C FORWARD $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null || continue
         st="$st${st:++}$([ "$t" = "$iptables" ] && echo v4 || echo v6)"
     done
     [ "$st" != "$GGC_STATE" ] && [ -n "$st" ] && log "zapret: YouTube мимо кэшей оператора включено ($st)"
@@ -67,11 +71,14 @@ zapret_ggc_hits() {
 # FORWARD (раздача): там ClientHello ещё целый, nfqws его режет позже, в
 # POSTROUTING. Отбой — filter, как у GGC: RST на ClientHello к подсети из
 # списка. tun+ — мимо: через VPN сервер достижим.
-YT_MARK_OUT="! -o tun+ -m owner ! --uid-owner 0 $GGC_MATCH -j CONNMARK --set-xmark $YT_CTMARK/$YT_CTMARK"
-YT_MARK_FWD="! -o tun+ $GGC_MATCH -j CONNMARK --set-xmark $YT_CTMARK/$YT_CTMARK"
-# Play Маркет (gvt1.com) — свой бит: обрыв медленных его не трогает
-YT_GMARK_OUT="! -o tun+ -m owner ! --uid-owner 0 $GVT_MATCH -j CONNMARK --set-xmark $YT_GCTMARK/$YT_GCTMARK"
-YT_GMARK_FWD="! -o tun+ $GVT_MATCH -j CONNMARK --set-xmark $YT_GCTMARK/$YT_GCTMARK"
+yt_match_build() {   # zapret_caps зовёт снова, если ядро без connbytes
+    YT_MARK_OUT="! -o tun+ -m owner ! --uid-owner 0 $GGC_MATCH -j CONNMARK --set-xmark $YT_CTMARK/$YT_CTMARK"
+    YT_MARK_FWD="! -o tun+ $GGC_MATCH -j CONNMARK --set-xmark $YT_CTMARK/$YT_CTMARK"
+    # Play Маркет (gvt1.com) — свой бит: обрыв медленных его не трогает
+    YT_GMARK_OUT="! -o tun+ -m owner ! --uid-owner 0 $GVT_MATCH -j CONNMARK --set-xmark $YT_GCTMARK/$YT_GCTMARK"
+    YT_GMARK_FWD="! -o tun+ $GVT_MATCH -j CONNMARK --set-xmark $YT_GCTMARK/$YT_GCTMARK"
+}
+yt_match_build
 
 yt_dead_hooks_off() {
     local c m _n
@@ -88,7 +95,8 @@ yt_dead_hooks_off() {
 
 yt_dead_on() {
     yt_dead_hooks_off
-    if [ "$YT_DEAD_FAILFAST" != "1" ] || [ -z "$CONNTRACK_BIN" ]; then
+    # без string (zapret_caps) мёртвые серверы не узнать — выключено
+    if [ "$YT_DEAD_FAILFAST" != "1" ] || [ -z "$CONNTRACK_BIN" ] || ! zapret_cap str; then
         yt_dead_off
         return 0
     fi
@@ -108,6 +116,11 @@ yt_dead_on() {
         $iptables -t mangle -I OUTPUT 1 $YT_GMARK_OUT 2>/dev/null
         $iptables -I OUTPUT 1 $GVT_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
         $iptables -I OUTPUT 1 $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
+    fi
+    # хук не встал — не «on»: иначе сторож zapret ставил бы правила по кругу
+    if ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null; then
+        [ "$YT_DEAD_STATE" = "fail" ] || log "WARNING: zapret: правила отбоя мёртвых серверов YouTube не встали — отбой выключен"
+        yt_dead_hooks_off; YT_DEAD_STATE="fail"; return 0
     fi
     [ "$YT_DEAD_STATE" = "on" ] || log "zapret: отбой мёртвых и молчащих серверов YouTube и Play включён (нет ответа ${YT_DEAD_AFTER}с, на запрос ${YT_SILENT_AFTER}с и проверка не прошла -> RST на $((YT_DEAD_TTL / 60)) мин)"
     YT_DEAD_STATE="on"

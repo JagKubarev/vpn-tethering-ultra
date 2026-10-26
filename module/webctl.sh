@@ -89,6 +89,10 @@ zscan_busy() {
 # идёт регистрация WARP (warp/warp.sh gen): её nfqws тоже ловит curl от root
 warpgen_busy() { [ -d /data/local/tmp/vpn_tether_warpgen.lock ]; }
 
+# ядро без connbytes (демон проверил, zapret_caps) — правило проверки без него
+CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9"
+grep -q '^cb=0' /data/local/tmp/vpn_tether_zcaps 2>/dev/null && CB_OUT=""
+
 # Текущая сеть: "<ключ>|<название>" (zapret/netid.sh по WAN из status)
 cur_net() {
     local wan
@@ -460,7 +464,7 @@ case "$1" in
         CA=/apex/com.android.conscrypt/cacerts
         [ -d "$CA" ] || CA=/system/etc/security/cacerts
         Q=202
-        RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
+        RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
         st_cleanup() {
             [ -n "$nqpid" ] && kill "$nqpid" 2>/dev/null
             iptables -w 2 -t mangle -D POSTROUTING $RULE_NFQ 2>/dev/null
@@ -531,7 +535,7 @@ case "$1" in
         CA=/apex/com.android.conscrypt/cacerts
         [ -d "$CA" ] || CA=/system/etc/security/cacerts
         Q=202
-        RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
+        RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
         yt_cleanup() {
             [ -n "$nqpid" ] && kill "$nqpid" 2>/dev/null
             iptables -w 2 -t mangle -D POSTROUTING $RULE_NFQ 2>/dev/null

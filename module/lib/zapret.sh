@@ -78,6 +78,48 @@ quic_block_down() {
 ZAPRET_ARGS_RUN=""
 ZAPRET_EXCL_RUN=""
 
+# Что умеет iptables ядра (лог 4PDA 26.10: Xiaomi, ядро 5.10 — правило с
+# connbytes не вставало, обход не работал вовсе, а сторож каждые 15 с ставил
+# правила заново). Пробуем один раз в пустой, ни к чему не подключённой цепочке.
+#   нет NFQUEUE   — обход невозможен (состояние nokernel, без повторов);
+#   нет connbytes — в nfqws все исходящие HTTPS-пакеты (не первые 9), ответы
+#                   не идут (это была бы вся закачка): нет автосписка и
+#                   подстройки по ответу сервера (autottl, --wssize);
+#   нет string    — нет «мимо кэшей оператора» и отбоя мёртвых серверов YouTube.
+# Итог — и в файл: проверка сайта, подбор и регистрация WARP ставят свои правила.
+ZAPRET_CAPS=""                  # «cb=1 str=1 nfq=1», пусто — ещё не проверяли
+ZAPRET_CAPS_FILE=/data/local/tmp/vpn_tether_zcaps
+ZAPRET_CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9"
+
+zapret_caps() {
+    local c=VPN_ZCAP cb=0 str=0 nfq=0 e miss=""
+    [ -n "$ZAPRET_CAPS" ] && return 0
+    $iptables -t mangle -N $c 2>/dev/null; $iptables -t mangle -F $c 2>/dev/null
+    if e=$($iptables -t mangle -A $c -p tcp --dport 443 $ZAPRET_CB_OUT -j RETURN 2>&1); then cb=1; else miss="$miss connbytes (${e%%
+*})"; fi
+    if e=$($iptables -t mangle -A $c -p tcp -m string --string googlevideo.com --algo bm -j RETURN 2>&1); then str=1; else miss="$miss string (${e%%
+*})"; fi
+    if e=$($iptables -t mangle -A $c -p tcp -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>&1); then nfq=1; else miss="$miss NFQUEUE (${e%%
+*})"; fi
+    $iptables -t mangle -F $c 2>/dev/null; $iptables -t mangle -X $c 2>/dev/null
+    ZAPRET_CAPS="cb=$cb str=$str nfq=$nfq"
+    printf '%s\n' $ZAPRET_CAPS > "$ZAPRET_CAPS_FILE" 2>/dev/null
+    [ -n "$miss" ] && log "WARNING: zapret: ядро не умеет:$miss"
+    if [ "$nfq" = 0 ]; then
+        log "WARNING: zapret: без NFQUEUE обход невозможен — выключен до перезагрузки; нужен VPN или другое ядро"
+    elif [ "$cb" = 0 ]; then
+        ZAPRET_CB_OUT=""
+        log "WARNING: zapret: упрощённый режим — в nfqws все исходящие HTTPS-пакеты (больше нагрузка), без автосписка и подстройки по ответу сервера"
+        # GGC и отбой мёртвых — по одной строке SNI, без «первых пакетов»
+        GGC_MATCH="-p tcp --dport 443 -m string --string googlevideo.com --algo bm"
+        GVT_MATCH="-p tcp --dport 443 -m string --string gvt1.com --algo bm"
+        yt_match_build
+    fi
+    [ "$str" = 0 ] && log "WARNING: zapret: без string — «YouTube мимо кэшей оператора» и отбой мёртвых серверов недоступны"
+    return 0
+}
+zapret_cap() { case " $ZAPRET_CAPS " in *" $1=1 "*) return 0 ;; esac; return 1; }
+
 zapret_alive() {
     local pid
     pid=$(cat "$ZAPRET_PID_FILE" 2>/dev/null)
@@ -338,8 +380,8 @@ zapret_rules_on() {
             # только раздача: у её пакетов нет локального сокета
             $t -t mangle -A "$CHAIN_ZAPRET" -m owner --socket-exists -j RETURN 2>/dev/null
         fi
-        $t -t mangle -A "$CHAIN_ZAPRET" -p tcp --dport 443 \
-            -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 \
+        # shellcheck disable=SC2086
+        $t -t mangle -A "$CHAIN_ZAPRET" -p tcp --dport 443 $ZAPRET_CB_OUT \
             -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
         $t -t mangle -C POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null || \
             $t -t mangle -A POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null
@@ -351,7 +393,8 @@ zapret_rules_on() {
         $t -t mangle -A "$CHAIN_ZAPRET_IN" -i warp+ -j RETURN 2>/dev/null
         $t -t mangle -A "$CHAIN_ZAPRET_IN" -i lo -j RETURN 2>/dev/null
         $t -t mangle -A "$CHAIN_ZAPRET_IN" -s "$lan" -j RETURN 2>/dev/null
-        $t -t mangle -A "$CHAIN_ZAPRET_IN" -p tcp --sport 443 \
+        # без connbytes ответы не шлём: в nfqws ушла бы вся закачка
+        zapret_cap cb && $t -t mangle -A "$CHAIN_ZAPRET_IN" -p tcp --sport 443 \
             -m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3 \
             -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
         $t -t mangle -C PREROUTING -j "$CHAIN_ZAPRET_IN" 2>/dev/null || \
@@ -504,6 +547,14 @@ zapret_reconcile() {
     local args excl
     if [ "$ZAPRET_ENABLE" != "1" ] || [ -z "$NFQWS_BIN" ]; then
         [ "$ZAPRET_STATE" != "off" ] && zapret_down
+        return 0
+    fi
+    zapret_caps
+    if ! zapret_cap nfq; then
+        [ "$ZAPRET_STATE" = "nokernel" ] && return 0
+        zapret_down
+        ZAPRET_STATE="nokernel"
+        phone_status_refresh
         return 0
     fi
     if [ "$ZAPRET_WL" = "1" ]; then

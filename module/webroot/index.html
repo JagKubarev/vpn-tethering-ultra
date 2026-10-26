@@ -834,6 +834,7 @@ function renderStatus(s) {
   }
   if (s.zapret === 'on') {
     let zt = 'включён';
+    if (/cb=0/.test(s.zapret_caps || '')) zt += ' · упрощённый режим (ядро без connbytes)';
     if (s.zapret_strategy) zt += ' · ' + esc(stratName(s.zapret_strategy, s.zapret_eff_args)) +
       (s.zapret_src === 'net' ? ' (своя для «' + esc(s.net_label) + '»)' : s.zapret_src === 'label' ? ' (как у «' + esc(s.net_label) + '», код сети ' + esc(s.net_key) + ')' : ' (общая)');
     if (s.zapret_eff_yt) zt += ' · YouTube: ' + esc(stratLabel(s.zapret_eff_yt));
@@ -855,6 +856,7 @@ function renderStatus(s) {
     }
   }
   else if (s.zapret === 'fail') h += kvRow('Обход блокировок', 'nfqws не запустился, повтор через минуту', 'red');
+  else if (s.zapret === 'nokernel') h += kvRow('Обход блокировок', 'ядро телефона не поддерживает NFQUEUE — обход невозможен, нужен VPN', 'red');
   else if (s.zapret === 'wl') h += kvRow('Обход блокировок', 'пауза: похоже, белые списки оператора — обход не поможет, нужен VPN', 'amber');
   if (s.dnsproxy_enable === '1' && s.meta_eu === '1') {
     if (s.meta_eu_on === '1') h += kvRow('Instagram и Facebook', 'как из Европы (ECS ' + esc(s.meta_ecs) + ')', 'green');
