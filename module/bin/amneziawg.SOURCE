@@ -1,0 +1,13 @@
+amneziawg-go v3.1.20260828 (MIT, см. amneziawg-go.LICENSE) и awg из
+amneziawg-tools v3.1.20260812 (GPL-2.0, см. awg.LICENSE) — https://github.com/amnezia-vpn
+Собраны в GitHub Actions: .github/workflows/build-awg.yml (ветка warp-awg), из
+официальных тегов; копии исходников — third_party/amneziawg/ (SHA256SUMS там же).
+  amneziawg-go: CGO_ENABLED=0 go build -trimpath (Go 1.25), GOARCH=arm64 / arm GOARM=7,
+    -ldflags "-s -w -X github.com/amnezia-vpn/amneziawg-go/v3/ipc.socketDirectory=/data/local/tmp/amneziawg"
+  awg: Android NDK (static), make PLATFORM=linux RUNSTATEDIR=/data/local/tmp LDFLAGS=-static wg
+
+sha256 бинарей:
+  amneziawg-go-arm64  a9d0f8c59cbeef8a8984342467c638b2e86f56e575252808a55473c6440c2646
+  amneziawg-go-arm    0a9a9eeaf0f164e074f4646b2e72a3202da58ddc2c0763c99ebf72b288a6a94d
+  awg-arm64           db49fc808db4ed07bde31ca920f3af92a920bc4bfc963bda406efb744ea38938
+  awg-arm             1945a1c3a61754757124503499905bc7e78fb9115fa9d325bb5d65d3652677bf
