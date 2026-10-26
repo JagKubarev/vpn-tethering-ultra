@@ -324,6 +324,11 @@ yt_dead_scan() {
             # соединения с коротким ответом (возобновлённая TLS-сессия)
             if (bo < 600 || pr < 1 || br > 60 * pr) next
             kind = (pr <= 1) ? "stuck" : "dead"
+            # Play (gvt1.com): имя YOTA не режет (замер 25.10), так что ClientHello
+            # без подтверждения — мёртвый сервер/адрес, а не DPI. 26.10 Play висел
+            # на 172.217.133.234 / 173.194.188.42 (TLS нет и с www.google.com):
+            # от сервера 1 пакет, ClientHello переотправлен 14 раз
+            if (kind == "stuck" && gv && !yt) kind = "dead"
             # застрявшие (сигнал сторожу) — только точно googlevideo.com
             if (kind == "stuck" && !yt) next
             if (now - t0 >= after && d == 0) { print "HIT", kind, dst, tag; d = 1 }
