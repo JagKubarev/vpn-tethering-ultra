@@ -31,6 +31,7 @@ WARP_NOTE=""             # почему fail — для лога и WebUI
 WARP_PUB=""              # «состояние|заметка», уже записанные в status
 WARP_ENSURE_PID=""
 WARP_ENSURE_DONE=0
+WARP_ENSURE_AT=0         # не вышло (нет сети при загрузке) — повтор после этого времени
 WARP_SU_G=""             # su -g работает (проверка — мимо прокси AdGuard)
 WARP_CA=/apex/com.android.conscrypt/cacerts
 [ -d "$WARP_CA" ] || WARP_CA=/system/etc/security/cacerts
@@ -50,7 +51,7 @@ warp_down() {   # [причина] — пусто: молча
     $ip link del $WARP_IF 2>/dev/null
     [ -n "$WARP_PID" ] && kill "$WARP_PID" 2>/dev/null
     warp_kill_strays
-    rm -f "$WARP_SOCK_DIR/$WARP_IF.sock" "$WARP_RUN.wg"
+    rm -f "$WARP_SOCK_DIR/$WARP_IF.sock" "$WARP_DIR/.run.wg"
     [ -n "$1" ] && [ "$WARP_STATE" != off ] && log "WARP: туннель снят ($1)"
     WARP_PID=""; WARP_CUR=""; WARP_STATE=off; WARP_FAILS=0
 }
@@ -93,14 +94,26 @@ warp_start() {   # имя конфига
     warp_down
     # старые прошивки (8.1): /dev/tun вместо /dev/net/tun
     [ -e /dev/net/tun ] || { mkdir -p /dev/net && ln -s /dev/tun /dev/net/tun; } 2>/dev/null
-    mkdir -p "$WARP_SOCK_DIR"
+    # каталог сокета — в /data/local/tmp (вшит при сборке), там пишет и shell:
+    # пересоздаём своим (root, 700), чтобы awg не отдал ключ чужому сокету
+    rm -rf "$WARP_SOCK_DIR"; mkdir -m 700 "$WARP_SOCK_DIR" 2>/dev/null
     WG_PROCESS_FOREGROUND=1 "$AWG_GO_BIN" "$WARP_IF" > "$WARP_RUN.log" 2>&1 < /dev/null &
     WARP_PID=$!
-    while [ $i -lt 30 ] && [ ! -S "$WARP_SOCK_DIR/$WARP_IF.sock" ]; do sleep 0.1; i=$((i + 1)); done
-    # awg не знает Address/DNS/MTU (это wg-quick) — без них; файл с ключом — на миг
-    (umask 077; grep -vE '^[[:space:]]*(#|(Address|DNS|MTU)[[:space:]]*=)' "$f" > "$WARP_RUN.wg")
-    "$AWG_BIN" setconf "$WARP_IF" "$WARP_RUN.wg" >> "$WARP_RUN.log" 2>&1; rc=$?
-    rm -f "$WARP_RUN.wg"
+    # холодный старт на слабом телефоне (MT6580) — до нескольких секунд
+    while [ $i -lt 100 ] && [ ! -S "$WARP_SOCK_DIR/$WARP_IF.sock" ]; do sleep 0.1; i=$((i + 1)); done
+    if [ ! -S "$WARP_SOCK_DIR/$WARP_IF.sock" ]; then
+        # не вина конфига — в «плохие» не ставим, повтор через минуту
+        log "WARP: amneziawg-go не запустился за 10 с ($(tail -1 "$WARP_RUN.log" 2>/dev/null | cut -c1-120))"
+        warp_down; WARP_RETRY_TS=$(( $(date +%s) + 60 )); warp_set_state fail "amneziawg-go не запустился"
+        return 1
+    fi
+    # awg не знает Address/DNS/MTU (это wg-quick) — без них. AllowedIPs — весь
+    # трафик: что пускать в туннель, решают наши правила, а «сплит» из
+    # генератора молча отбросил бы Telegram/Google. Файл с ключом — на миг.
+    (umask 077; awk '/^[ \t]*(#|(Address|DNS|MTU|AllowedIPs)[ \t]*=)/ { next } { print }
+        /^[ \t]*\[Peer\]/ { print "AllowedIPs = 0.0.0.0/0, ::/0" }' "$f" > "$WARP_DIR/.run.wg")
+    "$AWG_BIN" setconf "$WARP_IF" "$WARP_DIR/.run.wg" >> "$WARP_RUN.log" 2>&1; rc=$?
+    rm -f "$WARP_DIR/.run.wg"
     if [ $rc != 0 ]; then
         log "WARP: $n — не запустился (amneziawg-go/awg setconf: $(tail -1 "$WARP_RUN.log" 2>/dev/null | cut -c1-120))"
         warp_down; warp_mark_bad "$n"; return 1
@@ -113,6 +126,8 @@ warp_start() {   # имя конфига
     done
     mtu=$(sed -n 's/^[[:space:]]*MTU[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$f" | head -1)
     $ip link set $WARP_IF mtu "${mtu:-1280}" up 2>/dev/null
+    # обратный маршрут ответов идёт не через warp0: при строгом rp_filter прошивки они бы отбрасывались
+    echo 2 > /proc/sys/net/ipv4/conf/$WARP_IF/rp_filter 2>/dev/null
     $ip route replace default dev $WARP_IF table $WARP_TABLE 2>/dev/null
     $ip -6 route replace default dev $WARP_IF table $WARP_TABLE 2>/dev/null
     $ip rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
@@ -145,11 +160,13 @@ warp_ensure() {
         case "$r" in
             OK*) log "WARP: созданы конфиги:${r#OK}"; WARP_RETRY_TS=0 ;;
             '') ;;
-            *) log "WARP: не удалось создать конфиги — $r" ;;
+            *) log "WARP: не удалось создать конфиги — $r (повтор через $((WARP_RETRY_SECS / 60)) мин)"
+               WARP_ENSURE_DONE=0; WARP_ENSURE_AT=$(( $(date +%s) + WARP_RETRY_SECS )) ;;
         esac
         return 0
     fi
     [ "$WARP_ENSURE_DONE" = 1 ] && return 0
+    [ "$(date +%s)" -lt "$WARP_ENSURE_AT" ] && return 0
     WARP_ENSURE_DONE=1
     [ -f "$WARP_DIR/.init" ] && return 0
     ls "$WARP_DIR"/*.conf >/dev/null 2>&1 && return 0
@@ -173,9 +190,14 @@ warp_reconcile() {
     if [ "$WARP_ENABLE" != "1" ]; then why="выключен"
     elif [ -z "$AWG_BIN" ] || [ -z "$AWG_GO_BIN" ]; then why="нет бинарей"
     elif vpn_up_now; then why="поднят VPN"
+    # раздача на паузе (kill-switch) или VPN переподключается (гистерезис держит «on»):
+    # WARP впереди guard открыл бы клиентам Telegram/Google — «VPN или ничего»
+    elif [ "$VPN_TETHER_MODE" = "blocked" ]; then why="пауза kill-switch"
+    elif [ "$VPN_TETHER_MODE" != "off" ]; then why="поднят VPN"
     elif [ "$WAN_DOWN_LOGGED" = "1" ] || [ -z "$LAST_WAN_IFACE" ]; then why="нет сети"
     fi
-    [ "$WARP_ENABLE" = "1" ] && [ -n "$AWG_BIN" ] && warp_ensure
+    # первые конфиги — только при сети (иначе регистрация падает до перезагрузки)
+    [ -z "$why" ] && warp_ensure
     if [ -n "$why" ]; then
         if [ "$WARP_STATE" != off ]; then warp_down "$why"; WARP_BAD=""; WARP_RETRY_TS=0; fi
         warp_set_state off "$why"   # повторы отсекает WARP_PUB
@@ -206,7 +228,7 @@ warp_reconcile() {
                 log "WARP: $WARP_CUR поднят за $(( $(date +%s) - WARP_TS )) с"
                 WARP_TS=$(date +%s); WARP_CHECK_TS=$WARP_TS; WARP_FAILS=0
                 warp_set_state up ""
-                warp_routes_reconcile""
+                warp_routes_reconcile
             else
                 WARP_FAILS=$((WARP_FAILS + 1))
                 # 3 проверки по 5 с + такты цикла ≈ 20 с (свежий поднимается за ~0,7 с)
@@ -262,7 +284,7 @@ warp_reconcile() {
 # Только по адресам, которые принадлежат самим сервисам (урок 3.15).
 # Root (uid 0: dnsproxy, сам amneziawg-go, проверки) — никогда.
 # ============================================================================
-WARP_MARK=0x8000000
+WARP_MARK=0x20000000             # 0x08000000 — connmark сканера (zapret/scan.sh SCMARK)
 WARP_MARK_PREF=2979
 WARP_MSS=1240
 CHAIN_WARP_OUT="VPN_WARP_OUT"     # mangle OUTPUT
@@ -272,11 +294,13 @@ CHAIN_WARP_SET="VPN_WARP_SET"     # connmark + fwmark
 CHAIN_WARP_NAT="VPN_WARP_NAT"     # nat POSTROUTING
 CHAIN_WARP_FWD="VPN_WARP_FWD"     # filter FORWARD
 CHAIN_WARP_V6="VPN_WARP_V6"       # filter OUTPUT (v6): отбить
+CHAIN_WARP_V6F="VPN_WARP_V6F"     # filter FORWARD (v6 раздачи): отбить
 WARP_DOM_SECS=600                 # домены перерезолвить раз в 10 мин
 WARP_RT_ON=0
 WARP_RT_SIG=""                    # что стоит: группы|раздача|uid|адреса доменов
 WARP_DOM_TS=0
 WARP_DOM_IPS=""
+WARP_DOM_LAST=""                  # адреса прошлого обновления (без накопления)
 WARP_DOM_SKIP=0
 WARP_APP_UIDS=""
 WARP_APP_TS=0
@@ -284,17 +308,20 @@ WARP_APP_TS=0
 # Домен -> IPv4 через наш dnsproxy (те же ответы, что у клиентов); его нет —
 # через 1.1.1.1. Свой разбор ответа: у busybox nslookup нет -port, dig нет.
 warp_dq() {
-    local q="" l srv=127.0.0.1 port="$DNSPROXY_PORT"
+    local d="${1%.}" q="" l srv=127.0.0.1 port="$DNSPROXY_PORT"
     [ -n "$DNSPROXY_BIN" ] && [ -n "$port" ] || { srv=1.1.1.1; port=53; }
-    for l in $(echo "$1" | tr '.' ' '); do q="$q$(printf '\\%03o' ${#l})$l"; done
+    for l in $(echo "$d" | tr '.' ' '); do q="$q$(printf '\\%03o' ${#l})$l"; done
     # shellcheck disable=SC2059
     printf "\\022\\064\\001\\000\\000\\001\\000\\000\\000\\000\\000\\000$q\\000\\000\\001\\000\\001" | \
-        timeout 3 toybox nc -u -q 1 -W 1 "$srv" "$port" 2>/dev/null | od -An -tu1 -v | \
-        awk -v skip=$((12 + ${#1} + 2 + 4)) '{ for (i = 1; i <= NF; i++) b[n++] = $i }
+        timeout 3 toybox nc -u -q 1 "$srv" "$port" 2>/dev/null | od -An -tu1 -v | \
+        awk -v skip=$((12 + ${#d} + 2 + 4)) '{ for (i = 1; i <= NF; i++) b[n++] = $i }
             END { if (n < 12 || b[3] % 16 != 0) exit
-                  i = skip
-                  while (i + 10 < n) {
-                      if (b[i] >= 192) i += 2; else { while (i < n && b[i] != 0) i += b[i] + 1; i++ }
+                  # только секция ответов (ANCOUNT): A из Additional — не наши
+                  an = b[6] * 256 + b[7]; i = skip
+                  while (an-- > 0 && i + 10 < n) {
+                      # имя: метки, затем ноль или ссылка (в т.ч. «метка + ссылка»)
+                      while (i < n && b[i] != 0 && b[i] < 192) i += b[i] + 1
+                      if (b[i] >= 192) i += 2; else i++
                       t = b[i] * 256 + b[i+1]; len = b[i+8] * 256 + b[i+9]; i += 10
                       if (t == 1 && len == 4) print b[i] "." b[i+1] "." b[i+2] "." b[i+3]
                       i += len
@@ -304,15 +331,22 @@ warp_dq() {
 # Адреса WARP_DOMAINS без общих CDN -> WARP_DOM_IPS (вместе с прошлым набором:
 # ответы DNS скачут, открытое соединение не должно терять маршрут)
 warp_domains_refresh() {
-    local d ips="" out
+    local d ips="" out k=0 pids="" p
     WARP_DOM_TS=$(date +%s)
-    [ -n "$WARP_DOMAINS" ] || { WARP_DOM_IPS=""; WARP_DOM_SKIP=0; return 0; }
-    for d in $WARP_DOMAINS; do ips="$ips $(warp_dq "$d" | tr '\n' ' ')"; done
-    out=$(echo $ips $WARP_DOM_IPS | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -u | \
+    [ -n "$WARP_DOMAINS" ] || { WARP_DOM_IPS=""; WARP_DOM_LAST=""; WARP_DOM_SKIP=0; return 0; }
+    # параллельно: по ~1 с на запрос, 50 доменов подряд держали бы цикл минуту.
+    # wait — по своим pid: у оболочки демона в фоне ещё amneziawg-go
+    for d in $WARP_DOMAINS; do warp_dq "$d" > "$WARP_RUN.dq$k" 2>/dev/null & pids="$pids $!"; k=$((k + 1)); done
+    for p in $pids; do wait "$p" 2>/dev/null; done
+    ips=$(cat "$WARP_RUN".dq* 2>/dev/null | tr '\n' ' '); rm -f "$WARP_RUN".dq*
+    # с прошлым обновлением (ответы DNS скачут — открытое соединение не теряет
+    # маршрут), но не со всеми прошлыми: адрес, ушедший другому, не копится
+    out=$(echo $ips $WARP_DOM_LAST | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -u | \
         awk 'function n(s,  a) { split(s, a, "."); return ((a[1] * 256 + a[2]) * 256 + a[3]) * 256 + a[4] }
-             FNR == NR { if ($1 ~ /^[0-9]/) { split($1, c, "/"); lo[k] = n(c[1]); sz[k++] = 2 ^ (32 - c[2]) } next }
+             FNR == NR { if ($1 ~ /^[0-9]/) { split($1, c, "/"); lo[k] = n(c[1]); sz[k] = 2 ^ (32 - c[2]); k++ } next }
              { v = n($1); for (j = 0; j < k; j++) if (v >= lo[j] && v < lo[j] + sz[j]) { skip++; next }; print }
-             END { print "skip " skip + 0 }' "$MODULE_DIR/warp/cdn-ipv4.txt" -)
+             END { print "skip " skip + 0 }' k=0 "$MODULE_DIR/warp/cdn-ipv4.txt" -)
+    WARP_DOM_LAST="$ips"
     WARP_DOM_SKIP=$(echo "$out" | sed -n 's/^skip //p')
     WARP_DOM_IPS=$(echo "$out" | grep -v '^skip ' | tr '\n' ' ')
     WARP_DOM_IPS=${WARP_DOM_IPS% }
@@ -359,6 +393,8 @@ warp_routes_off() {   # [force] — снять, даже если по флаг�
     $iptables -F "$CHAIN_WARP_FWD" 2>/dev/null; $iptables -X "$CHAIN_WARP_FWD" 2>/dev/null
     _n=0; while [ $_n -lt 8 ] && $ip6tables -D OUTPUT -j "$CHAIN_WARP_V6" 2>/dev/null; do _n=$((_n + 1)); done
     $ip6tables -F "$CHAIN_WARP_V6" 2>/dev/null; $ip6tables -X "$CHAIN_WARP_V6" 2>/dev/null
+    _n=0; while [ $_n -lt 8 ] && $ip6tables -D FORWARD -j "$CHAIN_WARP_V6F" 2>/dev/null; do _n=$((_n + 1)); done
+    $ip6tables -F "$CHAIN_WARP_V6F" 2>/dev/null; $ip6tables -X "$CHAIN_WARP_V6F" 2>/dev/null
     [ "$WARP_RT_ON" = "1" ] && log "WARP: маршруты в туннель сняты"
     WARP_RT_ON=0; WARP_RT_SIG=""
 }
@@ -375,10 +411,14 @@ warp_routes_apply() {   # ифейсы раздачи
         # соединение уже в WARP -> метка каждому пакету; новое -> по адресу.
         # В PREROUTING — только со стороны раздачи: ответы из warp0 с той же
         # connmark иначе получили бы метку и ушли обратно в туннель
+        # к локальным сетям (раздача: ICMP «frag needed» клиенту по его соединению с connmark) — не в туннель
+        echo "-A $CHAIN_WARP_OUT -d 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10 -j RETURN"
         echo "-A $CHAIN_WARP_OUT -m connmark --mark $WARP_MARK/$WARP_MARK -j MARK --set-xmark $WARP_MARK/$WARP_MARK"
         echo "-A $CHAIN_WARP_OUT -m connmark --mark $WARP_MARK/$WARP_MARK -j RETURN"
         echo "-A $CHAIN_WARP_OUT -o lo -j RETURN"
-        echo "-A $CHAIN_WARP_OUT -m owner --uid-owner 0 -j RETURN"
+        # root и системные uid (проверки связи NetworkMonitor, DoT netd) — мимо:
+        # сбой WARP не должен выглядеть для Android как «сеть без интернета»
+        echo "-A $CHAIN_WARP_OUT -m owner --uid-owner 0-9999 -j RETURN"
         echo "-A $CHAIN_WARP_OUT -m conntrack ! --ctstate NEW -j RETURN"
         for u in $uids; do echo "-A $CHAIN_WARP_OUT -m owner --uid-owner $u -j $CHAIN_WARP_SET"; done
         [ "$WARP_PHONE" = "1" ] && echo "-A $CHAIN_WARP_OUT -j $CHAIN_WARP_DST"
@@ -388,7 +428,8 @@ warp_routes_apply() {   # ифейсы раздачи
         done
         echo "COMMIT"
     } > "$f"
-    if ! ${iptables%% *}-restore -w 2 --noflush < "$f" 2>>"$WARP_RUN.log"; then
+    if ! ${iptables%% *}-restore -w 2 --noflush < "$f" 2>>"$WARP_RUN.log" && \
+       ! ${iptables%% *}-restore --noflush < "$f" 2>>"$WARP_RUN.log"; then
         log "WARNING: WARP: правила маршрутов не встали ($(tail -1 "$WARP_RUN.log" | cut -c1-120))"
         rm -f "$f"; warp_routes_off force; return 1
     fi
@@ -414,7 +455,7 @@ warp_routes_apply() {   # ифейсы раздачи
         $iptables -t mangle -I PREROUTING 1 -i $WARP_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $WARP_MSS
     # IPv6 телефона: отбить (tcp — RST, остальное — недоступен), уйдёт на v4
     $ip6tables -N "$CHAIN_WARP_V6" 2>/dev/null; $ip6tables -F "$CHAIN_WARP_V6"
-    $ip6tables -A "$CHAIN_WARP_V6" -m owner --uid-owner 0 -j RETURN
+    $ip6tables -A "$CHAIN_WARP_V6" -m owner --uid-owner 0-9999 -j RETURN
     {
         for u in $uids; do echo "-m owner --uid-owner $u"; done
         [ "$WARP_PHONE" = "1" ] && warp_dst6 | while read -r m; do echo "-d $m"; done
@@ -423,6 +464,15 @@ warp_routes_apply() {   # ифейсы раздачи
         $ip6tables -A "$CHAIN_WARP_V6" $m -j REJECT --reject-with icmp6-adm-prohibited
     done
     $ip6tables -C OUTPUT -j "$CHAIN_WARP_V6" 2>/dev/null || $ip6tables -I OUTPUT 1 -j "$CHAIN_WARP_V6"
+    # v6 клиентов раздачи к адресам групп — тоже отбить (Windows идёт на v6 первым)
+    $ip6tables -N "$CHAIN_WARP_V6F" 2>/dev/null; $ip6tables -F "$CHAIN_WARP_V6F"
+    for i in $tif; do
+        warp_dst6 | while read -r m; do
+            $ip6tables -A "$CHAIN_WARP_V6F" -i "$i" -d "$m" -p tcp -j REJECT --reject-with tcp-reset
+            $ip6tables -A "$CHAIN_WARP_V6F" -i "$i" -d "$m" -j REJECT --reject-with icmp6-adm-prohibited
+        done
+    done
+    $ip6tables -C FORWARD -j "$CHAIN_WARP_V6F" 2>/dev/null || $ip6tables -I FORWARD 1 -j "$CHAIN_WARP_V6F"
     n4=$(warp_dst4 | grep -c .); n6=$(warp_dst6 | grep -c .)
     [ "$WARP_GOOGLE" = 1 ] && what="$what Google,"
     [ "$WARP_TELEGRAM" = 1 ] && what="$what Telegram,"

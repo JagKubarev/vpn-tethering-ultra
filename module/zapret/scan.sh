@@ -35,6 +35,8 @@ CA=/apex/com.android.conscrypt/cacerts
 [ -d "$CA" ] || CA=/system/etc/security/cacerts
 case "$(uname -m)" in aarch64|arm64) NQ="$MODDIR/bin/nfqws-arm64" ;; *) NQ="$MODDIR/bin/nfqws-arm" ;; esac
 WAN=$(sed -n 's/^wan=//p' "$MODDIR/status" 2>/dev/null)
+# идёт регистрация WARP (warp/warp.sh gen, до ~15 с на конфиг) — подождать
+_i=0; while [ -d /data/local/tmp/vpn_tether_warpgen.lock ] && [ $_i -lt 90 ]; do sleep 1; _i=$((_i + 1)); done
 IPT="iptables -w 2"
 TMP="$OUT.tmp"
 EVENTS=/data/adb/vpn_tether_zapret_events

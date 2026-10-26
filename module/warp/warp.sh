@@ -65,11 +65,13 @@ normalize() {
             if (!i) { err = "строка " NR " без «=»"; exit }
             k = substr($0, 1, i - 1); v = substr($0, i + 1)
             gsub(/^[ \t]+|[ \t]+$/, "", k); gsub(/^[ \t]+|[ \t]+$/, "", v)
-            if (sec == "i") ok = k ~ /^(PrivateKey|Address|DNS|MTU|ListenPort|Jc|Jmin|Jmax|S[1-4]|H[1-4]|I[1-5]|J[1-3]|Itime)$/
+            # J1–J3/Itime (AmneziaWG 1.5) awg v3.1 не знает — «Line unrecognized»: в пропущенные
+            if (sec == "i") ok = k ~ /^(PrivateKey|Address|DNS|MTU|ListenPort|Jc|Jmin|Jmax|S[1-4]|H[1-4]|I[1-5])$/
             else if (sec == "p") ok = k ~ /^(PublicKey|PresharedKey|AllowedIPs|Endpoint|PersistentKeepalive)$/
             else { err = "строка " NR " до [Interface]"; exit }
             if (!ok) { skip++; next }
-            if (v == "" || v ~ /[^A-Za-z0-9+\/=.:,<> \[\]_-]/) { err = "недопустимое значение " k; exit }
+            t = v; gsub(/[][]/, "", t)   # скобки — отдельно: в классе с ними busybox awk ошибается
+            if (v == "" || t ~ /[^A-Za-z0-9+\/=.:,<> _-]/) { err = "недопустимое значение " k; exit }
             if (k ~ /Key$/ && (length(v) != 44 || v !~ /^[A-Za-z0-9+\/]+=$/)) { err = "неверный " k; exit }
             seen[sec k] = 1; out = out k " = " v "\n"
         }
@@ -95,7 +97,7 @@ free_name() {
 # текущей стратегией сети на curl от root (как sitetest в webctl.sh); при VPN
 # правило -o <WAN> не совпадёт, и запрос просто уйдёт в туннель. В обоих
 # случаях — мимо прокси AdGuard (подменяет сертификаты).
-Q=203
+Q=204   # 202 — sitetest, 203 — scan.sh
 bypass_on() {
     local wan nk nl
     iptables -w 2 -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
