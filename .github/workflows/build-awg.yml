@@ -49,8 +49,11 @@ jobs:
             t=${a%%:*}; n=${a##*:}
             make clean >/dev/null 2>&1 || true
             # цель Makefile — wg (это и есть awg); CFLAGS не трогаем: в нём
-            # Makefile сам добавляет -DRUNSTATEDIR и uapi/linux
-            make -j4 CC="$TC/${t}24-clang" PLATFORM=linux RUNSTATEDIR="$SOCK_DIR" LDFLAGS="-static" wg
+            # Makefile сам добавляет -DRUNSTATEDIR и uapi/linux.
+            # Динамически, с системной libc, API 21: статическая libc.a NDK — под
+            # последний API и на старых ядрах падает (MT6580, 3.18: «arc4random
+            # MADV_WIPEONFORK failed»); заодно имена резолвит штатный netd.
+            make -j4 CC="$TC/${t}21-clang" PLATFORM=linux RUNSTATEDIR="$SOCK_DIR" wg
             "$TC/llvm-strip" wg
             cp wg "../../out/awg-$n"
           done
