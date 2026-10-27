@@ -119,12 +119,11 @@ warp_start() {   # имя конфига
     rm -f "$WARP_DIR/.run.wg"
     if [ $rc != 0 ]; then
         log "WARP: $n — не запустился (awg setconf: $(tail -2 "$WARP_RUN.log" 2>/dev/null | tr '\n' ' ' | cut -c1-160))"
-        # имя Endpoint своего сервера не резолвится — это сеть/DNS, не конфиг
-        # bionic: «No address associated with hostname», при тайм-ауте DNS — «Try again»
-        if grep -qiE 'hostname|name or service|resolv|temporary failure|try again' "$WARP_RUN.log" 2>/dev/null; then
-            warp_down; WARP_RETRY_TS=$(( $(date +%s) + 60 )); warp_set_state fail "нет DNS для Endpoint"
-            return 1
-        fi
+        # Имя Endpoint не находится (bionic: «No address associated with
+        # hostname»). У WARP имя подставлено адресом выше, так что это свой
+        # сервер или шаблон (server.example.com из zip AmneziaVPN, 27.10):
+        # пропускаем на WARP_BAD_SECS, как плохой, и сразу берём следующий —
+        # ждать минуту на одном и том же значило бы не дойти до рабочих
         warp_down; warp_mark_bad "$n"; return 1
     fi
     for a in $(sed -n 's/^[[:space:]]*Address[[:space:]]*=//p' "$f" | tr ',' ' '); do
