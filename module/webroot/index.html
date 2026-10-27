@@ -102,7 +102,7 @@ h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacin
 .btn:active:not(:disabled) { background: var(--input); transform: scale(.98); }
 .btn.primary:active:not(:disabled) { background: var(--accent); filter: brightness(.92); }
 .btn:disabled { opacity: .5; cursor: default; }
-.btn:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn:focus-visible, summary:focus-visible, .chip button:focus-visible, .offnote:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* у вкладок рамки фокуса нет: WebView KernelSU рисовал её и после нажатия пальцем,
    а активная вкладка и так видна по цвету */
 #tabbar button:focus, #tabbar button:focus-visible { outline: none; }
@@ -309,7 +309,7 @@ details.more > summary { color: var(--muted); }
   <div class="row col" id="znetBox">
     <div class="txt"><div class="t">Эта сеть: <span id="znetCur">—</span></div>
       <div class="s" id="znetInfo"></div></div>
-    <select id="znetSel"></select>
+    <select id="znetSel" aria-label="Стратегия для этой сети"></select>
     <div class="s muted" id="znetListHead" style="font-size:13px;margin-top:12px"></div>
     <div id="znetList"></div>
   </div>
@@ -376,7 +376,7 @@ details.more > summary { color: var(--muted); }
       <div id="zauto" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:8px;padding:2px 10px"></div>
       <div class="row" style="padding:10px 0 0;border-top:0">
         <div class="txt"><div class="s">Порог добавления, сбоев за минуту</div></div>
-        <select data-key="ZAPRET_AUTO_FAIL" style="width:auto">
+        <select data-key="ZAPRET_AUTO_FAIL" style="width:auto" aria-label="Порог добавления, сбоев за минуту">
           <option value="2">2</option><option value="3">3</option><option value="4">4</option>
           <option value="5">5</option><option value="7">7</option><option value="10">10</option>
         </select>
@@ -408,7 +408,7 @@ details.more > summary { color: var(--muted); }
 <h2>Подбор стратегии</h2>
 <div class="card pad">
   <div class="s muted" style="font-size:13px;margin-top:2px">Ищет рабочую стратегию для текущей сети по этим сайтам, в фоне. При сбое стратегии автопроверка обхода запускает подбор сама.</div>
-  <textarea id="scSites" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+  <textarea id="scSites" rows="3" aria-label="Сайты для подбора" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
   <div class="btn-row eq mt8">
     <button class="btn" id="scQuick">Быстрый · ~2 мин</button>
     <button class="btn" id="scFull">Полный · ~7 мин</button>
@@ -622,7 +622,7 @@ details.more > summary { color: var(--muted); }
 <div class="card pad">
   <div class="s muted" style="font-size:13px;margin-top:2px">Доступность сайта мимо VPN — без обхода и с текущей стратегией.</div>
   <div class="inline">
-    <input type="text" id="stHost" enterkeyhint="go" placeholder="youtube.com" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <input type="text" id="stHost" enterkeyhint="go" aria-label="Адрес сайта" placeholder="youtube.com" autocapitalize="off" autocorrect="off" spellcheck="false">
     <button class="btn" id="stBtn">Проверить</button>
   </div>
   <button class="btn" id="ytBtn" style="margin-top:10px">Скорость YouTube</button>
@@ -687,17 +687,17 @@ details.more > summary { color: var(--muted); }
 </div></div>
 
 <div class="sheet-bg" id="sheetBg"></div>
-<div class="sheet" id="sheet">
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
   <div class="head">
     <div style="display:flex;justify-content:space-between;align-items:center">
       <b id="sheetTitle">Выберите приложения</b><button class="btn small" id="sheetDone">Готово</button>
     </div>
-    <input type="search" id="appSearch" placeholder="Поиск">
+    <input type="search" id="appSearch" placeholder="Поиск" aria-label="Поиск приложения">
   </div>
   <div class="list" id="appList"></div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
 'use strict';
@@ -992,6 +992,11 @@ $$('[data-key]').forEach((el) => {
   });
 });
 $('#zlist').addEventListener('input', () => { $('#zlistErr').style.display = 'none'; renderBar(); });
+// для диктора: у переключателя и поля в строке своей подписи нет — берём заголовок строки
+$$('.row input, .row select, .row textarea').forEach((el) => {
+  const t = el.closest('.row').querySelector('.t');
+  if (t && el.type !== 'file' && !el.hasAttribute('aria-label')) el.setAttribute('aria-label', t.textContent.trim());
+});
 
 // ---------------------------------------------------------------- устройства в раздаче (3.18)
 // "ip|mac|состояние|имя|соединений|байт|1=заблокировано" (webctl clients)
@@ -1029,11 +1034,15 @@ $('#clients').addEventListener('click', async (e) => {
 function showTab(t) {
   if (!$('.tab[data-tab="' + t + '"]')) t = 'home';
   $$('.tab').forEach((el) => el.classList.toggle('on', el.dataset.tab === t));
-  $$('#tabbar button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
+  $$('#tabbar button').forEach((b) => { b.classList.toggle('on', b.dataset.tab === t); b.setAttribute('aria-current', b.dataset.tab === t ? 'page' : 'false'); });
   try { localStorage.setItem('vtTab', t); } catch (e) { /* без хранилища — просто не запоминаем */ }
 }
 $$('#tabbar button').forEach((b) => b.addEventListener('click', () => { showTab(b.dataset.tab); document.body.scrollTo(0, 0); }));
-$$('[data-offnote]').forEach((n) => n.addEventListener('click', () => { showTab('home'); document.body.scrollTo(0, 0); }));
+$$('[data-offnote]').forEach((n) => {
+  n.tabIndex = 0;
+  n.addEventListener('click', () => { showTab('home'); document.body.scrollTo(0, 0); });
+  n.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); n.click(); } });
+});
 let _tab0 = 'home';
 try { _tab0 = localStorage.getItem('vtTab') || 'home'; } catch (e) { /* по умолчанию — Главная */ }
 showTab(_tab0);
@@ -1066,7 +1075,7 @@ function renderChips() {
   Object.keys(CHIPS).forEach((k) => {
     const list = appKeyList(k);
     $(CHIPS[k][0]).innerHTML = list.length
-      ? list.map((p) => '<span class="chip"><span>' + esc(label(p)) + '</span><button data-rm="' + esc(p) + '" data-rk="' + k + '" aria-label="Убрать">×</button></span>').join('')
+      ? list.map((p) => '<span class="chip"><span>' + esc(label(p)) + '</span><button data-rm="' + esc(p) + '" data-rk="' + k + '" aria-label="Убрать ' + esc(label(p)) + '">×</button></span>').join('')
       : '<div class="empty">' + CHIPS[k][1] + '</div>';
   });
 }
@@ -1788,7 +1797,7 @@ $('#metaBtn').addEventListener('click', async () => {
 function mockExec(cmd) {
   const a = cmd.replace(CTL + ' ', '');
   const M = window.__mock || (window.__mock = {
-    target: 'vpn', usr: { DNSPROXY_ENABLE: '1' }, zlist: '', ack: '',
+    target: 'vpn', usr: { DNSPROXY_ENABLE: '1', WARP_ENABLE: '1' }, zlist: '', ack: '',   // WARP включён — вкладка не серая при warp=up
   });
   // set/unset/zlist-set запоминаются, чтобы после «Применить» форма не откатывалась
   const mset = /^set ([A-Z_]+) '(.*)'$/.exec(a), munset = /^unset ([A-Z_]+)$/.exec(a);
