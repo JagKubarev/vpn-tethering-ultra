@@ -107,7 +107,9 @@ h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacin
    а активная вкладка и так видна по цвету */
 #tabbar button:focus, #tabbar button:focus-visible { outline: none; }
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.btn-row.eq > .btn { flex: 1 1 130px; padding: 0 8px; white-space: nowrap; }   /* две равные в ряд, третья — ниже на всю ширину */
+.btn-row.eq > .btn { flex: 1 1 120px; padding: 0 8px; white-space: nowrap; }   /* две равные в ряд, третья — ниже на всю ширину (120 — две и на 320 px) */
+/* равные кнопки в ряд; не влезают — переносятся и растягиваются на свободное место */
+.btn-row.fill > .btn { flex: 1 1 0; padding: 0 8px; white-space: nowrap; }
 
 .row { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-top: 1px solid var(--line); }
 .row:first-child { border-top: 0; }
@@ -117,6 +119,12 @@ h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacin
 .row.off { opacity: .45; pointer-events: none; }
 .row.col { flex-direction: column; align-items: stretch; }
 .row.col > .head { display: flex; align-items: center; gap: 12px; }   /* заголовок + кнопка справа, итог ниже */
+/* строка с кнопкой справа: на узком экране или при крупном шрифте кнопка уходит
+   под текст, а не сжимает его в столбик по слогу */
+.row.wrap, .row.col > .head { flex-wrap: wrap; }
+.row.wrap > .txt, .row.col > .head > .txt { flex: 1 1 10em; }
+.row.wrap > .btn, .row.col > .head > .btn { margin-left: auto; }
+.row.wrap > .dot { align-self: flex-start; margin-top: calc(.725em - 5px); }   /* точка — у первой строки, а не посередине */
 .badge { font-size: 11px; color: var(--accent); border: 1px solid currentColor; border-radius: 6px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
 
 .sw { position: relative; width: 46px; height: 28px; flex: none; }
@@ -137,11 +145,13 @@ textarea { resize: vertical; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo
 .st-line { margin-top: 6px; overflow-wrap: anywhere; }
 .st-line > .dot { margin-right: 8px; vertical-align: -1px; }
 details.off { opacity: .45; pointer-events: none; }
+/* в тёмной теме серый текст на .45 почти сливался с карточкой */
+@media (prefers-color-scheme: dark) { .row.off, details.off { opacity: .55; } }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 select:disabled { opacity: .6; }
-.inline { display: flex; gap: 8px; align-items: flex-start; }
-.inline > input { min-width: 0; }
-.inline > .btn { margin-top: 10px; white-space: nowrap; flex: none; }
+.inline { display: flex; flex-wrap: wrap; gap: 0 8px; align-items: flex-start; }
+.inline > input { min-width: 0; flex: 1 1 9em; }   /* поле не уже ~9 знаков: иначе кнопка — на строку ниже */
+.inline > .btn { margin-top: 10px; margin-left: auto; white-space: nowrap; flex: none; }
 .err { color: var(--red); font-size: 13px; margin-top: 6px; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
@@ -202,6 +212,10 @@ pre.log { margin: 0; padding: 12px 14px; background: var(--input); font: 12px/1.
 /* пять вкладок: при крупном системном шрифте подпись не налезает на соседнюю */
 .tabbar button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tabbar button.on { color: var(--accent); font-weight: 600; }
+@media (max-width: 340px) {   /* 320 px: «Главная» и «Сервис» не обрезаются и при шрифте ×1.3 */
+  .tabbar .in { padding: 0 2px; }
+  .tabbar button { font-size: 11px; }
+}
 details.more { margin-top: 18px; }
 details.kvbox { margin: 14px -16px -16px; border-top: 1px solid var(--line); }
 details.kvbox > summary { padding: 12px 16px; min-height: 46px; font-size: 14px; color: var(--muted); }
@@ -348,7 +362,7 @@ details.more > summary { color: var(--muted); }
     <summary><span>Сайты с отдельной стратегией: <span id="zaltN">0</span></span></summary>
     <div style="padding:0 16px 13px">
       <div id="zalt"></div>
-      <div class="btn-row mt8">
+      <div class="btn-row fill mt8">
         <button class="btn small" id="zaltRun">Проверить сайты сейчас</button>
         <button class="btn small" id="zaltClear">Сбросить</button>
       </div>
@@ -618,11 +632,11 @@ details.more > summary { color: var(--muted); }
 
 <h2>Проверки</h2>
 <div class="card">
-  <div class="row">
+  <div class="row wrap">
     <div class="txt"><div class="t">Проверка DNS</div><div class="s" id="dohRes">Отвечает ли зашифрованный DNS (dnsproxy).</div></div>
     <button class="btn small" id="dohBtn">Проверить</button>
   </div>
-  <div class="row">
+  <div class="row wrap">
     <div class="txt"><div class="t">Сбросить кэш DNS</div><div class="s" id="dnsFlushRes">Если сайт пишет «недоступно в вашем регионе», хотя должен открываться. На ноутбуке затем — ipconfig /flushdns или переподключение к точке.</div></div>
     <button class="btn small" id="dnsFlushBtn">Сбросить</button>
   </div>
@@ -637,7 +651,7 @@ details.more > summary { color: var(--muted); }
 
 <h2>Журналы</h2>
 <div class="card">
-  <div class="row">
+  <div class="row wrap">
     <div class="txt"><div class="t">Отправить логи</div>
       <div class="s" id="logSendRes">Журналы и настройки одним файлом в «Загрузки» и сразу в «Поделиться». В файле есть названия сетей Wi-Fi и локальные адреса.</div></div>
     <button class="btn small" id="logSend">Отправить</button>
@@ -648,7 +662,7 @@ details.more > summary { color: var(--muted); }
   </details>
   <details id="logBox">
     <summary>Журнал модуля</summary>
-    <div class="row btn-row" style="border-top:0;padding-top:0">
+    <div class="row btn-row fill" style="border-top:0;padding-top:0">
       <button class="btn small" id="logRefresh">Обновить</button>
       <button class="btn small" id="logCopy">Скопировать</button>
       <button class="btn small" id="logPrev">Прошлый запуск</button>
@@ -990,7 +1004,7 @@ function clientRow(f) {
   if (blocked) info += ' · заблокировано';
   else if (st === '-') info += ' · не подключено';
   else info += ' · ' + (on ? 'в сети' : 'был недавно') + (+c ? ' · соединений: ' + c + (+by ? ' · ' + fmtBytes(+by) : '') : '');
-  return '<div class="row" style="gap:8px"><span class="dot ' + (blocked ? 'red' : on ? 'green' : '') + '"></span>' +
+  return '<div class="row wrap" style="gap:8px"><span class="dot ' + (blocked ? 'red' : on ? 'green' : '') + '"></span>' +
     '<div class="txt"><div class="t">' + esc(nm) + '</div><div class="s">' + esc(info) + '</div></div>' +
     '<button class="btn small" data-cmac="' + esc(mac) + '" data-cname="' + esc(nm) + '" data-cbl="' + (blocked ? '1' : '0') + '">' +
     (blocked ? 'Разблокировать' : 'Блок') + '</button></div>';
@@ -1255,7 +1269,7 @@ async function loadWarp() {
     '<div class="row col"><div class="head" style="gap:8px"><span class="dot ' + (n === run ? 'green' : '') + '"></span>' +
     '<div class="txt"><div class="t">' + esc(n) + (n === main ? '<span class="badge">основной</span>' : '') + '</div>' +
     '<div class="s">' + esc(ep) + ' · ' + (src === 'gen' ? 'создан' : 'импорт') + ' ' + esc(dt) + (n === run ? ' · в работе' : '') + '</div></div></div>' +
-    '<div class="btn-row mt8">' + (n === main ? '' : '<button class="btn small" data-wmain="' + esc(n) + '" aria-label="Сделать основным ' + esc(n) + '">Основной</button>') +
+    '<div class="btn-row fill mt8">' + (n === main ? '' : '<button class="btn small" data-wmain="' + esc(n) + '" aria-label="Сделать основным ' + esc(n) + '">Основной</button>') +
     '<button class="btn small" data-wsave="' + esc(n) + '" aria-label="Сохранить ' + esc(n) + ' в Загрузки">Сохранить</button>' +
     '<button class="btn small" data-wdel="' + esc(n) + '" aria-label="Удалить ' + esc(n) + '">Удалить</button></div></div>').join('')
     : '<div class="row"><div class="txt"><div class="s">Конфигов нет. Нажмите «Создать» или импортируйте свой.</div></div></div>';
@@ -1629,7 +1643,7 @@ async function scRefresh() {
     const full = r.maxBrk === 0 && r.open === blocked.length && blocked.length > 0;
     const dot = r.maxBrk > 0 ? 'red' : full ? 'green' : r.open > 0 ? 'amber' : '';
     const info = r.maxBrk > 0 ? 'ломает обычные сайты' : 'открыл ' + r.open + ' из ' + blocked.length + (r.ms ? ' · ' + (r.ms / 1000).toFixed(1) + ' с' : '') + (r.runs > 1 ? ' · проверена ' + r.runs + '×' : '');
-    return '<div class="row" style="padding:10px 0;border-top:' + (i ? '1px solid var(--line)' : '0') + '">' +
+    return '<div class="row wrap" style="padding:10px 0;border-top:' + (i ? '1px solid var(--line)' : '0') + '">' +
       '<span class="dot ' + dot + '"></span><div class="txt"><div class="t" style="font-size:14px">' + esc(stratLabel(r.a)) + '</div>' +
       '<div class="s">' + esc(info) + (r.det && !full ? ' · не открылись: ' + esc(r.det.replace(/:x(\d+)/g, (m, c) => c === '28' ? ' (тайм-аут)' : c === '35' ? ' (обрыв)' : ' (ошибка ' + c + ')')) : '') + '</div></div>' +
       (r.maxBrk === 0 && r.open > 0 ? '<button class="btn small" data-apply="' + esc(r.a) + '">Применить</button>' : '') + '</div>';
@@ -1711,7 +1725,7 @@ function renderZnet() {
   sel.disabled = !ZN.cur;
   $('#znetListHead').textContent = ZN.list.length ? 'Запомненные сети: ' + ZN.list.length : 'Запомненных сетей пока нет.';
   $('#znetList').innerHTML = ZN.list.map((x) =>
-    '<div class="row" style="padding:10px 0;border-top:1px solid var(--line)">' +
+    '<div class="row wrap" style="padding:10px 0;border-top:1px solid var(--line)">' +
     '<span class="dot' + (x.key === ZN.cur ? ' green' : '') + '"></span><div class="txt"><div class="t" style="font-size:14px">' +
     esc(x.label) + ' <span class="muted" style="font-weight:400">· ' + esc(netKind(x.key)) + '</span></div>' +
     '<div class="s">' + esc(stratName(x.st, x.args)) + (x.note ? ' · ' + esc(x.note) : '') + (x.date ? ' · ' + esc(x.date) : '') + '</div></div>' +
