@@ -109,7 +109,7 @@ zapret_caps() {
         log "WARNING: zapret: без NFQUEUE обход невозможен — выключен до перезагрузки; нужен VPN или другое ядро"
     elif [ "$cb" = 0 ]; then
         ZAPRET_CB_OUT=""
-        log "WARNING: zapret: упрощённый режим — в nfqws все исходящие HTTPS-пакеты (больше нагрузка), без автосписка и подстройки по ответу сервера"
+        log "WARNING: zapret: упрощённый режим — в nfqws все исходящие HTTPS-пакеты (больше нагрузка), без подстройки по ответу сервера (autottl, --wssize); автосписок — только по зависаниям"
         # GGC и отбой мёртвых — по одной строке SNI, без «первых пакетов»
         GGC_MATCH="-p tcp --dport 443 -m string --string googlevideo.com --algo bm"
         GVT_MATCH="-p tcp --dport 443 -m string --string gvt1.com --algo bm"
@@ -233,6 +233,16 @@ zapret_auto_log_trim() {
     [ "${s:-0}" -gt 262144 ] || return 0
     tail -n 1500 "$ZAPRET_AUTO_LOG" > "$ZAPRET_AUTO_LOG.tmp" && cat "$ZAPRET_AUTO_LOG.tmp" > "$ZAPRET_AUTO_LOG"
     rm -f "$ZAPRET_AUTO_LOG.tmp"
+}
+# лог nfqws — тоже: «rawsend: bind (ignoring)» на каждый подставной пакет
+# раздачи (лог 4PDA 26.10) рос бы до перезапуска. Открыт с >> (O_APPEND) —
+# обрезка на ходу безопасна
+zapret_nfqws_log_trim() {
+    local s
+    s=$(wc -c < "$ZAPRET_LOG" 2>/dev/null) || return 0
+    [ "${s:-0}" -gt 524288 ] || return 0
+    tail -n 200 "$ZAPRET_LOG" > "$ZAPRET_LOG.tmp" && cat "$ZAPRET_LOG.tmp" > "$ZAPRET_LOG"
+    rm -f "$ZAPRET_LOG.tmp"
 }
 
 zapret_args() {
@@ -581,6 +591,7 @@ zapret_reconcile() {
         ZAPRET_TICK=0
         ZAPRET_NET_DIRTY=0
         zapret_auto_log_trim
+        zapret_nfqws_log_trim
         ZAPRET_NETS_STAMP="$stamp"
         # dumpsys connectivity тяжёлый (system_server) — раз на каждый tun, а
         # не каждые 30с: владелец VPN за сессию не меняется

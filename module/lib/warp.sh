@@ -110,12 +110,21 @@ warp_start() {   # имя конфига
     # awg не знает Address/DNS/MTU (это wg-quick) — без них. AllowedIPs — весь
     # трафик: что пускать в туннель, решают наши правила, а «сплит» из
     # генератора молча отбросил бы Telegram/Google. Файл с ключом — на миг.
-    (umask 077; awk '/^[ \t]*(#|(Address|DNS|MTU|AllowedIPs)[ \t]*=)/ { next } { print }
+    # Endpoint WARP — адресом: awg резолвит имя сам, и без DNS «Configuration
+    # parsing error» записывал исправный конфиг в «плохие» (27.10 09:52)
+    (umask 077; awk '/^[ \t]*(#|(Address|DNS|MTU|AllowedIPs)[ \t]*=)/ { next }
+        { sub(/engage\.cloudflareclient\.com:/, "162.159.192.1:"); print }
         /^[ \t]*\[Peer\]/ { print "AllowedIPs = 0.0.0.0/0, ::/0" }' "$f" > "$WARP_DIR/.run.wg")
     "$AWG_BIN" setconf "$WARP_IF" "$WARP_DIR/.run.wg" >> "$WARP_RUN.log" 2>&1; rc=$?
     rm -f "$WARP_DIR/.run.wg"
     if [ $rc != 0 ]; then
-        log "WARP: $n — не запустился (amneziawg-go/awg setconf: $(tail -1 "$WARP_RUN.log" 2>/dev/null | cut -c1-120))"
+        log "WARP: $n — не запустился (awg setconf: $(tail -2 "$WARP_RUN.log" 2>/dev/null | tr '\n' ' ' | cut -c1-160))"
+        # имя Endpoint своего сервера не резолвится — это сеть/DNS, не конфиг
+        # bionic: «No address associated with hostname», при тайм-ауте DNS — «Try again»
+        if grep -qiE 'hostname|name or service|resolv|temporary failure|try again' "$WARP_RUN.log" 2>/dev/null; then
+            warp_down; WARP_RETRY_TS=$(( $(date +%s) + 60 )); warp_set_state fail "нет DNS для Endpoint"
+            return 1
+        fi
         warp_down; warp_mark_bad "$n"; return 1
     fi
     for a in $(sed -n 's/^[[:space:]]*Address[[:space:]]*=//p' "$f" | tr ',' ' '); do
@@ -137,16 +146,20 @@ warp_start() {   # имя конфига
     return 0
 }
 
-# Трафик через туннель есть: Cloudflare отвечает «warp=on». От группы
-# dnsproxy — мимо прокси AdGuard (с --interface он даёт тайм-аут).
+# Трафик через туннель есть: trace Cloudflare ответил через warp0. Не «warp=on»:
+# свой сервер AmneziaWG/WireGuard (не Cloudflare) честно отвечает «warp=off»
+# и отбраковывался (лог 4PDA 26.10, PORTAL-NL). От группы dnsproxy — мимо
+# прокси AdGuard (с --interface он даёт тайм-аут).
 warp_probe() {
-    local cmd="curl -s -m 5 --interface $WARP_IF --capath $WARP_CA https://www.cloudflare.com/cdn-cgi/trace" out
+    # по IP: при отказе DNS (DoH не отвечает) проверка по имени валилась и
+    # живой туннель считался мёртвым (27.10 09:52)
+    local cmd="curl -s -m 5 --interface $WARP_IF --capath $WARP_CA https://1.1.1.1/cdn-cgi/trace" out
     if [ -z "$WARP_SU_G" ]; then
         WARP_SU_G=0
         su -g "$DNSPROXY_GID" -c true >/dev/null 2>&1 && WARP_SU_G=1
     fi
     if [ "$WARP_SU_G" = "1" ]; then out=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else out=$(eval "$cmd" 2>/dev/null); fi
-    case "$out" in *warp=on*|*warp=plus*) return 0 ;; esac
+    case "$out" in *ip=*) return 0 ;; esac
     return 1
 }
 
