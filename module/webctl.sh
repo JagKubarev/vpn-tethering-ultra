@@ -333,17 +333,23 @@ case "$1" in
         # по архитектуре: в zip оба бинаря с +x, а arm64 на armv7 не исполняется
         case "$(uname -m)" in aarch64|arm64) CT="$MODDIR/bin/conntrack-arm64" ;; *) CT="$MODDIR/bin/conntrack-arm" ;; esac
         { for i in $ifs; do ip -4 neigh show dev "$i" 2>/dev/null | awk '/lladdr/ {print "N", $1, $3, $NF}'; done
-          dumpsys network_stack 2>/dev/null | sed -n 's/.*hwAddr: \([0-9a-f:]*\),.*hostname: \([^,]*\).*/H \1 \2/p'
+          # конец аренды (expTime) — в мс от загрузки, те же часы, что /proc/uptime
+          awk '{printf "U %d\n", $1 * 1000}' /proc/uptime
+          dumpsys network_stack 2>/dev/null | sed -n 's/.*hwAddr: \([0-9a-f:]*\),.*expTime: \([0-9]*\),.*hostname: \([^,]*\).*/H \1 \2 \3/p'
           [ -x "$CT" ] && "$CT" -L 2>/dev/null | awk '{s=""; b=0; for(i=1;i<=NF;i++){ if($i ~ /^src=/ && s=="") s=substr($i,5); if($i ~ /^bytes=/) b+=substr($i,7) } if(s!="") print "C", s, b}'
           sed 's/|/ /; s/^/B /' "$BL" 2>/dev/null
         } | awk '
             $1 == "N" { ip[$3] = $2; st[$3] = $4; ord[++n] = $3 }
             # имя — весь хвост строки (бывает с пробелами), без «|» (разделитель)
-            $1 == "H" { s = $0; sub(/^H [^ ]* /, "", s); gsub(/\|/, "", s); nm[$2] = s }
+            $1 == "U" { now = $2 }
+            $1 == "H" { s = $0; sub(/^H [^ ]* [^ ]* /, "", s); gsub(/\|/, "", s); nm[$2] = s; ex[$2] = $3 }
             $1 == "C" { c[$2]++; by[$2] += $3 }
             $1 == "B" { bl[$2] = 1; s = $0; sub(/^B [^ ]* ?/, "", s); gsub(/\|/, "", s); if (!($2 in nm) && s != "") nm[$2] = s }
             END {
                 for (k = 1; k <= n; k++) { m = ord[k]; if (seen[m]++) continue
+                    # аренда истекла, трафика нет — ушёл (ядро держит STALE часами);
+                    # нет аренды в журнале (статический IP, журнал прокрутился) — показываем
+                    if ((m in ex) && now > 0 && ex[m] + 0 < now && st[m] !~ /REACHABLE|DELAY|PROBE/ && !c[ip[m]] && !bl[m]) continue
                     print ip[m] "|" m "|" st[m] "|" nm[m] "|" (c[ip[m]] + 0) "|" (by[ip[m]] + 0) "|" (bl[m] ? 1 : 0) }
                 for (m in bl) if (!seen[m]) print "|" m "|-|" nm[m] "|0|0|1"
             }'
