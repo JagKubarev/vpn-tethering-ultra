@@ -173,7 +173,7 @@ gen() {
     pid=$(cat "$ZSCAN.pid" 2>/dev/null)
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "ERR идёт подбор обхода — повторите позже"; return 1; fi
     mkdir "$GEN_LOCK" 2>/dev/null || {
-        # замок от убитого процесса — старше 2 минут
+        # замок от убитого процесса — старше 3 минут (живой gen обновляет его на каждом конфиге)
         [ -n "$(find "$GEN_LOCK" -maxdepth 0 -mmin +3 2>/dev/null)" ] && rm -rf "$GEN_LOCK" && mkdir "$GEN_LOCK" 2>/dev/null \
             || { echo "ERR генерация уже идёт"; return 1; }
     }

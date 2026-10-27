@@ -53,7 +53,8 @@ zapret_ggc_on() {
         fi
         st="$st${st:++}$([ "$t" = "$iptables" ] && echo v4 || echo v6)"
     done
-    [ -n "$st" ] && GGC_FAILS=0
+    case "$st" in v4*) GGC_FAILS=0 ;; esac
+    [ "$GGC_FAILS" = 3 ] && log "WARNING: zapret: правила «YouTube мимо кэшей оператора» не встали 3 раза — выключено до смены сети"
     [ "$st" != "$GGC_STATE" ] && [ -n "$st" ] && log "zapret: YouTube мимо кэшей оператора включено ($st)"
     GGC_STATE="$st"
 }

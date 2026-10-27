@@ -97,10 +97,15 @@ rm -f "$ZAPRET_CAPS_FILE" 2>/dev/null   # от прошлой загрузки: 
 # xtables у netd/scan.sh, не создалась цепочка) — повтор в следующем такте.
 # Иначе разовый сбой на загрузке выключал zapret до перезагрузки (ревью 27.10)
 zapret_caps() {
-    local c=VPN_ZCAP cb=0 str=0 nfq=0 e miss="" try
+    local c=VPN_ZCAP cb=0 str=0 nfq=0 e miss=""
     [ -n "$ZAPRET_CAPS" ] && return 0
     $iptables -t mangle -N $c 2>/dev/null; $iptables -t mangle -F $c 2>/dev/null
-    $iptables -t mangle -L $c -n >/dev/null 2>&1 || return 1
+    if ! e=$($iptables -t mangle -L $c -n 2>&1 >/dev/null); then
+        ZAPRET_CAPS_TRIES=$((ZAPRET_CAPS_TRIES + 1))
+        [ "$ZAPRET_CAPS_TRIES" = 3 ] && log "WARNING: zapret: не проверить возможности ядра — iptables не создаёт цепочку (${e%%
+*}); повторяю"
+        return 1
+    fi
     # сбой от замка — не ответ ядра
     zcap_lockerr() { case "$1" in *xtables\ lock*|*[Tt]emporarily*|*[Rr]esource\ busy*|*holding*) return 0 ;; esac; return 1; }
     if e=$($iptables -t mangle -A $c -p tcp --dport 443 $ZAPRET_CB_OUT -j RETURN 2>&1); then cb=1
@@ -576,6 +581,9 @@ zapret_whitelist_check() {
 # Каждая итерация цикла. Дорогое (dumpsys, stat пакетов) — раз в ~30с.
 zapret_reconcile() {
     local args excl
+    # возможности ядра — и при выключенном zapret: по файлу их берут проверка
+    # сайта и регистрация WARP (ядро без connbytes, ревью 27.10)
+    [ -n "$ZAPRET_CAPS" ] || zapret_caps
     if [ "$ZAPRET_ENABLE" != "1" ] || [ -z "$NFQWS_BIN" ]; then
         [ "$ZAPRET_STATE" != "off" ] && zapret_down
         return 0
@@ -655,11 +663,16 @@ zapret_reconcile() {
         ZAPRET_HOOK_TICK=0
         if ! $iptables -t mangle -C POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null || \
            { [ "$ZAPRET_QUIC_BLOCK" = "1" ] && ! $iptables -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; } || \
-           { [ -n "$GGC_STATE" ] && ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null; } || \
+           { case "$GGC_STATE" in v4*) ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null ;; *) false ;; esac; } || \
            { [ "$YT_DEAD_STATE" = "on" ] && ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null; } || \
-           { [ "$YT_GGC_BLOCK" = "1" ] && [ -z "$GGC_STATE" ] && [ "$GGC_FAILS" -gt 0 ] && [ "$GGC_FAILS" -lt 3 ] && zapret_cap str; } || \
+           { [ "$YT_GGC_BLOCK" = "1" ] && [ "$GGC_FAILS" -gt 0 ] && [ "$GGC_FAILS" -lt 3 ] && zapret_cap str; } || \
            { [ "$YT_DEAD_STATE" = "fail" ] && [ "$YT_DEAD_FAILS" -lt 3 ]; }; then
             _hooks_bad=1
+            # повтор не вставших GGC/отбоя — не «правила пропали»
+            if [ "$GGC_FAILS" -gt 0 ] || [ "$YT_DEAD_STATE" = "fail" ]; then
+                log "zapret: повторяю правила «мимо кэшей оператора»/отбоя мёртвых серверов (попытка $((GGC_FAILS > YT_DEAD_FAILS ? GGC_FAILS + 1 : YT_DEAD_FAILS + 1)) из 3)"
+                ZAPRET_RETRY_LOGGED=1
+            fi
         fi
     fi
     if [ "$ZAPRET_STATE" != "on" ] || [ "$excl" != "$ZAPRET_EXCL_RUN" ] || [ "$_hooks_bad" = 1 ]; then
@@ -669,7 +682,8 @@ zapret_reconcile() {
         elif [ "$excl" != "$ZAPRET_EXCL_RUN" ]; then
             log "zapret: исключения VPN-клиентов: ${excl:-нет}"
         else
-            log "WATCHDOG: zapret: правила пропали, ставлю заново"
+            [ "$ZAPRET_RETRY_LOGGED" = 1 ] || log "WATCHDOG: zapret: правила пропали, ставлю заново"
+            ZAPRET_RETRY_LOGGED=0
         fi
         ZAPRET_EXCL_RUN="$excl"
         ZAPRET_STATE="on"

@@ -157,9 +157,9 @@ warp_start() {   # имя конфига
     return 0
 }
 
-# Трафик через туннель есть: trace Cloudflare ответил через warp0. Не «warp=on»:
-# свой сервер AmneziaWG/WireGuard (не Cloudflare) честно отвечает «warp=off»
-# и отбраковывался (лог 4PDA 26.10, PORTAL-NL). От группы dnsproxy — мимо
+# Трафик через туннель есть: trace Cloudflare ответил через warp0. Сервер
+# Cloudflare — нужен «warp=on» (WARP_CF); свой AmneziaWG/WireGuard честно
+# отвечает «warp=off» и отбраковывался (лог 4PDA 26.10) — ему любой ответ. От группы dnsproxy — мимо
 # прокси AdGuard (с --interface он даёт тайм-аут).
 warp_probe() {
     # по IP: при отказе DNS (DoH не отвечает) проверка по имени валилась и
@@ -329,6 +329,8 @@ CHAIN_WARP_V6F="VPN_WARP_V6F"     # filter FORWARD (v6 раздачи): отби
 WARP_DOM_SECS=600                 # домены перерезолвить раз в 10 мин
 WARP_RT_ON=0
 WARP_RT_SIG=""                    # что стоит: группы|раздача|uid|адреса доменов
+WARP_RT_GRP=""                    # группы из настроек при последней сборке
+WARP_RT_DST=""                    # сети v4 при последней сборке (что закрыть при смене групп)
 WARP_DOM_TS=0
 WARP_DOM_IPS=""
 WARP_DOM_LAST=""                  # адреса прошлого обновления (без накопления)
@@ -397,15 +399,16 @@ warp_app_uids() {
 }
 
 # Адреса групп по строке: google/telegram из файлов, домены
-warp_dst4() {
+warp_dst4() {   # \r — на случай списка, сохранённого в Windows (iptables-restore его не примет)
     local a
-    [ "$WARP_GOOGLE" = "1" ] && grep -E '^[0-9]+\.' "$ZAPRET_DIR/google-ipv4.txt" 2>/dev/null
-    [ "$WARP_TELEGRAM" = "1" ] && grep -E '^[0-9]+\.' "$MODULE_DIR/warp/telegram.txt" 2>/dev/null
+    # сервисы Google без Google Cloud (goog.json минус cloud.json): на GCP — чужие сайты
+    [ "$WARP_GOOGLE" = "1" ] && tr -d '\r' < "$MODULE_DIR/warp/google-ipv4.txt" 2>/dev/null | grep -E '^[0-9]+\.'
+    [ "$WARP_TELEGRAM" = "1" ] && tr -d '\r' < "$MODULE_DIR/warp/telegram.txt" 2>/dev/null | grep -E '^[0-9]+\.'
     for a in $WARP_DOM_IPS; do echo "$a/32"; done
 }
 warp_dst6() {
-    [ "$WARP_GOOGLE" = "1" ] && grep -E '^[0-9a-f]+:' "$ZAPRET_DIR/google-ipv6.txt" 2>/dev/null
-    [ "$WARP_TELEGRAM" = "1" ] && grep -E '^[0-9a-f]+:' "$MODULE_DIR/warp/telegram.txt" 2>/dev/null
+    [ "$WARP_GOOGLE" = "1" ] && tr -d '\r' < "$MODULE_DIR/warp/google-ipv6.txt" 2>/dev/null | grep -E '^[0-9a-f]+:'
+    [ "$WARP_TELEGRAM" = "1" ] && tr -d '\r' < "$MODULE_DIR/warp/telegram.txt" 2>/dev/null | grep -E '^[0-9a-f]+:'
 }
 
 # Путь к адресам групп сменился (маршруты WARP встали или сняты) — старые
@@ -413,15 +416,20 @@ warp_dst6() {
 # или источник стал другим. Telegram замечал это только по своему таймауту и
 # минутами висел на «Соединение…» (27.10; так же в AmneziaWG и WG Tunnel).
 # Закрываем их сокеты (ss -K, как отбой мёртвых серверов YouTube) —
-# приложения переподключаются сразу и уже новым путём. Только сокеты самого
-# телефона: соединения раздачи живут на клиенте. Один ss на все сети.
-warp_kill_sockets() {   # причина
-    local f="" m n
+# приложения переподключаются сразу и уже новым путём. Сокеты самого телефона
+# (соединения раздачи живут на клиенте), и только при WARP_PHONE=1: иначе путь
+# у телефона не менялся, а рвать ему Google (FCM, поиск) — урок 25.10. По uid
+# ss не фильтрует: закроются и сокеты root/системы к этим адресам — они просто
+# переподключатся. Установленные и висящие на SYN (блок по IP: SYN глушится,
+# а NAT у соединения уже назначен мимо туннеля). Один ss на все сети.
+warp_kill_sockets() {   # причина [сети — по умолчанию все сети групп]
+    local f="" m n nets="${2-$(warp_dst4)}"
+    [ "$WARP_PHONE" = "1" ] || return 0
     command -v ss >/dev/null 2>&1 || return 0
-    for m in $(warp_dst4); do f="$f${f:+ or }dst $m"; done
+    for m in $nets; do f="$f${f:+ or }dst $m"; done
     [ -n "$f" ] || return 0
     # shellcheck disable=SC2086
-    n=$(ss -K -tn state established "( $f )" 2>/dev/null | awk 'NR > 1' | grep -c .)
+    n=$(ss -K -tn state established state syn-sent "( $f )" 2>/dev/null | awk 'NR > 1' | grep -c .)
     [ "${n:-0}" -gt 0 ] && log "WARP: закрыто соединений телефона к адресам из WARP: $n ($1) — приложения переподключатся сразу"
     return 0
 }
@@ -549,9 +557,19 @@ warp_routes_reconcile() {
     [ "$WARP_RT_ON" = "1" ] && [ "$sig" = "$WARP_RT_SIG" ] && \
         $iptables -t mangle -C OUTPUT -j "$CHAIN_WARP_OUT" 2>/dev/null && \
         $iptables -C FORWARD -j "$CHAIN_WARP_FWD" 2>/dev/null && return 0
-    local was="$WARP_RT_ON"
+    local was="$WARP_RT_ON" grp="$WARP_GOOGLE$WARP_TELEGRAM$WARP_PHONE|$WARP_DOMAINS" old new
+    old="$WARP_RT_DST"
     warp_routes_apply "$tif" && WARP_RT_SIG="$sig"
-    # маршруты встали впервые (а не пересобраны) — старые соединения шли мимо
-    [ "$was" != "1" ] && [ "$WARP_RT_ON" = "1" ] && warp_kill_sockets "туннель поднят"
+    [ "$WARP_RT_ON" = "1" ] || return 0
+    new=$(warp_dst4); WARP_RT_DST="$new"
+    # маршруты встали впервые — старые соединения шли мимо. Сменились группы
+    # при поднятом туннеле (Telegram/Google/домены в настройках; не адреса
+    # доменов — те обновляются раз в 10 мин, и не раздача/uid) — путь сменился
+    # только у сетей, что добавились или ушли: их и закрываем
+    if [ "$was" != "1" ]; then warp_kill_sockets "туннель поднят"
+    elif [ -n "$WARP_RT_GRP" ] && [ "$grp" != "$WARP_RT_GRP" ]; then
+        warp_kill_sockets "сменились группы" "$(printf '%s\n%s\n' "$old" "$new" | grep . | sort | uniq -u)"
+    fi
+    WARP_RT_GRP="$grp"
     return 0
 }
