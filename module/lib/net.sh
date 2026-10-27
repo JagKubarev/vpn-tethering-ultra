@@ -496,12 +496,13 @@ read_table_index() {
     return 1
 }
 
-# Лучший из доступных алгоритмов: bbr3 (кастомные ядра с BBRv3) -> bbr -> cubic.
+# Лучший из доступных алгоритмов: bbr3 / bbr2 (кастомные ядра) -> bbr -> cubic.
 # Словом, а не grep -q bbr: «bbr» находился и в «bbr3», и модуль ставил v1
 # поверх bbr3 ядра (issue #17, Xiaomi 13 Ultra, GKI 5.15 с CONFIG_DEFAULT_BBR3)
 tcp_cc_best() {
     case " $(cat /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null) " in
         *" bbr3 "*) echo bbr3 ;;
+        *" bbr2 "*) echo bbr2 ;;
         *" bbr "*)  echo bbr ;;
         *)          echo cubic ;;
     esac

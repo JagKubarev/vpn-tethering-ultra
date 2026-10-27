@@ -174,7 +174,7 @@ gen() {
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "ERR идёт подбор обхода — повторите позже"; return 1; fi
     mkdir "$GEN_LOCK" 2>/dev/null || {
         # замок от убитого процесса — старше 2 минут
-        [ -n "$(find "$GEN_LOCK" -maxdepth 0 -mmin +2 2>/dev/null)" ] && rm -rf "$GEN_LOCK" && mkdir "$GEN_LOCK" 2>/dev/null \
+        [ -n "$(find "$GEN_LOCK" -maxdepth 0 -mmin +3 2>/dev/null)" ] && rm -rf "$GEN_LOCK" && mkdir "$GEN_LOCK" 2>/dev/null \
             || { echo "ERR генерация уже идёт"; return 1; }
     }
     trap 'bypass_off; rm -rf "$GEN_LOCK"' EXIT
@@ -182,6 +182,7 @@ gen() {
     bypass_on
     while [ $i -lt "$n" ]; do
         name=$(free_name warp)
+        touch "$GEN_LOCK"   # живой: замок свежий (gen 5 бывает дольше 2 мин)
         e=$(gen_one "$name") || { rm -f "$WARP_DIR/.$name.tmp"; break; }
         made="$made $name"; i=$((i + 1))
         [ $i -lt "$n" ] && sleep 1
@@ -251,6 +252,7 @@ case "$1" in
         T="$WARP_DIR/.zip"; rm -rf "$T"; mkdir "$T" || { echo "ERR временная папка"; exit 1; }
         # время DOS — сейчас
         set -- $(date '+%Y %m %d %H %M %S')
+        [ "$1" -lt 1980 ] && set -- 1980 01 01 00 00 00   # часы не выставлены (1970)
         dd=$(( (($1 - 1980) << 9) | (${2#0} << 5) | ${3#0} )); dt=$(( (${4#0} << 11) | (${5#0} << 5) | (${6#0} / 2) ))
         off=0; n=0
         : > "$T/local"; : > "$T/central"
@@ -259,6 +261,7 @@ case "$1" in
             sed '1{/^# vpn_tether:/d;}' "$f" > "$T/data"
             sz=$(wc -c < "$T/data")
             $GZ -c < "$T/data" | tail -c 8 | head -c 4 > "$T/crc"
+            [ "$(wc -c < "$T/crc")" -eq 4 ] || { rm -rf "$T"; echo "ERR не удалось посчитать CRC (gzip)"; exit 1; }
             # версия, флаги, метод (0 — без сжатия), время, дата | CRC | размеры, длина имени, extra
             { printf 'PK\003\004'; le 10 2 0 2 0 2 $dt 2 $dd 2; cat "$T/crc"; le $sz 4 $sz 4 ${#nm} 2 0 2
               printf '%s' "$nm"; cat "$T/data"; } >> "$T/local"

@@ -25,6 +25,8 @@ WARP_TS=0                # когда запущен / поднялся
 WARP_CHECK_TS=0          # последняя проверка трафиком (0 — проверить сейчас)
 WARP_FAILS=0             # проверок подряд без ответа
 WARP_CRASH=""            # конфиг, упавший сразу после подъёма (второй раз — в «плохие»)
+WARP_CF=0                # Endpoint — сервер Cloudflare: проверка требует warp=on
+WARP_ENSURE_WAIT=300     # пауза перед повтором создания конфигов: удваивается, до часа
 WARP_BAD=""              # «имя:epoch …»
 WARP_RETRY_TS=0
 WARP_NOTE=""             # почему fail — для лога и WebUI
@@ -96,7 +98,13 @@ warp_start() {   # имя конфига
     [ -e /dev/net/tun ] || { mkdir -p /dev/net && ln -s /dev/tun /dev/net/tun; } 2>/dev/null
     # каталог сокета — в /data/local/tmp (вшит при сборке), там пишет и shell:
     # пересоздаём своим (root, 700), чтобы awg не отдал ключ чужому сокету
-    rm -rf "$WARP_SOCK_DIR"; mkdir -m 700 "$WARP_SOCK_DIR" 2>/dev/null
+    rm -rf "$WARP_SOCK_DIR"
+    if ! mkdir -m 700 "$WARP_SOCK_DIR" 2>/dev/null; then
+        # кто-то успел создать его между rm и mkdir — ключ туда не отдаём
+        log "WARNING: WARP: каталог сокета $WARP_SOCK_DIR занят чужим — не запускаю"
+        warp_down; WARP_RETRY_TS=$(( $(date +%s) + 60 )); warp_set_state fail "amneziawg-go не запустился"
+        return 1
+    fi
     WG_PROCESS_FOREGROUND=1 "$AWG_GO_BIN" "$WARP_IF" > "$WARP_RUN.log" 2>&1 < /dev/null &
     WARP_PID=$!
     # холодный старт на слабом телефоне (MT6580) — до нескольких секунд
@@ -112,7 +120,7 @@ warp_start() {   # имя конфига
     # генератора молча отбросил бы Telegram/Google. Файл с ключом — на миг.
     # Endpoint WARP — адресом: awg резолвит имя сам, и без DNS «Configuration
     # parsing error» записывал исправный конфиг в «плохие» (27.10 09:52)
-    (umask 077; awk '/^[ \t]*(#|(Address|DNS|MTU|AllowedIPs)[ \t]*=)/ { next }
+    (umask 077; awk '/^[ \t]*(#|(Address|DNS|MTU|AllowedIPs|J[1-3]|Itime)[ \t]*=)/ { next }
         { sub(/engage\.cloudflareclient\.com:/, "162.159.192.1:"); print }
         /^[ \t]*\[Peer\]/ { print "AllowedIPs = 0.0.0.0/0, ::/0" }' "$f" > "$WARP_DIR/.run.wg")
     "$AWG_BIN" setconf "$WARP_IF" "$WARP_DIR/.run.wg" >> "$WARP_RUN.log" 2>&1; rc=$?
@@ -141,6 +149,10 @@ warp_start() {   # имя конфига
     $ip rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     $ip -6 rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     WARP_CUR="$n"; WARP_STATE=starting; WARP_TS=$(date +%s); WARP_CHECK_TS=0; WARP_FAILS=0
+    # сервер Cloudflare — проверка строже: trace должен сказать warp=on (не
+    # «ответил кто-то по дороге»); свой сервер так не скажет — ему любой ответ
+    WARP_CF=0
+    grep -qE '^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*(engage\.cloudflareclient\.com|162\.159\.)' "$f" && WARP_CF=1
     log "WARP: запускаю $n ($(sed -n 's/^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*//p' "$f" | head -1))"
     return 0
 }
@@ -158,7 +170,11 @@ warp_probe() {
         su -g "$DNSPROXY_GID" -c true >/dev/null 2>&1 && WARP_SU_G=1
     fi
     if [ "$WARP_SU_G" = "1" ]; then out=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else out=$(eval "$cmd" 2>/dev/null); fi
-    case "$out" in *ip=*) return 0 ;; esac
+    if [ "$WARP_CF" = 1 ]; then
+        case "$out" in *warp=on*|*warp=plus*) return 0 ;; esac
+    else
+        case "$out" in *ip=*) return 0 ;; esac
+    fi
     return 1
 }
 
@@ -172,8 +188,11 @@ warp_ensure() {
         case "$r" in
             OK*) log "WARP: созданы конфиги:${r#OK}"; WARP_RETRY_TS=0 ;;
             '') ;;
-            *) log "WARP: не удалось создать конфиги — $r (повтор через $((WARP_RETRY_SECS / 60)) мин)"
-               WARP_ENSURE_DONE=0; WARP_ENSURE_AT=$(( $(date +%s) + WARP_RETRY_SECS )) ;;
+            *) log "WARP: не удалось создать конфиги — $r (повтор через $((WARP_ENSURE_WAIT / 60)) мин)"
+               # Cloudflare стабильно не отвечает — не дёргать nfqws и правила
+               # каждые 5 минут: пауза растёт вдвое, до часа
+               WARP_ENSURE_DONE=0; WARP_ENSURE_AT=$(( $(date +%s) + WARP_ENSURE_WAIT ))
+               WARP_ENSURE_WAIT=$((WARP_ENSURE_WAIT * 2)); [ "$WARP_ENSURE_WAIT" -gt 3600 ] && WARP_ENSURE_WAIT=3600 ;;
         esac
         return 0
     fi
@@ -348,9 +367,12 @@ warp_domains_refresh() {
     [ -n "$WARP_DOMAINS" ] || { WARP_DOM_IPS=""; WARP_DOM_LAST=""; WARP_DOM_SKIP=0; return 0; }
     # параллельно: по ~1 с на запрос, 50 доменов подряд держали бы цикл минуту.
     # wait — по своим pid: у оболочки демона в фоне ещё amneziawg-go
-    for d in $WARP_DOMAINS; do warp_dq "$d" > "$WARP_RUN.dq$k" 2>/dev/null & pids="$pids $!"; k=$((k + 1)); done
+    # ответы — в свой каталог (root, 700): в /data/local/tmp пишет и shell,
+    # подложенный .dq99 увёл бы чужие адреса в WARP
+    rm -f "$WARP_DIR"/.dq*
+    for d in $WARP_DOMAINS; do warp_dq "$d" > "$WARP_DIR/.dq$k" 2>/dev/null & pids="$pids $!"; k=$((k + 1)); done
     for p in $pids; do wait "$p" 2>/dev/null; done
-    ips=$(cat "$WARP_RUN".dq* 2>/dev/null | tr '\n' ' '); rm -f "$WARP_RUN".dq*
+    ips=$(cat "$WARP_DIR"/.dq* 2>/dev/null | tr '\n' ' '); rm -f "$WARP_DIR"/.dq*
     # с прошлым обновлением (ответы DNS скачут — открытое соединение не теряет
     # маршрут), но не со всеми прошлыми: адрес, ушедший другому, не копится
     out=$(echo $ips $WARP_DOM_LAST | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -u | \
@@ -412,7 +434,7 @@ warp_routes_off() {   # [force] — снять, даже если по флаг�
 }
 
 warp_routes_apply() {   # ифейсы раздачи
-    local tif="$1" uids="$WARP_APP_UIDS" f="$WARP_RUN.rules" c i u m n4 n6 what=""
+    local tif="$1" uids="$WARP_APP_UIDS" f="$WARP_DIR/.rules" c i u m n4 n6 what=""
     # mangle v4: адреса групп одним iptables-restore (~150 правил за раз)
     {
         echo "*mangle"

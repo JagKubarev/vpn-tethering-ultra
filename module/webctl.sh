@@ -87,7 +87,8 @@ zscan_busy() {
 }
 
 # идёт регистрация WARP (warp/warp.sh gen): её nfqws тоже ловит curl от root
-warpgen_busy() { [ -d /data/local/tmp/vpn_tether_warpgen.lock ]; }
+# замок старше 3 мин — от убитого процесса (gen обновляет его на каждом конфиге)
+warpgen_busy() { [ -n "$(find /data/local/tmp/vpn_tether_warpgen.lock -maxdepth 0 -mmin -3 2>/dev/null)" ]; }
 
 # ядро без connbytes (демон проверил, zapret_caps) — правило проверки без него
 CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9"

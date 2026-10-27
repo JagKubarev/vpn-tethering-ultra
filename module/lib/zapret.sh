@@ -91,17 +91,35 @@ ZAPRET_CAPS=""                  # «cb=1 str=1 nfq=1», пусто — ещё н
 ZAPRET_CAPS_FILE=/data/local/tmp/vpn_tether_zcaps
 ZAPRET_CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9"
 
+ZAPRET_CAPS_TRIES=0
+rm -f "$ZAPRET_CAPS_FILE" 2>/dev/null   # от прошлой загрузки: /data/local/tmp её переживает
+# 0 — проверено (ZAPRET_CAPS заполнен), 1 — не сейчас (сбой не от ядра: замок
+# xtables у netd/scan.sh, не создалась цепочка) — повтор в следующем такте.
+# Иначе разовый сбой на загрузке выключал zapret до перезагрузки (ревью 27.10)
 zapret_caps() {
-    local c=VPN_ZCAP cb=0 str=0 nfq=0 e miss=""
+    local c=VPN_ZCAP cb=0 str=0 nfq=0 e miss="" try
     [ -n "$ZAPRET_CAPS" ] && return 0
     $iptables -t mangle -N $c 2>/dev/null; $iptables -t mangle -F $c 2>/dev/null
-    if e=$($iptables -t mangle -A $c -p tcp --dport 443 $ZAPRET_CB_OUT -j RETURN 2>&1); then cb=1; else miss="$miss connbytes (${e%%
+    $iptables -t mangle -L $c -n >/dev/null 2>&1 || return 1
+    # сбой от замка — не ответ ядра
+    zcap_lockerr() { case "$1" in *xtables\ lock*|*[Tt]emporarily*|*[Rr]esource\ busy*|*holding*) return 0 ;; esac; return 1; }
+    if e=$($iptables -t mangle -A $c -p tcp --dport 443 $ZAPRET_CB_OUT -j RETURN 2>&1); then cb=1
+    elif zcap_lockerr "$e"; then $iptables -t mangle -F $c 2>/dev/null; $iptables -t mangle -X $c 2>/dev/null; return 1
+    else miss="$miss connbytes (${e%%
 *})"; fi
-    if e=$($iptables -t mangle -A $c -p tcp -m string --string googlevideo.com --algo bm -j RETURN 2>&1); then str=1; else miss="$miss string (${e%%
+    if e=$($iptables -t mangle -A $c -p tcp -m string --string googlevideo.com --algo bm -j RETURN 2>&1); then str=1
+    elif zcap_lockerr "$e"; then $iptables -t mangle -F $c 2>/dev/null; $iptables -t mangle -X $c 2>/dev/null; return 1
+    else miss="$miss string (${e%%
 *})"; fi
-    if e=$($iptables -t mangle -A $c -p tcp -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>&1); then nfq=1; else miss="$miss NFQUEUE (${e%%
+    if e=$($iptables -t mangle -A $c -p tcp -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>&1); then nfq=1
+    elif zcap_lockerr "$e"; then $iptables -t mangle -F $c 2>/dev/null; $iptables -t mangle -X $c 2>/dev/null; return 1
+    else miss="$miss NFQUEUE (${e%%
 *})"; fi
     $iptables -t mangle -F $c 2>/dev/null; $iptables -t mangle -X $c 2>/dev/null
+    # не прошло ничего — подозрительно (iptables сломан, а не ядро): три такта подряд
+    if [ "$cb$str$nfq" = "000" ] && [ "$ZAPRET_CAPS_TRIES" -lt 2 ]; then
+        ZAPRET_CAPS_TRIES=$((ZAPRET_CAPS_TRIES + 1)); return 1
+    fi
     ZAPRET_CAPS="cb=$cb str=$str nfq=$nfq"
     printf '%s\n' $ZAPRET_CAPS > "$ZAPRET_CAPS_FILE" 2>/dev/null
     [ -n "$miss" ] && log "WARNING: zapret: ядро не умеет:$miss"
@@ -114,6 +132,9 @@ zapret_caps() {
         GGC_MATCH="-p tcp --dport 443 -m string --string googlevideo.com --algo bm"
         GVT_MATCH="-p tcp --dport 443 -m string --string gvt1.com --algo bm"
         yt_match_build
+        # хуки от убитого демона с этим совпадением: чистка при старте снимала
+        # только вариант с connbytes
+        zapret_ggc_hooks_off "$iptables"; zapret_ggc_hooks_off "$ip6tables"; yt_dead_hooks_off
     fi
     [ "$str" = 0 ] && log "WARNING: zapret: без string — «YouTube мимо кэшей оператора» и отбой мёртвых серверов недоступны"
     return 0
@@ -559,7 +580,7 @@ zapret_reconcile() {
         [ "$ZAPRET_STATE" != "off" ] && zapret_down
         return 0
     fi
-    zapret_caps
+    zapret_caps || return 0     # не удалось проверить сейчас — в следующем такте
     if ! zapret_cap nfq; then
         [ "$ZAPRET_STATE" = "nokernel" ] && return 0
         zapret_down
@@ -635,7 +656,9 @@ zapret_reconcile() {
         if ! $iptables -t mangle -C POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null || \
            { [ "$ZAPRET_QUIC_BLOCK" = "1" ] && ! $iptables -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; } || \
            { [ -n "$GGC_STATE" ] && ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null; } || \
-           { [ "$YT_DEAD_STATE" = "on" ] && ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null; }; then
+           { [ "$YT_DEAD_STATE" = "on" ] && ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null; } || \
+           { [ "$YT_GGC_BLOCK" = "1" ] && [ -z "$GGC_STATE" ] && [ "$GGC_FAILS" -gt 0 ] && [ "$GGC_FAILS" -lt 3 ] && zapret_cap str; } || \
+           { [ "$YT_DEAD_STATE" = "fail" ] && [ "$YT_DEAD_FAILS" -lt 3 ]; }; then
             _hooks_bad=1
         fi
     fi

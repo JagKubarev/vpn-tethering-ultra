@@ -35,8 +35,6 @@ CA=/apex/com.android.conscrypt/cacerts
 [ -d "$CA" ] || CA=/system/etc/security/cacerts
 case "$(uname -m)" in aarch64|arm64) NQ="$MODDIR/bin/nfqws-arm64" ;; *) NQ="$MODDIR/bin/nfqws-arm" ;; esac
 WAN=$(sed -n 's/^wan=//p' "$MODDIR/status" 2>/dev/null)
-# идёт регистрация WARP (warp/warp.sh gen, до ~15 с на конфиг) — подождать
-_i=0; while [ -d /data/local/tmp/vpn_tether_warpgen.lock ] && [ $_i -lt 90 ]; do sleep 1; _i=$((_i + 1)); done
 IPT="iptables -w 2"
 TMP="$OUT.tmp"
 EVENTS=/data/adb/vpn_tether_zapret_events
@@ -117,6 +115,10 @@ trap on_exit EXIT
 trap 'exit 0' INT TERM
 
 echo $$ > "$OUT.pid"
+# идёт регистрация WARP (warp/warp.sh gen) — подождать. После pid: пока ждём,
+# демон и WebUI видят «подбор идёт» и второй scan.sh не запустят. Замок старше
+# 3 мин — от убитого процесса (gen обновляет его на каждом конфиге)
+_i=0; while [ -n "$(find /data/local/tmp/vpn_tether_warpgen.lock -maxdepth 0 -mmin -3 2>/dev/null)" ] && [ $_i -lt 90 ]; do sleep 1; _i=$((_i + 1)); done
 # nfqws на нашей очереди от убитого (kill -9, OOM) прогона: иначе очередь
 # занята, все прогоны «nfqws: …», и сирота портит HTTPS от root
 for _p in $(pgrep -f "nfqws.*--qnum=$Q " 2>/dev/null); do kill -9 "$_p" 2>/dev/null; done
