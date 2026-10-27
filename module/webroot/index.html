@@ -559,7 +559,7 @@ details.more > summary { color: var(--muted); }
 <div class="card">
   <div class="row" data-dep="WARP_ENABLE">
     <div class="txt"><div class="t">Telegram</div>
-      <div class="s">Сети Telegram: приложение, веб-версия, звонки. Без VPN Telegram закрыт по IP.</div></div>
+      <div class="s">Без VPN Telegram закрыт по IP. Клиенты Telegram на телефоне (официальный, Telegram X, Nekogram и др.) идут через WARP целиком — вместе с запасными узлами, на которые Telegram переходит при сбоях; устройства раздачи — по сетям Telegram.</div></div>
     <label class="sw"><input type="checkbox" data-key="WARP_TELEGRAM"><span></span></label>
   </div>
   <div class="row" data-dep="WARP_ENABLE">
@@ -574,7 +574,7 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row col" data-dep="WARP_ENABLE">
     <div class="txt"><div class="t">Приложения целиком</div>
-      <div class="s">Весь трафик выбранных приложений телефона; пока WARP не поднят — напрямую. Если приложение фильтрует AdGuard, его HTTPS пойдёт мимо WARP — исключите приложение в AdGuard.</div></div>
+      <div class="s">Весь трафик выбранных приложений телефона; пока WARP не поднят — напрямую. Если приложение фильтрует AdGuard, его TCP (в том числе HTTPS) открывает AdGuard от своего имени, и оно идёт мимо WARP (проверено), а UDP и QUIC — через WARP. Чтобы шло целиком, исключите приложение в AdGuard. Клиенты Telegram добавлять не нужно — их берёт переключатель «Telegram».</div></div>
     <div class="chips" id="warpChips"></div>
     <div class="mt8"><button class="btn small" id="warpAdd">Добавить приложение</button></div>
   </div>

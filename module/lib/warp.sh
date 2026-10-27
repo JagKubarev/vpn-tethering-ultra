@@ -388,12 +388,28 @@ warp_domains_refresh() {
     WARP_DOM_IPS=${WARP_DOM_IPS% }
 }
 
+# Клиенты Telegram. При WARP_TELEGRAM (и WARP_PHONE) — в WARP целиком, как
+# WARP_APPS: когда основные серверы отвечают плохо, Telegram берёт конфиг
+# через DoH (dns.google, Cloudflare) и уходит на запасные узлы на чужих
+# хостингах (iNet, Vodafone; порты 443/5448/7909/9941) — их нет в сетях
+# Telegram, а напрямую их режет ТСПУ (27.10: TCP не устанавливается, через
+# WARP — 80–110 мс). По сетям в WARP шли только основные, и Telegram висел на
+# «Соединение…»; целиком — без отвалов. Сети Telegram остаются для раздачи и
+# для клиентов, которых фильтрует AdGuard (его соединения — от его uid).
+WARP_TG_PKGS="org.telegram.messenger org.telegram.messenger.web org.telegram.messenger.beta org.thunderdog.challegram org.telegram.plus tw.nekomimi.nekogram xyz.nextalone.nagram com.exteragram.messenger uz.unnarsx.cherrygram org.forkgram.messenger it.octogram.android"
+warp_tg_pkgs() {   # установленные клиенты Telegram, если они идут в WARP целиком
+    local p
+    [ "$WARP_TELEGRAM" = "1" ] && [ "$WARP_PHONE" = "1" ] || return 0
+    for p in $WARP_TG_PKGS; do [ -d "/data/data/$p" ] && echo "$p"; done
+}
+
 warp_app_uids() {
     local p u out=""
-    for p in $WARP_APPS; do
+    for p in $WARP_APPS $(warp_tg_pkgs); do
         u=$(stat -c %u "/data/data/$p" 2>/dev/null)
         case "$u" in ''|*[!0-9]*) continue ;; esac
-        [ "$u" -ge 10000 ] && out="$out $u"
+        [ "$u" -ge 10000 ] || continue
+        case " $out " in *" $u "*) ;; *) out="$out $u" ;; esac
     done
     echo "${out# }"
 }
@@ -540,7 +556,10 @@ warp_routes_apply() {   # ифейсы раздачи
     [ "$WARP_GOOGLE" = 1 ] && what="$what Google,"
     [ "$WARP_TELEGRAM" = 1 ] && what="$what Telegram,"
     [ -n "$WARP_DOMAINS" ] && what="$what домены ($(echo $WARP_DOM_IPS | wc -w) адр.$([ "${WARP_DOM_SKIP:-0}" -gt 0 ] && echo ", общий CDN мимо: $WARP_DOM_SKIP")),"
-    [ -n "$WARP_APPS" ] && what="$what приложения $WARP_APPS (uid ${uids:-не установлены}),"
+    m=$(warp_tg_pkgs | tr '\n' ' '); m=${m% }
+    [ -n "$m" ] && what="$what клиенты Telegram целиком ($m),"
+    [ -n "$WARP_APPS" ] && what="$what приложения $WARP_APPS,"
+    [ -n "$m$WARP_APPS" ] && what="$what uid ${uids:-не установлены},"
     WARP_RT_ON=1
     log "WARP: в туннель —${what:- ничего,} $n4 сетей v4, v6 отбито: $n6; для:$([ "$WARP_PHONE" = 1 ] && echo ' телефона')${tif:+ раздачи [$tif]}"
 }
