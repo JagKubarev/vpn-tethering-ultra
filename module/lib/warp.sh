@@ -408,6 +408,24 @@ warp_dst6() {
     [ "$WARP_TELEGRAM" = "1" ] && grep -E '^[0-9a-f]+:' "$MODULE_DIR/warp/telegram.txt" 2>/dev/null
 }
 
+# Путь к адресам групп сменился (маршруты WARP встали или сняты) — старые
+# соединения телефона к ним мертвы: через Cloudflare началась новая сессия
+# или источник стал другим. Telegram замечал это только по своему таймауту и
+# минутами висел на «Соединение…» (27.10; так же в AmneziaWG и WG Tunnel).
+# Закрываем их сокеты (ss -K, как отбой мёртвых серверов YouTube) —
+# приложения переподключаются сразу и уже новым путём. Только сокеты самого
+# телефона: соединения раздачи живут на клиенте. Один ss на все сети.
+warp_kill_sockets() {   # причина
+    local f="" m n
+    command -v ss >/dev/null 2>&1 || return 0
+    for m in $(warp_dst4); do f="$f${f:+ or }dst $m"; done
+    [ -n "$f" ] || return 0
+    # shellcheck disable=SC2086
+    n=$(ss -K -tn state established "( $f )" 2>/dev/null | awk 'NR > 1' | grep -c .)
+    [ "${n:-0}" -gt 0 ] && log "WARP: закрыто соединений телефона к адресам из WARP: $n ($1) — приложения переподключатся сразу"
+    return 0
+}
+
 warp_routes_off() {   # [force] — снять, даже если по флагу не стоят
     local t c _n
     [ "$WARP_RT_ON" = "1" ] || [ "$1" = "force" ] || return 0
@@ -429,7 +447,10 @@ warp_routes_off() {   # [force] — снять, даже если по флаг�
     $ip6tables -F "$CHAIN_WARP_V6" 2>/dev/null; $ip6tables -X "$CHAIN_WARP_V6" 2>/dev/null
     _n=0; while [ $_n -lt 8 ] && $ip6tables -D FORWARD -j "$CHAIN_WARP_V6F" 2>/dev/null; do _n=$((_n + 1)); done
     $ip6tables -F "$CHAIN_WARP_V6F" 2>/dev/null; $ip6tables -X "$CHAIN_WARP_V6F" 2>/dev/null
-    [ "$WARP_RT_ON" = "1" ] && log "WARP: маршруты в туннель сняты"
+    if [ "$WARP_RT_ON" = "1" ]; then
+        log "WARP: маршруты в туннель сняты"
+        warp_kill_sockets "туннель снят"
+    fi
     WARP_RT_ON=0; WARP_RT_SIG=""
 }
 
@@ -528,5 +549,9 @@ warp_routes_reconcile() {
     [ "$WARP_RT_ON" = "1" ] && [ "$sig" = "$WARP_RT_SIG" ] && \
         $iptables -t mangle -C OUTPUT -j "$CHAIN_WARP_OUT" 2>/dev/null && \
         $iptables -C FORWARD -j "$CHAIN_WARP_FWD" 2>/dev/null && return 0
+    local was="$WARP_RT_ON"
     warp_routes_apply "$tif" && WARP_RT_SIG="$sig"
+    # маршруты встали впервые (а не пересобраны) — старые соединения шли мимо
+    [ "$was" != "1" ] && [ "$WARP_RT_ON" = "1" ] && warp_kill_sockets "туннель поднят"
+    return 0
 }
