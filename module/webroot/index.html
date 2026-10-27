@@ -578,6 +578,7 @@ details.more > summary { color: var(--muted); }
     <button class="btn small" id="warpGen">Создать</button>
     <button class="btn small" id="warpImp">Импорт файла</button>
     <button class="btn small" id="warpPaste" aria-expanded="false" aria-controls="warpPasteBox">Вставить текст</button>
+    <button class="btn small" id="warpSaveAll">Сохранить все в zip</button>
   </div>
   <div class="row col" id="warpPasteBox" style="display:none">
     <textarea id="warpPasteText" rows="6" aria-label="Текст конфига" placeholder="[Interface]&#10;PrivateKey = …" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
@@ -585,7 +586,7 @@ details.more > summary { color: var(--muted); }
   </div>
   <input type="file" id="warpFile" accept=".conf,.zip,text/plain,application/zip" multiple style="display:none">
 </div>
-<div class="hint">«Создать» регистрирует новый конфиг в Cloudflare прямо с телефона. Импорт — файлы .conf из AmneziaVPN или WireGuard и zip-экспорт AmneziaVPN. «Основной» пробуется первым; если конфиг перестаёт отвечать, модуль сам переходит на следующий. «Сохранить» кладёт конфиг в «Загрузки» — в нём закрытый ключ: его видят приложения с доступом к памяти, не публикуйте и удалите после переноса. Если WARP не поднят, «Приложения целиком» идут напрямую.</div>
+<div class="hint">«Создать» регистрирует новый конфиг в Cloudflare прямо с телефона. Импорт — файлы .conf из AmneziaVPN или WireGuard и zip-экспорт AmneziaVPN. «Основной» пробуется первым; если конфиг перестаёт отвечать, модуль сам переходит на следующий. «Сохранить» кладёт конфиг в «Загрузки» («Сохранить все в zip» — все сразу, как экспорт AmneziaVPN) — в нём закрытый ключ: его видят приложения с доступом к памяти, не публикуйте и удалите после переноса. Если WARP не поднят, «Приложения целиком» идут напрямую.</div>
 </section>
 
 <section class="tab" data-tab="tools">
@@ -1322,6 +1323,14 @@ async function unzipConfs(buf) {
   }
   return out;
 }
+$('#warpSaveAll').addEventListener('click', async () => {
+  const b = $('#warpSaveAll'); b.disabled = true;
+  try {
+    const r = await ctlBg('warp-saveall');
+    const m = /^OK \S*\/([^/\s]+) (\d+)/.exec(r.out.trim());
+    toast(m ? 'Сохранено конфигов: ' + m[2] + ' — Загрузки/' + m[1] : errText(r, 'Не получилось'));
+  } finally { b.disabled = false; }
+});
 $('#warpImp').addEventListener('click', () => $('#warpFile').click());
 $('#warpFile').addEventListener('change', async (e) => {
   const list = [];
@@ -1789,6 +1798,7 @@ function mockExec(cmd) {
   if (/^warp-import /.test(a)) { const n = /^warp-import '([^']+)'/.exec(a)[1]; M.warp.push(n + '|engage.cloudflareclient.com:4500|import|2026-10-27 00:21'); return { errno: 0, out: 'OK ' + n }; }
   if (/^warp-del /.test(a)) { const n = a.slice(10).replace(/'/g, ''); M.warp = M.warp.filter((l) => l.split('|')[0] !== n); return { errno: 0, out: 'OK' }; }
   if (/^warp-save /.test(a)) return { errno: 0, out: 'OK /storage/emulated/0/Download/x.conf' };
+  if (a === 'warp-saveall') return { errno: 0, out: 'OK /storage/emulated/0/Download/warp-configs_20261027_1040.zip 3' };
   if (a === 'clients') return { errno: 0, out: '192.168.43.77|e0:2b:e9:75:60:84|REACHABLE|DESKTOP-LAPTOP|31|21545980|0\n192.168.43.67|42:96:f4:ac:3a:91|STALE|realme-9-Pro-5G|2|7553|0\n|00:27:15:ec:84:bd|-|android-tv|0|0|1\n' };
   if (/^client-(un)?block /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'dnsflush') return { errno: 0, out: 'OK кэш сброшен (dnsproxy перезапущен). На ноутбуке — ещё ipconfig /flushdns' };

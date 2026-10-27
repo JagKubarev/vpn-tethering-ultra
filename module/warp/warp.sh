@@ -11,6 +11,7 @@
 #   warp.sh del ИМЯ
 #   warp.sh export ИМЯ           текст конфига
 #   warp.sh save ИМЯ             копия в «Загрузки» (ИМЯ.conf) -> «OK путь»
+#   warp.sh saveall              все конфиги одним zip в «Загрузки» -> «OK путь число»
 #
 # Регистрация — по тому же API, что у warp-generation.github.io и
 # zapret2-android (идея оттуда, реализация своя): POST reg с публичным
@@ -235,6 +236,43 @@ case "$1" in
         chmod 644 "$F" 2>/dev/null
         ( content call --uri content://media --method scan_file --arg "$F" >/dev/null 2>&1 & )
         echo "OK $F" ;;
+    saveall)
+        # все конфиги одним zip в «Загрузки» — как экспорт AmneziaVPN (импорт
+        # туда и на другой телефон). zip без сжатия, собираем сами: zip на
+        # телефоне нет. CRC32 — из хвоста gzip (там он уже little-endian, как в
+        # zip): busybox crc32 есть не везде, а awk режет xor до 32 бит со знаком
+        set -- "$WARP_DIR"/*.conf
+        [ -f "$1" ] || { echo "ERR конфигов нет"; exit 1; }
+        BB=""; for b in /data/adb/ksu/bin/busybox /data/adb/magisk/busybox /data/adb/ap/bin/busybox; do [ -x "$b" ] && { BB="$b"; break; }; done
+        [ -n "$BB" ] || { echo "ERR нет busybox"; exit 1; }
+        GZ="$BB gzip"; command -v gzip >/dev/null 2>&1 && GZ=gzip
+        # «число ширина ...» -> байты little-endian (один awk на заголовок, а не процесс на байт)
+        le() { printf "$("$BB" awk 'BEGIN { for (i = 1; i < ARGC; i += 2) { v = ARGV[i]; for (k = 0; k < ARGV[i+1]; k++) { printf "\\%03o", v % 256; v = int(v / 256) } } }' "$@")"; }
+        T="$WARP_DIR/.zip"; rm -rf "$T"; mkdir "$T" || { echo "ERR временная папка"; exit 1; }
+        # время DOS — сейчас
+        set -- $(date '+%Y %m %d %H %M %S')
+        dd=$(( (($1 - 1980) << 9) | (${2#0} << 5) | ${3#0} )); dt=$(( (${4#0} << 11) | (${5#0} << 5) | (${6#0} / 2) ))
+        off=0; n=0
+        : > "$T/local"; : > "$T/central"
+        for f in "$WARP_DIR"/*.conf; do
+            nm=${f##*/}
+            sed '1{/^# vpn_tether:/d;}' "$f" > "$T/data"
+            sz=$(wc -c < "$T/data")
+            $GZ -c < "$T/data" | tail -c 8 | head -c 4 > "$T/crc"
+            # версия, флаги, метод (0 — без сжатия), время, дата | CRC | размеры, длина имени, extra
+            { printf 'PK\003\004'; le 10 2 0 2 0 2 $dt 2 $dd 2; cat "$T/crc"; le $sz 4 $sz 4 ${#nm} 2 0 2
+              printf '%s' "$nm"; cat "$T/data"; } >> "$T/local"
+            { printf 'PK\001\002'; le 20 2 10 2 0 2 0 2 $dt 2 $dd 2; cat "$T/crc"; le $sz 4 $sz 4 ${#nm} 2 0 2 0 2 0 2 0 2 0 4 $off 4
+              printf '%s' "$nm"; } >> "$T/central"
+            off=$((off + 30 + ${#nm} + sz)); n=$((n + 1))
+        done
+        F="/storage/emulated/0/Download/warp-configs_$(date +%Y%m%d_%H%M).zip"
+        { cat "$T/local" "$T/central"; printf 'PK\005\006'; le 0 2 0 2 $n 2 $n 2 $(wc -c < "$T/central") 4 $off 4 0 2; } > "$F" 2>/dev/null
+        rm -rf "$T"
+        [ -s "$F" ] || { echo "ERR не удалось записать в «Загрузки»"; exit 1; }
+        chmod 644 "$F" 2>/dev/null
+        ( content call --uri content://media --method scan_file --arg "$F" >/dev/null 2>&1 & )
+        echo "OK $F $n" ;;
     *)
         echo "ERR команда"; exit 1 ;;
 esac

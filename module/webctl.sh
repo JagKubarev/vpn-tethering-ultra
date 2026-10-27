@@ -32,7 +32,7 @@
 #   webctl.sh zalt                    сайты со своей стратегией в текущей сети: сайт|аргументы|дата
 #   webctl.sh zalt-clear              забыть их (и «не открылись ничем»)
 #   webctl.sh zscan-start sites ['сайты']  подобрать своё сайтам (без списка — из списков zapret)
-#   webctl.sh warp-list|warp-gen [N]|warp-import ИМЯ BASE64|warp-del ИМЯ|warp-export ИМЯ|warp-save ИМЯ
+#   webctl.sh warp-list|warp-gen [N]|warp-import ИМЯ BASE64|warp-del ИМЯ|warp-export ИМЯ|warp-save ИМЯ|warp-saveall
 #                                     конфиги WARP (AmneziaWG) — см. warp/warp.sh
 # ============================================================================
 
@@ -745,7 +745,7 @@ case "$1" in
         done
         ;;
 
-    warp-list|warp-gen|warp-import|warp-del|warp-export|warp-save)
+    warp-list|warp-gen|warp-import|warp-del|warp-export|warp-save|warp-saveall)
         sh "$MODDIR/warp/warp.sh" "${1#warp-}" "$2" "$3" ;;
 
     *)
