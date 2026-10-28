@@ -349,6 +349,9 @@ net_identity_reconcile() {
     k="${d%%"|"*}"; l="${d#*"|"}"
     [ -n "$k" ] || l=""
     [ "$k" = "$NET_KEY" ] && return 0
+    # другая точка с тем же адресом и шлюзом (handle_change её не видит) — WARP
+    # проверить сразу, как при смене сети в loop.sh
+    [ -n "$k" ] && [ -n "$NET_KEY" ] && { WARP_CHECK_TS=0; WARP_NETCHG=1; WARP_BAD=""; WARP_EP_FULL=0; WARP_RETRY_TS=0; }
     NET_KEY="$k"
     NET_LABEL="$l"
     log "Сеть: ${NET_LABEL:-не определена}${NET_KEY:+ ($NET_KEY)}"

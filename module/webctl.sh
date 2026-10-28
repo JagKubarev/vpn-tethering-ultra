@@ -262,8 +262,8 @@ case "$1" in
         # системные, в -3 (и в listPackages('user') менеджера) их нет.
         # query-activities — Android 7+; нет — как раньше, только сторонние
         { pm list packages -3 2>/dev/null | sed 's/^package://'
-          cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 2>/dev/null | \
-              sed -n 's|^ *\([A-Za-z0-9_.]*\)/.*|\1|p'
+          cmd package query-activities --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 2>/dev/null | \
+              sed -n 's|^ *\([A-Za-z0-9_][A-Za-z0-9_.]*\)/.*|\1|p'
         } | sort -u
         ;;
 

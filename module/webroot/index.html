@@ -1086,7 +1086,14 @@ function renderChips() {
   renderChips();
 }));
 
-async function loadApps() {
+// старт страницы и открытие списка зовут её почти одновременно: после await
+// второй вызов не видел APPS и гонял webctl apps ещё раз — ждём первый
+let APPS_P = null;
+function loadApps() {
+  if (!APPS_P) APPS_P = loadApps0().finally(() => { APPS_P = null; });
+  return APPS_P;
+}
+async function loadApps0() {
   if (APPS) return APPS;
   let list = [];
   try {

@@ -329,9 +329,17 @@ warp_reconcile() {
                 WARP_BAD=""; WARP_EP_FULL=0; WARP_RETRY_TS=$((now + WARP_RETRY_SECS))
                 return 0
             fi
+            # NET_KEY (адрес для сети) считает zapret_reconcile — при выключенном
+            # zapret он не обновляется, и адрес новой сети лёг бы под ключ старой
+            net_identity_reconcile
             warp_start "$n" && warp_set_state starting "" ;;
         starting)
-            if [ "$WARP_CF" = 1 ] && [ "$WARP_HS" = 0 ]; then
+            if [ "$WARP_NETCHG" = 1 ]; then
+                # сеть сменилась посреди подъёма (warp_start флаг сбросил):
+                # очередь адресов и промахи — от прошлой сети, конфиг не виноват
+                WARP_NETCHG=0
+                warp_down "сменилась сеть"; warp_set_state off ""
+            elif [ "$WARP_CF" = 1 ] && [ "$WARP_HS" = 0 ]; then
                 # адрес Cloudflare: сначала хендшейк, молчит — следующий адрес
                 if [ -n "$WARP_PID" ] && ! kill -0 "$WARP_PID" 2>/dev/null; then
                     # процесс умер — перебор адресов бессмыслен (и это не «закрыт пул»)
