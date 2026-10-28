@@ -26,6 +26,14 @@ WARP_CHECK_TS=0          # последняя проверка трафиком 
 WARP_FAILS=0             # проверок подряд без ответа
 WARP_CRASH=""            # конфиг, упавший сразу после подъёма (второй раз — в «плохие»)
 WARP_CF=0                # Endpoint — сервер Cloudflare: проверка требует warp=on
+WARP_EP0=""              # адрес из конфига (engage… — числом)
+WARP_EP_FILE=$WARP_DIR/.endpoints   # «сеть|адрес» — рабочий адрес Cloudflare для сети
+WARP_EP_FULL=0           # конфигов за круг, не давших хендшейк ни на одном адресе пула
+WARP_EP_TRIED=""         # адреса, уже испробованные этим конфигом
+WARP_EP_Q=""             # ещё не испробованные
+WARP_EP_CUR=""           # пробуем сейчас
+WARP_EP_T0=0             # когда подан (мс от загрузки)
+WARP_HS=0                # хендшейк на WARP_EP_CUR был
 WARP_ENSURE_WAIT=300     # пауза перед повтором создания конфигов: удваивается, до часа
 WARP_BAD=""              # «имя:epoch …»
 WARP_RETRY_TS=0
@@ -91,8 +99,68 @@ warp_pick() {   # первый конфиг не из «плохих»; нет �
     return 1
 }
 
+# .run.wg для awg (с ключом — на миг). awg не знает Address/DNS/MTU (это
+# wg-quick) — без них. AllowedIPs — весь трафик: что пускать в туннель, решают
+# наши правила, а «сплит» из генератора молча отбросил бы Telegram/Google.
+# $2 — адрес вместо Endpoint конфига (пусто — как в конфиге)
+warp_wg_file() {   # конфиг [адрес]
+    (umask 077; awk -v ep="$2" '/^[ \t]*(#|(Address|DNS|MTU|AllowedIPs|J[1-3]|Itime)[ \t]*=)/ { next }
+        ep != "" && /^[ \t]*Endpoint[ \t]*=/ { print "Endpoint = " ep; next }
+        { print }
+        /^[ \t]*\[Peer\]/ { print "AllowedIPs = 0.0.0.0/0, ::/0" }' "$1" > "$WARP_DIR/.run.wg")
+}
+
+# Адреса Cloudflare по порядку: рабочий для этой сети, из конфига, пул
+# (warp/endpoints.txt). После двух конфигов без хендшейка за круг — без пула:
+# на сети, где WARP закрыт целиком, не гонять весь пул по каждому конфигу.
+warp_ep_list() {
+    { [ -f "$WARP_EP_FILE" ] && awk -F'|' -v k="${NET_KEY:--}" '$1 == k { print $2 }' "$WARP_EP_FILE"
+      echo "$WARP_EP0"
+      [ "$WARP_EP_FULL" -lt 2 ] && grep -E '^[0-9.]+:[0-9]+$' "$MODULE_DIR/warp/endpoints.txt" 2>/dev/null
+    } | awk 'NF && !s[$0]++'
+}
+
+warp_ep_save() {   # адрес — рабочий для текущей сети
+    local k="${NET_KEY:--}"
+    { awk -F'|' -v k="$k" '$1 != k' "$WARP_EP_FILE" 2>/dev/null | tail -n 49; echo "$k|$1"; } > "$WARP_EP_FILE.tmp" &&
+        mv -f "$WARP_EP_FILE.tmp" "$WARP_EP_FILE"
+}
+
+# Сети режут WARP по-разному (замер 28.10, 9 сетей): одни — подсети
+# 188.114.96/97, другие — всё, кроме них, роутер МТС — порты 500/4500. Адрес
+# из конфига молчит — следующий; признак — хендшейк за 4 с (замер: 0,1–0,9 с),
+# а не проверка трафиком (~25 с на попытку). 28.10 на роутере МТС 14 конфигов
+# подряд ушли в «плохие» за 7,5 мин — все на одном 162.159.192.1:4500.
+# По шагу на проход цикла (~2 с): ждать 10 адресов подряд — 40 с без сторожа.
+warp_ep_kick() {   # адрес — пробуем его с этого момента
+    WARP_EP_CUR="$1"; WARP_EP_TRIED="$WARP_EP_TRIED $1"; WARP_EP_T0=$(uptime_ms)
+    # пакет в туннель — повод для хендшейка (и PersistentKeepalive)
+    ping -c 1 -W 1 -I $WARP_IF 1.1.1.1 >/dev/null 2>&1 &
+}
+
+warp_ep_step() {   # 0 — ждём или дождались (WARP_HS=1), 1 — адреса кончились
+    local hs e was
+    hs=$("$AWG_BIN" show $WARP_IF latest-handshakes 2>/dev/null | awk '{print $2; exit}')
+    if [ "${hs:-0}" -gt 0 ]; then
+        WARP_HS=1; WARP_EP_FULL=0
+        warp_ep_save "$WARP_EP_CUR"
+        was="${WARP_EP_TRIED% $WARP_EP_CUR}"; was="${was# }"
+        [ "$WARP_EP_CUR" = "$WARP_EP0" ] || log "WARP: $WARP_CUR — через $WARP_EP_CUR${was:+ (молчали: $was)}"
+        return 0
+    fi
+    [ $(( $(uptime_ms) - WARP_EP_T0 )) -lt 4000 ] && return 0
+    set -- $WARP_EP_Q
+    [ $# -gt 0 ] || return 1
+    e="$1"; shift; WARP_EP_Q="$*"
+    warp_wg_file "$WARP_DIR/$WARP_CUR.conf" "$e"
+    "$AWG_BIN" setconf "$WARP_IF" "$WARP_DIR/.run.wg" >> "$WARP_RUN.log" 2>&1
+    rm -f "$WARP_DIR/.run.wg"
+    warp_ep_kick "$e"
+    return 0
+}
+
 warp_start() {   # имя конфига
-    local n="$1" f="$WARP_DIR/$1.conf" a mtu i=0 rc
+    local n="$1" f="$WARP_DIR/$1.conf" a mtu i=0 rc ep1=""
     warp_down
     # старые прошивки (8.1): /dev/tun вместо /dev/net/tun
     [ -e /dev/net/tun ] || { mkdir -p /dev/net && ln -s /dev/tun /dev/net/tun; } 2>/dev/null
@@ -115,14 +183,19 @@ warp_start() {   # имя конфига
         warp_down; WARP_RETRY_TS=$(( $(date +%s) + 60 )); warp_set_state fail "amneziawg-go не запустился"
         return 1
     fi
-    # awg не знает Address/DNS/MTU (это wg-quick) — без них. AllowedIPs — весь
-    # трафик: что пускать в туннель, решают наши правила, а «сплит» из
-    # генератора молча отбросил бы Telegram/Google. Файл с ключом — на миг.
-    # Endpoint WARP — адресом: awg резолвит имя сам, и без DNS «Configuration
-    # parsing error» записывал исправный конфиг в «плохие» (27.10 09:52)
-    (umask 077; awk '/^[ \t]*(#|(Address|DNS|MTU|AllowedIPs|J[1-3]|Itime)[ \t]*=)/ { next }
-        { sub(/engage\.cloudflareclient\.com:/, "162.159.192.1:"); print }
-        /^[ \t]*\[Peer\]/ { print "AllowedIPs = 0.0.0.0/0, ::/0" }' "$f" > "$WARP_DIR/.run.wg")
+    # сервер Cloudflare — проверка строже: trace должен сказать warp=on (не
+    # «ответил кто-то по дороге»); свой сервер так не скажет — ему любой ответ.
+    # Cloudflare — и подбор адреса (warp_ep_step); свой сервер не трогаем.
+    WARP_CF=0; WARP_EP0=""
+    grep -qE '^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*(engage\.cloudflareclient\.com|162\.159\.|188\.114\.)' "$f" && WARP_CF=1
+    if [ "$WARP_CF" = 1 ]; then
+        # Endpoint WARP — адресом: awg резолвит имя сам, и без DNS «Configuration
+        # parsing error» записывал исправный конфиг в «плохие» (27.10 09:52)
+        WARP_EP0=$(sed -n 's/^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*//p' "$f" | head -1 | tr -d ' \r')
+        case "$WARP_EP0" in engage.cloudflareclient.com:*) WARP_EP0="162.159.192.1:${WARP_EP0##*:}" ;; esac
+        ep1=$(warp_ep_list | head -1)
+    fi
+    warp_wg_file "$f" "$ep1"
     "$AWG_BIN" setconf "$WARP_IF" "$WARP_DIR/.run.wg" >> "$WARP_RUN.log" 2>&1; rc=$?
     rm -f "$WARP_DIR/.run.wg"
     if [ $rc != 0 ]; then
@@ -149,11 +222,12 @@ warp_start() {   # имя конфига
     $ip rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     $ip -6 rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     WARP_CUR="$n"; WARP_STATE=starting; WARP_TS=$(date +%s); WARP_CHECK_TS=0; WARP_FAILS=0
-    # сервер Cloudflare — проверка строже: trace должен сказать warp=on (не
-    # «ответил кто-то по дороге»); свой сервер так не скажет — ему любой ответ
-    WARP_CF=0
-    grep -qE '^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*(engage\.cloudflareclient\.com|162\.159\.)' "$f" && WARP_CF=1
     log "WARP: запускаю $n ($(sed -n 's/^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*//p' "$f" | head -1))"
+    WARP_HS=0; WARP_EP_TRIED=""; WARP_EP_Q=""
+    if [ "$WARP_CF" = 1 ]; then
+        WARP_EP_Q=$(warp_ep_list | awk 'NR > 1' | tr '\n' ' ')
+        warp_ep_kick "$ep1"
+    fi
     return 0
 }
 
@@ -230,7 +304,7 @@ warp_reconcile() {
     # первые конфиги — только при сети (иначе регистрация падает до перезагрузки)
     [ -z "$why" ] && warp_ensure
     if [ -n "$why" ]; then
-        if [ "$WARP_STATE" != off ]; then warp_down "$why"; WARP_BAD=""; WARP_RETRY_TS=0; fi
+        if [ "$WARP_STATE" != off ]; then warp_down "$why"; WARP_BAD=""; WARP_EP_FULL=0; WARP_RETRY_TS=0; fi
         warp_set_state off "$why"   # повторы отсекает WARP_PUB
         return 0
     fi
@@ -250,12 +324,19 @@ warp_reconcile() {
                     log "WARP: ни один конфиг не поднялся — повтор через $((WARP_RETRY_SECS / 60)) мин"
                     warp_set_state fail "не поднялся"
                 fi
-                WARP_BAD=""; WARP_RETRY_TS=$((now + WARP_RETRY_SECS))
+                WARP_BAD=""; WARP_EP_FULL=0; WARP_RETRY_TS=$((now + WARP_RETRY_SECS))
                 return 0
             fi
             warp_start "$n" && warp_set_state starting "" ;;
         starting)
-            if warp_probe; then
+            if [ "$WARP_CF" = 1 ] && [ "$WARP_HS" = 0 ]; then
+                # адрес Cloudflare: сначала хендшейк, молчит — следующий адрес
+                if ! warp_ep_step; then
+                    log "WARP: $WARP_CUR — нет хендшейка ни на одном адресе (${WARP_EP_TRIED# }), беру следующий"
+                    WARP_EP_FULL=$((WARP_EP_FULL + 1))
+                    warp_mark_bad "$WARP_CUR"; warp_down; warp_set_state off ""
+                fi
+            elif warp_probe; then
                 log "WARP: $WARP_CUR поднят за $(( $(date +%s) - WARP_TS )) с"
                 WARP_TS=$(date +%s); WARP_CHECK_TS=$WARP_TS; WARP_FAILS=0
                 warp_set_state up ""

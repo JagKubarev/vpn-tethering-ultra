@@ -277,7 +277,7 @@ reload_config() {
     if [ "$s_wp0" != "$s_wp1" ]; then
         # WARP: снять, сторож поднимет заново с новым конфигом (~2с)
         warp_down "настройки"
-        WARP_BAD=""; WARP_RETRY_TS=0; WARP_ENSURE_DONE=0
+        WARP_BAD=""; WARP_EP_FULL=0; WARP_RETRY_TS=0; WARP_ENSURE_DONE=0
         warp_set_state off ""
     fi
     if [ "$s_wr0" != "$s_wr1" ]; then
