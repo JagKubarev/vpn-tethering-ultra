@@ -59,6 +59,11 @@
   телефона. Своя стратегия для каждой сети, подбор в WebUI (~2 или ~7 мин), сторож, который
   сам чинит сломавшуюся стратегию, отдельные стратегии для отдельных сайтов. Банки и Госуслуги
   обход не трогает никогда.
+- **WARP без VPN-клиента.** Для того, что обход не открывает (Telegram, сайты с блокировкой
+  по IP или по стране), — свой туннель WARP на AmneziaWG в режиме «напрямую». Через него идут
+  только выбранные группы: Telegram (клиенты на телефоне — целиком), по желанию Google, свои
+  домены и приложения телефона. Конфиги создаются прямо с телефона или импортируются из
+  AmneziaVPN; перестал отвечать — модуль переходит на следующий.
 - **YouTube на мобильном интернете.** Отбой «молчащих» видеосерверов, обрыв медленных
   видеосоединений, чтобы плеер ушёл на быстрый сервер, отдельная стратегия для YouTube,
   по желанию — отбой кэшей оператора (GGC), замер «Скорость YouTube».
@@ -74,7 +79,7 @@
 |---|---|
 | Root | **KernelSU**, **Magisk**, **APatch** (учтены пути модулей `/data/adb/modules` и `/data/adb/ap`) |
 | Архитектура | arm64 или armv7 — при установке остаются бинарники под устройство |
-| Ядро | `iptables`/`ip6tables`, NFQUEUE (для обхода DPI) и conntrack; IPv6 NAT не обязателен — без него DNS телефона перехватывается только по IPv4 |
+| Ядро | `iptables`/`ip6tables`, NFQUEUE (для обхода DPI) и conntrack; без `connbytes` обход работает в упрощённом режиме (модуль проверяет ядро при старте); IPv6 NAT не обязателен — без него DNS телефона перехватывается только по IPv4 |
 | VPN | любой VPN-клиент, который поднимает `tun*` (проверялись AmneziaWG/WARP, VLESS-клиенты на sing-box, в том числе два tun одновременно) |
 | Раздача | Wi-Fi-точка и USB-модем (в том числе CDC-NCM); клиенты — ноутбуки и ПК (Windows 7/10/11 и др.), другие телефоны |
 | Проверено | Snapdragon (SM8750, Android 15), MediaTek; у пользователей — MTK (`ccmni*`), Samsung Exynos (`swlan0`) |
@@ -82,7 +87,13 @@
 Соединения известных VPN-клиентов (список `VPN_CLIENT_PKGS` в `service.sh`) обход DPI не трогает,
 чтобы не ломать переподключение. Если на телефоне стоит AdGuard с HTTPS-фильтром, модуль
 исключает трафик dnsproxy из его перехвата (по GID). DNS-защиту AdGuard вместе с `DNS_PHONE=1`
-не включайте: они будут перехватывать DNS друг у друга.
+не включайте: они будут перехватывать DNS друг у друга. Приложения, которые фильтрует AdGuard,
+идут по TCP мимо WARP (AdGuard открывает соединение от своего имени) — чтобы приложение шло
+через WARP целиком, исключите его в AdGuard.
+
+Конфиги WARP хранятся в `/data/adb/vpn_tether_warp`. В файлах, которые сохраняет WebUI
+(«Сохранить», «Сохранить все в zip» — в «Загрузки»), лежит закрытый ключ: его видят приложения
+с доступом к памяти — не публикуйте такие файлы и удаляйте их после переноса.
 
 ## Установка
 
@@ -118,7 +129,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 - **Action** (кнопка ▶ у модуля в менеджере) переключает VPN ↔ напрямую. Демон подтверждает
   переключение, и Action показывает статус: где идёт раздача, режим, DNS раздачи и телефона,
   kill-switch.
-- **WebUI** — основное место для настроек: вкладки Главная, Обход, Сеть, Инструменты. Кнопка
+- **WebUI** — основное место для настроек: вкладки Главная, Обход, Сеть, WARP, Сервис. Кнопка
   «Применить» перечитывает настройки без перезагрузки и без обрыва соединений клиентов, если
   не менялись DNS или kill-switch.
 - **Конфиг** `/data/adb/vpn_tether.conf` — те же настройки в виде `КЛЮЧ=значение`. Файл
@@ -150,7 +161,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 
 **Где логи?**
 Основной лог — `/data/local/tmp/vpn_tether.log` (прошлый запуск — `vpn_tether.log.prev`),
-сообщения дублируются в logcat с тегом `vpn_tether`. Хвост лога виден во вкладке «Инструменты»,
+сообщения дублируются в logcat с тегом `vpn_tether`. Хвост лога виден во вкладке «Сервис»,
 там же кнопка «Отправить логи». С вопросами и логами — в [чат](https://t.me/+LyVq9jqT-802MGIy) или
 в [Issues](https://github.com/JagKubarev/vpn-tethering-ultra/issues) (см. [Связь](#связь)).
 
@@ -159,7 +170,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 - [Telegram-канал](https://t.me/kubarev_mods) — новые версии и новости.
 - [Чат](https://t.me/+LyVq9jqT-802MGIy) — вопросы, обсуждение, помощь с настройкой.
 - [Issues](https://github.com/JagKubarev/vpn-tethering-ultra/issues) — сообщения об ошибках.
-  Приложите файл из «Инструменты → Отправить логи» и укажите версию модуля, менеджер
+  Приложите файл из «Сервис → Отправить логи» и укажите версию модуля, менеджер
   (KernelSU / Magisk / APatch) и VPN-клиент.
 - [4PDA, каталог модулей](https://4pda.to/forum/index.php?showtopic=1097835) — релизы.
 
@@ -168,7 +179,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 Нумерация `X.Y.Z`: **X** — этап, **Y** — заметная функция, **Z** — исправления.
 `versionCode` = X·10000 + Y·100 + Z (3.8.1 → 30801). До 23.10.2026 у модуля было две
 нумерации (внешняя 2.x и внутренняя 3.x-hybrid) — таблица соответствия в [`CHANGELOG.md`](CHANGELOG.md).
-Теги `v1.0` … `v3.17.1`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
+Теги `v1.0` … `v3.19.0`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
 
 <details>
 <summary>Кратко по версиям</summary>
@@ -219,6 +230,8 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 | 3.13–3.15.1 | Telegram и сайты без VPN через прокси Opera (убрано в 3.16); эвристика раздачи не путает клиент Wi-Fi с точкой доступа; WebUI без рамки фокуса у вкладок. |
 | 3.16 | Прокси Opera убран целиком (работал нестабильно), поведение как в 3.12 с исправлениями 3.13–3.14; хвосты старых версий убираются при старте. |
 | 3.17 | Отбой молчащих серверов и для загрузок Play Маркета (`gvt1.com`); новый вид «молчит после запроса» — с фоновой проверкой адреса перед отбоем. Google и Cloudflare убраны из запасных DoH (не обходят гео-блок); кнопка «Сбросить кэш DNS» и сброс при возврате на DoH. |
+| 3.18 | Устройства в раздаче с блокировкой по MAC, пауза обхода в белых списках, тип блокировки в «Проверить сайт» (отдельно не выпускалась — вошла в 3.19.0). |
+| 3.19.0 | WARP (AmneziaWG) в режиме «напрямую»: группы Telegram/Google/домены/приложения, клиенты Telegram целиком, конфиги с телефона и из AmneziaVPN, переход на следующий конфиг; проверка ядра для zapret и упрощённый режим без `connbytes`; bbr3; вкладка «Сервис». |
 
 </details>
 
@@ -232,8 +245,10 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 | `nfqws` | из zapret v72.13 | [bol-van/zapret](https://github.com/bol-van/zapret) | MIT ([`nfqws.LICENSE`](module/bin/nfqws.LICENSE)) |
 | `dnsproxy` | v0.86.0 | [AdguardTeam/dnsproxy](https://github.com/AdguardTeam/dnsproxy) | Apache-2.0 ([`dnsproxy.LICENSE`](module/bin/dnsproxy.LICENSE)) |
 | `conntrack` | v1.4.8 (статическая сборка) | conntrack-tools, [netfilter.org](https://www.netfilter.org/projects/conntrack-tools/) | GPL-2.0 ([`conntrack.LICENSE`](module/bin/conntrack.LICENSE); рецепт сборки — [`conntrack.SOURCE`](module/bin/conntrack.SOURCE), исходники — [`third_party/conntrack/`](third_party/conntrack/)) |
+| `amneziawg-go` | v3.1.20260828 | [amnezia-vpn/amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go) | MIT ([`amneziawg-go.LICENSE`](module/bin/amneziawg-go.LICENSE); Go — [`golang.LICENSE`](module/bin/golang.LICENSE)) |
+| `awg` | из amneziawg-tools v3.1.20260812 | [amnezia-vpn/amneziawg-tools](https://github.com/amnezia-vpn/amneziawg-tools) | GPL-2.0 ([`awg.LICENSE`](module/bin/awg.LICENSE); сборка — [`amneziawg.SOURCE`](module/bin/amneziawg.SOURCE), исходники — [`third_party/amneziawg/`](third_party/amneziawg/)) |
 
-Спасибо авторам zapret (bol-van), dnsproxy (AdGuard) и netfilter. Некоторые идеи подбора
+Спасибо авторам zapret (bol-van), dnsproxy (AdGuard), AmneziaWG (Amnezia) и netfilter. Некоторые идеи подбора
 стратегий взяты из ZDT-D, byedpi (`--auto`) и zapret2 (circular), как указано в журнале
 изменений. Спасибо участникам темы на 4PDA за тесты на своих устройствах и сетях.
 
@@ -244,7 +259,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 | [`module/`](module/) | Сам модуль — из этой папки собирается zip |
 | [`docs/settings.md`](docs/settings.md) | Справочник: все настройки, устройство обхода DPI и DNS, файлы и логи |
 | [`docs/screenshots/`](docs/screenshots/), [`docs/webui/`](docs/webui/) | Скриншоты WebUI |
-| [`third_party/conntrack/`](third_party/conntrack/) | Исходники статического `conntrack` (GPL), в модуль не входят |
+| [`third_party/conntrack/`](third_party/conntrack/), [`third_party/amneziawg/`](third_party/amneziawg/) | Исходники `conntrack` и AmneziaWG (GPL), в модуль не входят |
 | [`tools/`](tools/) | Стенды и скрипты замеров для разработки, в модуль не входят |
 | [`CHANGELOG.md`](CHANGELOG.md) | Полная история изменений |
 | [`update.json`](update.json), [`update-changelog.md`](update-changelog.md) | Обновление через менеджер модулей |
@@ -270,7 +285,9 @@ offload that could leak traffic past the VPN; **encrypted DNS** via dnsproxy (Do
 clients and the phone itself, with health checks, an ordered fallback chain and EU-located answers
 for Meta domains (ECS); **DPI circumvention** with zapret's `nfqws` for traffic outside the VPN —
 per-network strategies, a quick/full strategy scanner, a self-repairing watchdog, per-site
-strategies and an exclusion list for banks and government services; **YouTube helpers** for mobile
+strategies and an exclusion list for banks and government services; a built-in **WARP tunnel**
+(AmneziaWG, no VPN app needed) for selected groups — Telegram, Google, custom domains, whole apps —
+with configs generated on the phone or imported from AmneziaVPN; **YouTube helpers** for mobile
 networks (fail-fast on silent video servers, dropping slow video connections); tethering stealth
 (TTL 63) and per-app QUIC blocking.
 
@@ -283,4 +300,5 @@ documentation are in Russian; the full reference is [docs/settings.md](docs/sett
 
 The module's own code is licensed under **GPL-3.0**. Bundled third-party binaries: `nfqws` from
 [zapret](https://github.com/bol-van/zapret) v72.13 (MIT), [dnsproxy](https://github.com/AdguardTeam/dnsproxy)
-v0.86.0 (Apache-2.0), `conntrack` v1.4.8 from conntrack-tools (GPL-2.0, sources in `third_party/`).
+v0.86.0 (Apache-2.0), `conntrack` v1.4.8 from conntrack-tools (GPL-2.0), [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go)
+(MIT) and `awg` from amneziawg-tools (GPL-2.0); GPL sources are in `third_party/`.
