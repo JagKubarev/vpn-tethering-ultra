@@ -34,6 +34,7 @@ WARP_EP_Q=""             # ещё не испробованные
 WARP_EP_CUR=""           # пробуем сейчас
 WARP_EP_T0=0             # когда подан (мс от загрузки)
 WARP_HS=0                # хендшейк на WARP_EP_CUR был
+WARP_NETCHG=0            # сменилась сеть (loop.sh), туннель на ней ещё не проверен
 WARP_ENSURE_WAIT=300     # пауза перед повтором создания конфигов: удваивается, до часа
 WARP_BAD=""              # «имя:epoch …»
 WARP_RETRY_TS=0
@@ -222,7 +223,7 @@ warp_start() {   # имя конфига
     $ip -6 route replace default dev $WARP_IF table $WARP_TABLE 2>/dev/null
     $ip rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     $ip -6 rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
-    WARP_CUR="$n"; WARP_STATE=starting; WARP_TS=$(date +%s); WARP_CHECK_TS=0; WARP_FAILS=0
+    WARP_CUR="$n"; WARP_STATE=starting; WARP_TS=$(date +%s); WARP_CHECK_TS=0; WARP_FAILS=0; WARP_NETCHG=0
     log "WARP: запускаю $n ($(sed -n 's/^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*//p' "$f" | head -1))"
     WARP_HS=0; WARP_EP_TRIED=""; WARP_EP_Q=""
     if [ "$WARP_CF" = 1 ]; then
@@ -375,7 +376,13 @@ warp_reconcile() {
             WARP_CHECK_TS=$now
             if warp_probe; then
                 [ $WARP_FAILS -gt 0 ] && log "WARP: $WARP_CUR снова отвечает"
-                WARP_FAILS=0
+                WARP_FAILS=0; WARP_NETCHG=0
+            elif [ "$WARP_NETCHG" = 1 ]; then
+                # сменилась сеть, а туннель молчит — сразу заново (хендшейк и
+                # адрес для этой сети), не ждать 3 промаха (~30 с, лог 28.10:
+                # Wi-Fi -> Wi-Fi без пропадания WAN). Конфиг не виноват
+                WARP_NETCHG=0
+                warp_down "сменилась сеть"; warp_set_state off ""
             else
                 WARP_FAILS=$((WARP_FAILS + 1))
                 # после сбоя — проверять чаще: 3 подряд ≈ полминуты
