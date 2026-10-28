@@ -142,8 +142,9 @@ warp_ep_step() {   # 0 — ждём или дождались (WARP_HS=1), 1 —
     local hs e was
     hs=$("$AWG_BIN" show $WARP_IF latest-handshakes 2>/dev/null | awk '{print $2; exit}')
     if [ "${hs:-0}" -gt 0 ]; then
+        # запомнить для сети — после warp=on (warp_reconcile): хендшейк без
+        # трафика не повод ставить адрес первым для всех конфигов
         WARP_HS=1; WARP_EP_FULL=0
-        warp_ep_save "$WARP_EP_CUR"
         was="${WARP_EP_TRIED% $WARP_EP_CUR}"; was="${was# }"
         [ "$WARP_EP_CUR" = "$WARP_EP0" ] || log "WARP: $WARP_CUR — через $WARP_EP_CUR${was:+ (молчали: $was)}"
         return 0
@@ -331,13 +332,18 @@ warp_reconcile() {
         starting)
             if [ "$WARP_CF" = 1 ] && [ "$WARP_HS" = 0 ]; then
                 # адрес Cloudflare: сначала хендшейк, молчит — следующий адрес
-                if ! warp_ep_step; then
+                if [ -n "$WARP_PID" ] && ! kill -0 "$WARP_PID" 2>/dev/null; then
+                    # процесс умер — перебор адресов бессмыслен (и это не «закрыт пул»)
+                    log "WARP: $WARP_CUR — amneziawg-go завершился при запуске ($(tail -1 "$WARP_RUN.log" 2>/dev/null | cut -c1-120))"
+                    warp_mark_bad "$WARP_CUR"; warp_down; warp_set_state off ""
+                elif ! warp_ep_step; then
                     log "WARP: $WARP_CUR — нет хендшейка ни на одном адресе (${WARP_EP_TRIED# }), беру следующий"
                     WARP_EP_FULL=$((WARP_EP_FULL + 1))
                     warp_mark_bad "$WARP_CUR"; warp_down; warp_set_state off ""
                 fi
             elif warp_probe; then
                 log "WARP: $WARP_CUR поднят за $(( $(date +%s) - WARP_TS )) с"
+                [ "$WARP_CF" = 1 ] && warp_ep_save "$WARP_EP_CUR"
                 WARP_TS=$(date +%s); WARP_CHECK_TS=$WARP_TS; WARP_FAILS=0
                 warp_set_state up ""
                 warp_routes_reconcile
