@@ -398,7 +398,13 @@ warp_reconcile() {
             else
                 WARP_FAILS=$((WARP_FAILS + 1))
                 # 3 проверки по 5 с + такты цикла ≈ 20 с (свежий поднимается за ~0,7 с)
-                if [ $WARP_FAILS -ge 3 ]; then
+                if [ $WARP_FAILS -ge 3 ] && [ -n "$WARP_RU_EP" ]; then
+                    # адрес после российского: хендшейк есть, трафика нет — конфиг
+                    # не виноват, российский с трафиком уже был: к нему
+                    WARP_EP_Q="$WARP_RU_EP"; WARP_RU_EP=""; WARP_FAILS=0
+                    log "WARP: $WARP_CUR — через $WARP_EP_CUR нет трафика, беру $WARP_EP_Q (российская)"
+                    warp_ep_next
+                elif [ $WARP_FAILS -ge 3 ]; then
                     log "WARP: $WARP_CUR — нет трафика через туннель, беру следующий"
                     warp_mark_bad "$WARP_CUR"; warp_down; warp_set_state off ""
                 fi

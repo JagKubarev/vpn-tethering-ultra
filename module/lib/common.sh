@@ -143,6 +143,7 @@ update_status() {
         echo "warp_conf=$WARP_CUR"
         echo "warp_note=$WARP_NOTE"
         echo "warp_colo=$WARP_COLO_UP"
+        echo "warp_cf=$WARP_CF"
         echo "conf_note=$USER_CONF_NOTE"
         echo "updated=$(date '+%H:%M:%S')"
     } > "$STATUS_FILE.tmp" 2>/dev/null && mv -f "$STATUS_FILE.tmp" "$STATUS_FILE"
