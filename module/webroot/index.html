@@ -477,7 +477,14 @@ details.more > summary { color: var(--muted); }
 </div>
 
 <h2>Приложения без QUIC</h2>
-<div class="card pad">
+<div class="card">
+  <div class="row">
+    <div class="txt"><div class="t">Клиенты YouTube</div>
+      <div class="s">YouTube, YouTube Music, ReVanced, Morphe, NewPipe и др. — без QUIC, если установлены. По обычному HTTPS модуль может оборвать медленное видеосоединение и отбить молчащий сервер, по QUIC — нет.</div></div>
+    <label class="sw"><input type="checkbox" data-key="QUIC_BLOCK_YT"><span></span></label>
+  </div>
+</div>
+<div class="card pad mt8">
   <div class="muted" style="font-size:13px">Выбранным приложениям закрывается QUIC (UDP 443) — они идут по HTTPS. Помогает, если оператор режет QUIC.</div>
   <div class="chips" id="quicChips"></div>
   <div class="mt8"><button class="btn small" id="quicAdd">Добавить приложение</button></div>

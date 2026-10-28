@@ -12,9 +12,18 @@
 # ============================================================================
 QUIC_UIDS=""
 QUIC_LOGGED=0
-quic_block_uids() {
+# QUIC_BLOCK_YT=1: клиенты YouTube — без QUIC, если установлены
+QUIC_YT_PKGS="com.google.android.youtube com.google.android.apps.youtube.music com.google.android.apps.youtube.kids com.google.android.youtube.tv app.revanced.android.youtube app.revanced.android.apps.youtube.music app.rvx.android.youtube app.rvx.android.apps.youtube.music app.morphe.android.youtube app.morphe.android.apps.youtube.music com.vanced.android.youtube com.vanced.android.apps.youtube.music org.schabi.newpipe com.github.libretube"
+quic_block_pkgs() {   # QUIC_BLOCK_APPS + установленные клиенты YouTube, без повторов
+    local p
+    { for p in $QUIC_BLOCK_APPS; do echo "$p"; done
+      [ "$QUIC_BLOCK_YT" = "1" ] && for p in $QUIC_YT_PKGS; do [ -d "/data/data/$p" ] && echo "$p"; done
+    } | awk 'NF && !s[$0]++' | tr '\n' ' '
+}
+
+quic_block_uids() {   # пакеты
     local p u out=""
-    for p in $QUIC_BLOCK_APPS; do
+    for p in $1; do
         u=$(stat -c %u "/data/data/$p" 2>/dev/null)
         case "$u" in ''|*[!0-9]*) continue ;; esac
         [ "$u" -ge 10000 ] && out="$out $u"
@@ -23,9 +32,10 @@ quic_block_uids() {
 }
 
 quic_block_apply() {
-    local uids t u rj
-    [ -n "$QUIC_BLOCK_APPS" ] || return 0
-    uids=$(quic_block_uids)
+    local uids t u rj pk
+    pk=$(quic_block_pkgs)
+    [ -n "$pk" ] || return 0
+    uids=$(quic_block_uids "$pk")
     if [ "$uids" = "$QUIC_UIDS" ] && [ "$QUIC_LOGGED" = "1" ] && \
        $iptables -C OUTPUT -j "$CHAIN_QUIC" 2>/dev/null; then
         return 0
@@ -42,7 +52,7 @@ quic_block_apply() {
         $t -C OUTPUT -j "$CHAIN_QUIC" 2>/dev/null || $t -I OUTPUT 1 -j "$CHAIN_QUIC" 2>/dev/null
     done
     if [ "$uids" != "$QUIC_UIDS" ] || [ "$QUIC_LOGGED" != "1" ]; then
-        log "QUIC (UDP 443) закрыт для: $QUIC_BLOCK_APPS (uid: ${uids:-не установлены})"
+        log "QUIC (UDP 443) закрыт для: ${pk% } (uid: ${uids:-не установлены})"
     fi
     QUIC_UIDS="$uids"
     QUIC_LOGGED=1
