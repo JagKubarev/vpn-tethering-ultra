@@ -10,7 +10,7 @@ amneziawg-tools v3.1.20260812 (GPL-2.0, см. awg.LICENSE) — https://github.co
 x/net v0.44.0, x/sys v0.36.0 (BSD-3-Clause, см. golang.LICENSE).
   amneziawg-go: CGO_ENABLED=0 go build -trimpath (Go 1.25), GOARCH=arm64 / arm GOARM=7,
     -ldflags "-s -w -X github.com/amnezia-vpn/amneziawg-go/v3/ipc.socketDirectory=/data/local/tmp/amneziawg"
-  awg: Android NDK r30 (30.0.16248370, закреплён в build-awg.yml; сборка 28.10 побайтно совпала), динамически с системной libc, API 21 (статический bionic
+  awg: Android NDK r30 (30.0.16248370; в build-awg.yml закреплён мажор r30; сборка 28.10 побайтно совпала), динамически с системной libc, API 21 (статический bionic
     падает на старых ядрах), make CC=<target>21-clang PLATFORM=linux RUNSTATEDIR=/data/local/tmp wg
 
 sha256 бинарей:

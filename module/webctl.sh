@@ -334,7 +334,7 @@ case "$1" in
         case "$(uname -m)" in aarch64|arm64) CT="$MODDIR/bin/conntrack-arm64" ;; *) CT="$MODDIR/bin/conntrack-arm" ;; esac
         { for i in $ifs; do ip -4 neigh show dev "$i" 2>/dev/null | awk '/lladdr/ {print "N", $1, $3, $NF}'; done
           # конец аренды (expTime) — в мс от загрузки, те же часы, что /proc/uptime
-          awk '{printf "U %d\n", $1 * 1000}' /proc/uptime
+          awk '{printf "U %.0f\n", $1 * 1000}' /proc/uptime
           dumpsys network_stack 2>/dev/null | sed -n 's/.*hwAddr: \([0-9a-f:]*\),.*expTime: \([0-9]*\),.*hostname: \([^,]*\).*/H \1 \2 \3/p'
           [ -x "$CT" ] && "$CT" -L 2>/dev/null | awk '{s=""; b=0; for(i=1;i<=NF;i++){ if($i ~ /^src=/ && s=="") s=substr($i,5); if($i ~ /^bytes=/) b+=substr($i,7) } if(s!="") print "C", s, b}'
           sed 's/|/ /; s/^/B /' "$BL" 2>/dev/null
