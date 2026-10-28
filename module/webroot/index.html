@@ -1101,7 +1101,7 @@ async function loadApps0() {
       const pkgs = JSON.parse(ksu.listPackages('user'));
       // + системные с иконкой (YouTube, Chrome из прошивки): в 'user' их нет
       try {
-        const r = await ctl('apps');
+        const r = await ctlBg('apps');   // в фоне: синхронный exec морозил страницу (MT6580 — до секунд)
         r.out.split('\n').map((s) => s.trim()).forEach((p) => { if (p && !pkgs.includes(p)) pkgs.push(p); });
       } catch (e) { /* только пользовательские, как раньше */ }
       let info = [];
