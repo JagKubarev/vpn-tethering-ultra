@@ -519,6 +519,28 @@
 #     запасной nslookup — только IPv4;
 #   - списки: threads, substack, udemy, coursera, grammarly, digitalocean,
 #     nicovideo, hetzner; встроенный плеер YouTube — в список YouTube.
+#   (3.18 отдельно не выпускалась — вошла в 3.19.0.)
+# v3.19.0 — WARP (AmneziaWG) в режиме «напрямую», вкладка «Сервис»:
+#   - lib/warp.sh: userspace amneziawg-go + awg (bin/, сборка — Actions
+#     build-awg.yml, NDK r30, awg динамически API 21 — статический bionic
+#     падал на ядре 3.18), интерфейс warp0, таблица 3996, метка 0x20000000;
+#     только без VPN; проверка — trace 1.1.1.1 через туннель (WARP_CF — нужен
+#     warp=on); не отвечает 3 раза — следующий конфиг, имя Endpoint не
+#     находится — конфиг пропускается; повтор с удвоением до 1 ч;
+#   - группы: Telegram (5 AS), Google без Google Cloud (warp/google-*),
+#     домены (адреса из ответов dnsproxy, общие CDN — мимо), приложения по
+#     uid; WARP_TELEGRAM=1 — клиенты Telegram телефона целиком (запасные узлы
+#     вне сетей Telegram, лог 27.10); v6 в группы — отбиваем (нет ip6 nat);
+#   - ss -K сокетов телефона к сетям групп при подъёме/снятии/смене групп
+#     (только WARP_PHONE=1) — Telegram переподключается за ~20 с, не ~4 мин;
+#   - warp/warp.sh: хранилище /data/adb/vpn_tether_warp — создать (Cloudflare
+#     API), импорт .conf/zip AmneziaVPN, экспорт по одному и zip;
+#   - zapret: проверка ядра (connbytes/string/NFQUEUE) во временной цепочке;
+#     без connbytes — упрощённый режим (NFQUEUE на весь исходящий 443), без
+#     NFQUEUE — не включается; файл vpn_tether_zcaps для scan.sh/WebUI;
+#   - net: bbr3 -> bbr -> cubic (issue #17); WebUI: пять вкладок («Сервис»
+#     вместо «Инструментов», WARP), тексты/320 px/доступность; устройства с
+#     истёкшей арендой DHCP и без трафика из списка убраны.
 # ============================================================================
 # ============================================================================
 
@@ -1310,7 +1332,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.18 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.19.0 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
