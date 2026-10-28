@@ -21,14 +21,18 @@ KernelSU/Magisk-модуль (id `vpn-to-hotspot-usb`, автор Kubarev, те�
   сети), `dns` (DNS клиентов, dnsproxy, DoH-проверки, Meta, DNS телефона), `zapret`
   (nfqws, QUIC приложений), `youtube` (GGC, мёртвые и медленные видеосерверы),
   `stealth` (TTL), `rules` (правила, kill-switch, conntrack, offload, `apply_state`),
-  `loop` (`handle_change`, `reload_config`, `monitor_loop`). В некоторых есть и свои
+  `loop` (`handle_change`, `reload_config`, `monitor_loop`), `warp` (туннель WARP,
+  группы маршрутизации, `ss -K`). В некоторых есть и свои
   переменные состояния — порядок подключения не менять. Новая функция — в файл своей
   области; ранний код до lock (`--check`, `--get` …) не может звать функции из `lib/`.
 - `module/action.sh` — кнопка Action (тоггл VPN ↔ напрямую, ждёт ack от демона).
 - `module/webctl.sh` + `module/webroot/index.html` — WebUI, только фиксированные команды.
 - `module/zapret/` — `scan.sh` (подбор / сторож / сайты), `ytslow.sh`, `netid.sh`, списки.
-- `module/bin/` — `nfqws`, `dnsproxy`, `conntrack` (arm64 + armv7).
-- `third_party/conntrack/` — тарболы исходников `bin/conntrack-*` (GPL), в zip не входят.
+- `module/warp/` — `warp.sh` (хранилище конфигов WARP: создать, импорт, экспорт), списки
+  сетей групп (Telegram, Google без GCP, общие CDN).
+- `module/bin/` — `nfqws`, `dnsproxy`, `conntrack`, `amneziawg-go`, `awg` (arm64 + armv7).
+- `third_party/conntrack/`, `third_party/amneziawg/` — тарболы исходников `bin/conntrack-*` и
+  AmneziaWG (GPL), в zip не входят. awg/amneziawg-go собираются в Actions (`build-awg.yml`).
 - `tools/` — стенды и замеры для разработки (`zt_harness.sh`, `leakmon.py`,
   `blockscan.sh`, `patch_*.py` …), в модуль не входят.
 - Конфиг пользователя: `/data/adb/vpn_tether.conf` (не исполняется, ключи из `CONF_KEYS`
@@ -43,7 +47,7 @@ KernelSU/Magisk-модуль (id `vpn-to-hotspot-usb`, автор Kubarev, те�
 
 На каждый релиз меняются **три места** и ставится тег `vX.Y.Z`:
 1. `module/module.prop`: `version=vX.Y.Z` и `versionCode` = X·10000 + Y·100 + Z
-   (сейчас 31800 у v3.18).
+   (сейчас 31900 у v3.19.0).
 2. Баннер в `service.sh`: `=== VPN Tether vX.Y.Z Started ...`.
 3. Запись в шапке `service.sh` (по хронологии: новая — в конец журнала, перед строкой `# ====`) **и** в `CHANGELOG.md`.
 4. Обновление через менеджер: `update.json` (version, versionCode, zipUrl) и
