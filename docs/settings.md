@@ -71,7 +71,7 @@
 | `NET_PROFILE_ADAPTIVE` | `0` | 0/1 | 0 — всегда профиль FAST (BBR), без пингов. 1 — пинг 1.1.1.1 через WAN раз в ~20 с; RTT выше порога или потеря 2 раза подряд → профиль STABLE (тот же BBR, больше SYN-ретраев). |
 | `STATUS_IN_DESCRIPTION` | `1` | 0/1 | Писать текущее состояние в описание модуля. |
 | `QUIC_BLOCK_APPS` | пусто | имена пакетов через пробел | Закрыть QUIC (UDP 443, REJECT) этим приложениям телефона, чтобы они сразу шли по HTTPS. |
-| `QUIC_BLOCK_YT` | `1` | 0/1 | Закрыть QUIC и установленным клиентам YouTube (YouTube, Music, Kids, ReVanced, ReVanced Extended, Morphe, Vanced, NewPipe, LibreTube) — без добавления вручную. По HTTPS модуль может оборвать медленное видеосоединение и отбить молчащий сервер, по QUIC — нет. |
+| `QUIC_BLOCK_YT` | `1` | 0/1 | Закрыть QUIC и установленным клиентам YouTube (YouTube, Music, Kids, ReVanced, ReVanced Extended, Morphe, Vanced, NewPipe, LibreTube) — без добавления вручную. По HTTPS модуль может оборвать медленное видеосоединение и отбить молчащий сервер, по QUIC — нет (это при `ZAPRET_ENABLE=1`, `ZAPRET_PHONE=1` и без VPN; через VPN блокировка просто переводит YouTube на TCP в туннеле). |
 
 ### DNS
 

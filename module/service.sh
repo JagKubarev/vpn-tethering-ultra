@@ -651,7 +651,8 @@ DNS_PROBE_TIMEOUT=4    # сек: столько ждём ответ вообще
 QUIC_BLOCK_APPS=""   # пример: "com.avito.android"
 # Клиенты YouTube (системный, Music, ReVanced, Morphe, NewPipe… — список в
 # lib/zapret.sh) — без QUIC, если установлены, вдобавок к QUIC_BLOCK_APPS.
-# Отбой мёртвых серверов и обрыв медленных видеосоединений видят только TCP;
+# Отбой мёртвых серверов и обрыв медленных видеосоединений видят только TCP
+# (и только при ZAPRET_PHONE=1 мимо VPN; через VPN — просто TCP в туннеле);
 # 28.10 с закрытым QUIC YouTube на YOTA грузил бодрее (на глаз, замер не
 # показал: у AdGuard свой REJECT UDP 443 для фильтруемых приложений)
 QUIC_BLOCK_YT=1
@@ -1351,7 +1352,7 @@ log "Daemon started with PID $$"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
 [ "$STATUS_IN_DESCRIPTION" = "1" ] || set_description "$MODULE_DESC_DEFAULT"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
-log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/per_net=$ZAPRET_PER_NET YT_DEAD=$YT_DEAD_FAILFAST YT_SLOW=$YT_SLOW_RETRY WATCHDOG=$ZAPRET_WATCHDOG/${ZAPRET_WATCHDOG_MIN}m META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
+log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}]/yt=$QUIC_BLOCK_YT ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/per_net=$ZAPRET_PER_NET YT_DEAD=$YT_DEAD_FAILFAST YT_SLOW=$YT_SLOW_RETRY WATCHDOG=$ZAPRET_WATCHDOG/${ZAPRET_WATCHDOG_MIN}m META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
 
 disable_hw_offload
 stealth_apply
