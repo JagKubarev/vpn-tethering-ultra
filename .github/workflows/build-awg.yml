@@ -16,6 +16,7 @@ env:
   AWG_GO_TAG: v3.1.20260828
   AWG_TOOLS_TAG: v3.1.20260812
   SOCK_DIR: /data/local/tmp
+  NDK_MAJOR: 30
 
 jobs:
   build:
@@ -43,7 +44,11 @@ jobs:
       - name: awg (Android NDK)
         working-directory: amneziawg-tools/src
         run: |
-          NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          # NDK закреплён по мажору (бинари 3.19 собраны r30): «последний» из образа
+          # молча сменился бы на r31 при обновлении раннера. Нет r30 — падаем.
+          NDK=$(ls -d "$ANDROID_HOME"/ndk/"$NDK_MAJOR".* 2>/dev/null | sort -V | tail -1)
+          [ -n "$NDK" ] || { echo "нет NDK r$NDK_MAJOR в образе: $(ls "$ANDROID_HOME"/ndk)"; exit 1; }
+          grep Pkg.Revision "$NDK/source.properties"
           TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
           for a in aarch64-linux-android:arm64 armv7a-linux-androideabi:arm; do
             t=${a%%:*}; n=${a##*:}
