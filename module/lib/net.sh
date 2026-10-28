@@ -129,6 +129,9 @@ detect_tun_name() {
             # без VPN третий проход брал ncm0 за tun — он выпадал из раздачи
             ncm*|softap*|tether*|bnep*|qmi*|seth_*|sipa_*|tunl*)
                 continue ;;
+            # свой WARP-туннель модуля (lib/warp.sh) — не VPN телефона
+            warp*)
+                continue ;;
             # аплинки и служебные (как в is_excluded_iface): иначе без VPN
             # «VPN ON», а раздача через оператора с реальным IP
             wwan*|r_rmnet*|rev_rmnet*|epdg*|stnet*|aware*|veth*|vlan*|docker*|lxc*|virbr*|macvlan*|ipvlan*)
@@ -493,8 +496,20 @@ read_table_index() {
     return 1
 }
 
+# Лучший из доступных алгоритмов: bbr3 / bbr2 (кастомные ядра) -> bbr -> cubic.
+# Словом, а не grep -q bbr: «bbr» находился и в «bbr3», и модуль ставил v1
+# поверх bbr3 ядра (issue #17, Xiaomi 13 Ultra, GKI 5.15 с CONFIG_DEFAULT_BBR3)
+tcp_cc_best() {
+    case " $(cat /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null) " in
+        *" bbr3 "*) echo bbr3 ;;
+        *" bbr2 "*) echo bbr2 ;;
+        *" bbr "*)  echo bbr ;;
+        *)          echo cubic ;;
+    esac
+}
+
 apply_network_profile() {
-    local profile=$1
+    local profile=$1 cc
 
     # Сравниваем с тем, что РЕАЛЬНО применено. Раньше — с CURRENT_NET_PROFILE,
     # который изначально "FAST": на загрузке (без FORCE) профиль не применялся
@@ -513,27 +528,23 @@ apply_network_profile() {
         # 6.7-7.8. Плохая мобильная связь = потери, то есть "STABLE" резал
         # скорость в разы ровно тогда, когда включался. Оставляем BBR, на
         # плохой связи меняем только число SYN-ретраев.
-        if grep -q bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
-            echo bbr > /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || true
-        fi
+        cc=$(tcp_cc_best)
+        [ "$cc" = cubic ] || echo "$cc" > /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || true
         # ECN=2 (как у Android): принимаем, но сами не просим — на мобильных
         # сетях встречаются узлы, которые режут или портят ECN-пакеты
         echo 2 > /proc/sys/net/ipv4/tcp_ecn 2>/dev/null || true
         echo 1 > /proc/sys/net/ipv4/tcp_ecn_fallback 2>/dev/null || true
         set_sysctl net.ipv4.tcp_syn_retries 5
         set_sysctl net.ipv4.tcp_slow_start_after_idle 0
-        log "STABLE profile: BBR + больше SYN-ретраев"
+        log "STABLE profile: $cc + больше SYN-ретраев"
     else
-        if grep -q bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
-            echo bbr > /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || true
-        else
-            echo cubic > /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || true
-        fi
+        cc=$(tcp_cc_best)
+        echo "$cc" > /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || true
         echo 2 > /proc/sys/net/ipv4/tcp_ecn 2>/dev/null || true
         echo 1 > /proc/sys/net/ipv4/tcp_ecn_fallback 2>/dev/null || true
         set_sysctl net.ipv4.tcp_syn_retries 3
         set_sysctl net.ipv4.tcp_slow_start_after_idle 0
-        log "FAST profile: BBR/cubic + ECN по запросу сервера"
+        log "FAST profile: $cc + ECN по запросу сервера"
     fi
     
     CURRENT_NET_PROFILE=$profile

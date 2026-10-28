@@ -63,7 +63,7 @@ body {
 h1 { font-size: 20px; font-weight: 600; margin: 4px 2px 14px; display: flex; align-items: center; gap: 10px; }
 h1 .logo { width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; flex: none; }
 h1 .logo svg { width: 18px; height: 18px; }
-h1 small { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--muted); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+h1 small { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--muted); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }   /* длинная версия (тестовые сборки) — с многоточием, а не за край экрана */
 h1 small:empty { display: none; }
 h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 24px 4px 8px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
@@ -102,12 +102,14 @@ h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacin
 .btn:active:not(:disabled) { background: var(--input); transform: scale(.98); }
 .btn.primary:active:not(:disabled) { background: var(--accent); filter: brightness(.92); }
 .btn:disabled { opacity: .5; cursor: default; }
-.btn:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn:focus-visible, summary:focus-visible, .chip button:focus-visible, .offnote:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* у вкладок рамки фокуса нет: WebView KernelSU рисовал её и после нажатия пальцем,
    а активная вкладка и так видна по цвету */
 #tabbar button:focus, #tabbar button:focus-visible { outline: none; }
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.btn-row.eq > .btn { flex: 1 1 130px; padding: 0 8px; white-space: nowrap; }   /* две равные в ряд, третья — ниже на всю ширину */
+.btn-row.eq > .btn { flex: 1 1 120px; padding: 0 8px; white-space: nowrap; }   /* две равные в ряд, третья — ниже на всю ширину (120 — две и на 320 px) */
+/* равные кнопки в ряд; не влезают — переносятся и растягиваются на свободное место */
+.btn-row.fill > .btn { flex: 1 1 0; padding: 0 8px; white-space: nowrap; }
 
 .row { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-top: 1px solid var(--line); }
 .row:first-child { border-top: 0; }
@@ -117,6 +119,12 @@ h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacin
 .row.off { opacity: .45; pointer-events: none; }
 .row.col { flex-direction: column; align-items: stretch; }
 .row.col > .head { display: flex; align-items: center; gap: 12px; }   /* заголовок + кнопка справа, итог ниже */
+/* строка с кнопкой справа: на узком экране или при крупном шрифте кнопка уходит
+   под текст, а не сжимает его в столбик по слогу */
+.row.wrap, .row.col > .head { flex-wrap: wrap; }
+.row.wrap > .txt, .row.col > .head > .txt { flex: 1 1 10em; }
+.row.wrap > .btn, .row.col > .head > .btn { margin-left: auto; }
+.row.wrap > .dot { align-self: flex-start; margin-top: calc(.725em - 5px); }   /* точка — у первой строки, а не посередине */
 .badge { font-size: 11px; color: var(--accent); border: 1px solid currentColor; border-radius: 6px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
 
 .sw { position: relative; width: 46px; height: 28px; flex: none; }
@@ -137,11 +145,13 @@ textarea { resize: vertical; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo
 .st-line { margin-top: 6px; overflow-wrap: anywhere; }
 .st-line > .dot { margin-right: 8px; vertical-align: -1px; }
 details.off { opacity: .45; pointer-events: none; }
+/* в тёмной теме серый текст на .45 почти сливался с карточкой */
+@media (prefers-color-scheme: dark) { .row.off, details.off { opacity: .55; } }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 select:disabled { opacity: .6; }
-.inline { display: flex; gap: 8px; align-items: flex-start; }
-.inline > input { min-width: 0; }
-.inline > .btn { margin-top: 10px; white-space: nowrap; flex: none; }
+.inline { display: flex; flex-wrap: wrap; gap: 0 8px; align-items: flex-start; }
+.inline > input { min-width: 0; flex: 1 1 9em; }   /* поле не уже ~9 знаков: иначе кнопка — на строку ниже */
+.inline > .btn { margin-top: 10px; margin-left: auto; white-space: nowrap; flex: none; }
 .err { color: var(--red); font-size: 13px; margin-top: 6px; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
@@ -196,10 +206,16 @@ pre.log { margin: 0; padding: 12px 14px; background: var(--input); font: 12px/1.
 .tab { display: none; }
 .tab.on { display: block; }
 .tabbar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); z-index: 11; touch-action: none; padding-bottom: calc(env(safe-area-inset-bottom) + var(--tabbar-pad)); }
-.tabbar .in { max-width: 640px; margin: 0 auto; display: flex; height: var(--tabbar-h); padding: 0 14px; }
+.tabbar .in { max-width: 640px; margin: 0 auto; display: flex; height: var(--tabbar-h); padding: 0 6px; }
 .tabbar button { flex: 1; min-width: 0; background: none; border: 0; padding: 6px 2px 0; color: var(--muted); font: 500 12px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; cursor: pointer; }
 .tabbar button svg { width: 27px; height: 27px; }
+/* пять вкладок: при крупном системном шрифте подпись не налезает на соседнюю */
+.tabbar button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tabbar button.on { color: var(--accent); font-weight: 600; }
+@media (max-width: 340px) {   /* 320 px: «Главная» и «Сервис» не обрезаются и при шрифте ×1.3 */
+  .tabbar .in { padding: 0 2px; }
+  .tabbar button { font-size: 11px; }
+}
 details.more { margin-top: 18px; }
 details.kvbox { margin: 14px -16px -16px; border-top: 1px solid var(--line); }
 details.kvbox > summary { padding: 12px 16px; min-height: 46px; font-size: 14px; color: var(--muted); }
@@ -240,12 +256,12 @@ details.more > summary { color: var(--muted); }
 <div class="card">
   <div class="row">
     <div class="txt"><div class="t">Обход блокировок</div>
-      <div class="s">Обход DPI для YouTube, Discord и других сайтов без VPN.</div></div>
+      <div class="s">Открывает YouTube, Discord и другие заблокированные сайты без VPN.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_ENABLE"><span></span></label>
   </div>
   <div class="row">
     <div class="txt"><div class="t">Зашифрованный DNS</div>
-      <div class="s">DNS-запросы по DoH: без подмены оператором и с доступом к сервисам с гео-блокировкой.</div></div>
+      <div class="s">DNS по DoH: оператор не подменит ответы, откроются сервисы с блокировкой по стране.</div></div>
     <label class="sw"><input type="checkbox" data-key="DNSPROXY_ENABLE"><span></span></label>
   </div>
   <div class="row">
@@ -255,7 +271,7 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row">
     <div class="txt"><div class="t">Защита от утечек</div>
-      <div class="s">Блокирует раздачу в обход VPN, если VPN отключился.</div></div>
+      <div class="s">В режиме VPN трафик раздачи не уходит мимо туннеля, пока VPN переподключается или сбоит. Если VPN так и не поднимется — см. «Пауза раздачи без VPN».</div></div>
     <label class="sw"><input type="checkbox" data-key="KILL_SWITCH"><span></span></label>
   </div>
 </div>
@@ -263,16 +279,21 @@ details.more > summary { color: var(--muted); }
   <summary>Дополнительно</summary>
   <div class="row" data-dep="KILL_SWITCH">
     <div class="txt"><div class="t">Пауза раздачи без VPN</div>
-      <div class="s">Если VPN не подключён, раздача приостанавливается. Иначе — переключается в режим «напрямую».</div></div>
+      <div class="s">Если VPN не подключён, раздача ждёт его, а не переходит на «напрямую».</div></div>
     <label class="sw"><input type="checkbox" data-key="KILL_SWITCH_STRICT"><span></span></label>
   </div>
   <div class="row" data-dep="TETHER_STEALTH">
     <div class="txt"><div class="t">Только устройства с TTL 64</div>
-      <div class="s">Блокирует пакеты раздачи с TTL, отличным от 64 (например, Windows без настройки).</div></div>
+      <div class="s">Пакеты с другим TTL отбрасываются: Windows без настройки TTL останется без интернета.</div></div>
     <label class="sw"><input type="checkbox" data-key="TETHER_TTL_STRICT"><span></span></label>
   </div>
 </details>
-<div class="hint">Подробные настройки — во вкладках «Обход» и «Сеть», проверки и журналы — в «Инструментах».</div>
+<h2>Устройства в раздаче</h2>
+<div class="card">
+  <div id="clients"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
+</div>
+<div class="hint">Заблокированное устройство остаётся подключённым к точке, но без интернета, и потом может отключиться само. После разблокировки иногда нужно переподключиться. Новый «случайный» MAC блокировку обходит. Трафик — по открытым сейчас соединениям.</div>
+<div class="hint">Остальные настройки — во вкладках «Обход», «Сеть» и «WARP», проверки и журналы — в «Сервисе».</div>
 
 </section>
 
@@ -288,7 +309,7 @@ details.more > summary { color: var(--muted); }
   <div class="row col" id="znetBox">
     <div class="txt"><div class="t">Эта сеть: <span id="znetCur">—</span></div>
       <div class="s" id="znetInfo"></div></div>
-    <select id="znetSel"></select>
+    <select id="znetSel" aria-label="Стратегия для этой сети"></select>
     <div class="s muted" id="znetListHead" style="font-size:13px;margin-top:12px"></div>
     <div id="znetList"></div>
   </div>
@@ -311,7 +332,7 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Автопроверка обхода</div>
-      <div class="s">Раз в <span id="zwdMin">15 минут</span> проверяет доступность заблокированных сайтов (и сразу — при зависании видео) и при сбое восстанавливает или подбирает стратегию. Требует «Стратегия для каждой сети», не работает при включённом VPN.</div></div>
+      <div class="s">Раз в <span id="zwdMin">15 минут</span> (и сразу при зависании видео) проверяет, открываются ли заблокированные сайты; если нет — возвращает рабочую стратегию или подбирает новую. Нужна «Стратегия для каждой сети»; при включённом VPN не работает.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_WATCHDOG"><span></span></label>
   </div>
 </div>
@@ -328,20 +349,20 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row col" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Дополнительные сайты</div>
-      <div class="s">Домены для обхода, по одному в строке; поддомены включаются. Зоны .ru, .su и .рф обрабатываются, только если указаны здесь или во встроенном списке.</div></div>
+      <div class="s">По одному домену в строке, поддомены тоже. Сайты в .ru, .su и .рф обходятся, только если они есть здесь или во встроенном списке.</div></div>
     <textarea id="zlist" rows="4" placeholder="example.com" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
     <div class="err" id="zlistErr" style="display:none"></div>
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Стратегии для отдельных сайтов</div>
-      <div class="s">Раз в <span id="zaltMin">3 часа</span> проверяет сайты из списков и подбирает отдельную стратегию тем, что не открываются основной (до трёх на сеть). Требует «Стратегия для каждой сети», не работает при включённом VPN.</div></div>
+      <div class="s">Раз в <span id="zaltMin">3 часа</span> проверяет сайты из списков и подбирает свою стратегию тем, что не открываются основной (до трёх на сеть). Нужна «Стратегия для каждой сети»; при включённом VPN не работает.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_ALT"><span></span></label>
   </div>
   <details id="zaltBox" data-dep="ZAPRET_ENABLE">
     <summary><span>Сайты с отдельной стратегией: <span id="zaltN">0</span></span></summary>
     <div style="padding:0 16px 13px">
       <div id="zalt"></div>
-      <div class="btn-row mt8">
+      <div class="btn-row fill mt8">
         <button class="btn small" id="zaltRun">Проверить сайты сейчас</button>
         <button class="btn small" id="zaltClear">Сбросить</button>
       </div>
@@ -351,11 +372,11 @@ details.more > summary { color: var(--muted); }
     <summary>Встроенный список и автосписок</summary>
     <div class="row col">
       <div class="txt"><div class="t">Автосписок: <span id="zautoN">0</span></div>
-        <div class="s">Сайты, добавленные после сбоев соединения, с датой и причиной. ✕ — удалить из списка.</div></div>
+        <div class="s">Сайты, добавленные сами после сбоев соединения, — с датой и причиной. ✕ — убрать из списка.</div></div>
       <div id="zauto" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:8px;padding:2px 10px"></div>
       <div class="row" style="padding:10px 0 0;border-top:0">
         <div class="txt"><div class="s">Порог добавления, сбоев за минуту</div></div>
-        <select data-key="ZAPRET_AUTO_FAIL" style="width:auto">
+        <select data-key="ZAPRET_AUTO_FAIL" style="width:auto" aria-label="Порог добавления, сбоев за минуту">
           <option value="2">2</option><option value="3">3</option><option value="4">4</option>
           <option value="5">5</option><option value="7">7</option><option value="10">10</option>
         </select>
@@ -374,20 +395,20 @@ details.more > summary { color: var(--muted); }
   <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Пропуск неотвечающих серверов</div>
-      <div class="s">Видеосерверы YouTube, не отвечающие после соединения, блокируются на 10 минут, и плеер сразу выбирает другой сервер.</div></div>
+      <div class="s">Видеосервер YouTube, который молчит после соединения, отключается на 10 минут — плеер сразу берёт другой.</div></div>
     <label class="sw"><input type="checkbox" data-key="YT_DEAD_FAILFAST"><span></span></label>
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Переподключение медленного видео</div>
-      <div class="s">Медленные видеосоединения YouTube разрываются, чтобы плеер переподключился к быстрому узлу. Приостанавливается, если быстрых узлов нет.</div></div>
+      <div class="s">Медленное видеосоединение YouTube обрывается, и плеер переходит на быстрый сервер. Если быстрых нет — пауза.</div></div>
     <label class="sw"><input type="checkbox" data-key="YT_SLOW_RETRY"><span></span></label>
   </div>
 </div>
 
 <h2>Подбор стратегии</h2>
 <div class="card pad">
-  <div class="s muted" style="font-size:13px;margin-top:2px">Поиск рабочей стратегии для текущей сети по списку сайтов. Выполняется в фоне. При сбое стратегии автопроверка обхода запускает его автоматически.</div>
-  <textarea id="scSites" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+  <div class="s muted" style="font-size:13px;margin-top:2px">Ищет рабочую стратегию для текущей сети по этим сайтам, в фоне. При сбое стратегии автопроверка обхода запускает подбор сама.</div>
+  <textarea id="scSites" rows="3" aria-label="Сайты для подбора" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
   <div class="btn-row eq mt8">
     <button class="btn" id="scQuick">Быстрый · ~2 мин</button>
     <button class="btn" id="scFull">Полный · ~7 мин</button>
@@ -401,17 +422,17 @@ details.more > summary { color: var(--muted); }
   <summary>Дополнительно</summary>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Обход для приложений телефона</div>
-      <div class="s">Применять обход к приложениям телефона, работающим без VPN. VPN-клиенты не затрагиваются.</div></div>
+      <div class="s">Обход и для приложений телефона, чей трафик идёт мимо VPN. VPN-клиенты не затрагиваются.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_PHONE"><span></span></label>
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Без QUIC на раздаче</div>
-      <div class="s">Устройства раздачи переходят с QUIC (HTTP/3) на HTTPS, где работает обход. Действует только для трафика мимо VPN.</div></div>
+      <div class="s">Раздаче закрывается QUIC (HTTP/3): браузеры сразу идут по HTTPS, где работает обход. Только для трафика мимо VPN.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_BLOCK"><span></span></label>
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">YouTube без кэшей оператора</div>
-      <div class="s">Блокирует серверы-кэши оператора, чтобы видео загружалось с серверов Google. Не включать, если оператор выдаёт только кэши.</div></div>
+      <div class="s">Блокирует серверы-кэши оператора, чтобы видео загружалось с серверов Google. Не включайте, если оператор отдаёт видео только с кэшей.</div></div>
     <label class="sw"><input type="checkbox" data-key="YT_GGC_BLOCK"><span></span></label>
   </div>
 </details>
@@ -423,7 +444,7 @@ details.more > summary { color: var(--muted); }
   <div class="offnote" data-offnote="DNSPROXY_ENABLE" role="button">Зашифрованный DNS выключен — включается на Главной.</div>
   <div class="row col" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Сервер DNS (DoH)</div>
-      <div class="s">Wlrus, dagami, not-a-dns и comss также открывают сервисы с гео-блокировкой (ChatGPT, Gemini, Claude). При недоступности сервера — «Запасные DoH-серверы» по порядку (в «Дополнительно»).</div></div>
+      <div class="s">wlrus, dagami, not-a-dns и comss открывают и сервисы с блокировкой по стране (ChatGPT, Gemini, Claude). Если сервер не отвечает — по порядку «Запасные DoH-серверы» из «Дополнительно».</div></div>
     <select id="upSelect">
       <option value="https://dns.wlrus.cfd/dns-query">wlrus.cfd</option>
       <option value="https://dns.dagami.ru/dns-query">dagami.ru</option>
@@ -444,20 +465,20 @@ details.more > summary { color: var(--muted); }
     <label class="sw"><input type="checkbox" data-key="DNS_PHONE"><span></span></label>
   </div>
   <div class="row" data-dep="DNSPROXY_ENABLE">
-    <div class="txt"><div class="t">Для раздачи без VPN</div>
-      <div class="s">Зашифрованный DNS для устройств раздачи, когда VPN выключен.</div></div>
+    <div class="txt"><div class="t">Для раздачи напрямую</div>
+      <div class="s">Зашифрованный DNS для устройств раздачи в режиме «напрямую».</div></div>
     <label class="sw"><input type="checkbox" id="directDoh"><span></span></label>
   </div>
   <div class="row" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Instagram и Facebook без VPN</div>
-      <div class="s">Адреса Instagram, Facebook и Threads запрашиваются с европейским ECS, чтобы открывать их без VPN вместе с обходом блокировок.</div></div>
+      <div class="s">Instagram, Facebook и Threads получают европейские адреса (ECS) и открываются без VPN вместе с обходом блокировок.</div></div>
     <label class="sw"><input type="checkbox" data-key="DNS_META_EU"><span></span></label>
   </div>
 </div>
 
 <h2>Приложения без QUIC</h2>
 <div class="card pad">
-  <div class="muted" style="font-size:13px">Для выбранных приложений блокируется QUIC (UDP 443), трафик идёт по HTTPS. Помогает, если оператор ограничивает QUIC.</div>
+  <div class="muted" style="font-size:13px">Выбранным приложениям закрывается QUIC (UDP 443) — они идут по HTTPS. Помогает, если оператор режет QUIC.</div>
   <div class="chips" id="quicChips"></div>
   <div class="mt8"><button class="btn small" id="quicAdd">Добавить приложение</button></div>
 </div>
@@ -475,7 +496,7 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row col">
     <div class="txt"><div class="t">Запасные DoH-серверы</div>
-      <div class="s">Используются, если основной сервер не отвечает. Google и Cloudflare сюда лучше не добавлять: они не обходят гео-блок, и ИИ-сервисы напишут «недоступно в вашем регионе».</div></div>
+      <div class="s">По порядку, если основной не отвечает. Google и Cloudflare сюда не добавляйте: они не обходят блокировку по стране, и ИИ-сервисы напишут «недоступно в вашем регионе».</div></div>
     <input type="text" data-key="DNS_FALLBACKS" autocapitalize="off" autocorrect="off" spellcheck="false">
   </div>
   <div class="row col">
@@ -485,17 +506,17 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row col">
     <div class="txt"><div class="t">Начальный DNS (bootstrap)</div>
-      <div class="s">Для определения адреса DoH-сервера (IP:порт).</div></div>
+      <div class="s">Чтобы узнать адрес DoH-сервера (IP:порт).</div></div>
     <input type="text" data-key="DNS_BOOTSTRAP" autocapitalize="off" autocorrect="off" spellcheck="false">
   </div>
   <div class="row col">
     <div class="txt"><div class="t">Интервал проверки DNS, с</div>
-      <div class="s">Интервал проверки сервера (2–600).</div></div>
+      <div class="s">Как часто проверять DoH-сервер, 2–600 с.</div></div>
     <input type="number" min="2" max="600" data-key="DNS_HEALTH_INTERVAL">
   </div>
   <div class="row col">
     <div class="txt"><div class="t">Интервал проверки восстановления, с</div>
-      <div class="s">Интервал проверки восстановления после сбоя (2–600).</div></div>
+      <div class="s">Как часто проверять после сбоя, 2–600 с.</div></div>
     <input type="number" min="2" max="600" data-key="DNS_HEALTH_RECOVER">
   </div>
   <div class="row col">
@@ -510,7 +531,7 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row">
     <div class="txt"><div class="t">Адаптация TCP к качеству связи</div>
-      <div class="s">Раз в ~20 секунд проверяет качество связи и при потерях адаптирует параметры TCP.</div></div>
+      <div class="s">Раз в ~20 секунд проверяет связь и при потерях или большой задержке перенастраивает TCP.</div></div>
     <label class="sw"><input type="checkbox" data-key="NET_PROFILE_ADAPTIVE"><span></span></label>
   </div>
   <div class="row">
@@ -522,13 +543,74 @@ details.more > summary { color: var(--muted); }
 </details>
 </section>
 
+<section class="tab" data-tab="warp">
+<h2>WARP</h2>
+<div class="card">
+  <div class="row">
+    <div class="txt"><div class="t">Туннель WARP</div>
+      <div class="s">Бесплатный туннель Cloudflare (AmneziaWG) для того, что не открывает обход: Telegram, сайты с блокировкой по IP или по стране. Работает, когда VPN на телефоне выключен.</div></div>
+    <label class="sw"><input type="checkbox" data-key="WARP_ENABLE"><span></span></label>
+  </div>
+  <div class="row" data-dep="WARP_ENABLE" style="gap:10px"><span class="dot" id="warpDot"></span>
+    <div class="txt"><div class="t" id="warpTitle">—</div><div class="s" id="warpSub"></div></div></div>
+</div>
+
+<h2>Что идёт через WARP</h2>
+<div class="card">
+  <div class="row" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Telegram</div>
+      <div class="s">Без VPN Telegram закрыт по IP. Клиенты Telegram на телефоне (официальный, Telegram X, Nekogram и др.) при включённом «Для самого телефона» идут через WARP целиком — вместе с запасными узлами, на которые Telegram переходит при сбоях; устройства раздачи — по сетям Telegram.</div></div>
+    <label class="sw"><input type="checkbox" data-key="WARP_TELEGRAM"><span></span></label>
+  </div>
+  <div class="row" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Google</div>
+      <div class="s">Поиск, YouTube, Play — если оператор периодически режет Google. Скорость — как у WARP, в замерах 30–40 Мбит/с.</div></div>
+    <label class="sw"><input type="checkbox" data-key="WARP_GOOGLE"><span></span></label>
+  </div>
+  <div class="row col" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Сайты</div>
+      <div class="s">Домены через пробел. Сайты на общих CDN (Cloudflare, Akamai, Fastly, CloudFront) так не направить: на тех же адресах тысячи чужих сайтов — для них обход или VPN.</div></div>
+    <input type="text" data-key="WARP_DOMAINS" placeholder="example.com example.org" autocapitalize="off" autocorrect="off" spellcheck="false">
+  </div>
+  <div class="row col" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Приложения целиком</div>
+      <div class="s">Весь трафик выбранных приложений телефона; пока WARP не поднят — напрямую. Если приложение фильтрует AdGuard, его TCP (в том числе HTTPS) открывает AdGuard от своего имени, и оно идёт мимо WARP (проверено), а UDP и QUIC — через WARP. Чтобы шло целиком, исключите приложение в AdGuard. Клиенты Telegram добавлять не нужно — их берёт переключатель «Telegram».</div></div>
+    <div class="chips" id="warpChips"></div>
+    <div class="mt8"><button class="btn small" id="warpAdd">Добавить приложение</button></div>
+  </div>
+  <div class="row" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Для самого телефона</div>
+      <div class="s">Telegram, Google и сайты идут через WARP и у приложений телефона, а не только у раздачи.</div></div>
+    <label class="sw"><input type="checkbox" data-key="WARP_PHONE"><span></span></label>
+  </div>
+</div>
+
+<h2>Конфиги</h2>
+<div class="card">
+  <div id="warpList"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
+  <div class="row btn-row eq">
+    <button class="btn small" id="warpGen">Создать</button>
+    <button class="btn small" id="warpImp">Импорт файла</button>
+    <button class="btn small" id="warpPaste" aria-expanded="false" aria-controls="warpPasteBox">Вставить текст</button>
+    <button class="btn small" id="warpSaveAll">Сохранить все в zip</button>
+  </div>
+  <div class="row col" id="warpPasteBox" style="display:none">
+    <textarea id="warpPasteText" rows="6" aria-label="Текст конфига" placeholder="[Interface]&#10;PrivateKey = …" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+    <div class="inline"><input type="text" id="warpPasteName" placeholder="имя латиницей, необязательно" aria-label="Имя конфига, латиницей, необязательно" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="warpPasteOk">Добавить</button></div>
+  </div>
+  <input type="file" id="warpFile" accept=".conf,.zip,text/plain,application/zip" multiple style="display:none">
+</div>
+<div class="hint">«Создать» регистрирует новый конфиг в Cloudflare прямо с телефона. Импорт — файлы .conf из AmneziaVPN или WireGuard и zip-экспорт AmneziaVPN. «Основной» пробуется первым; если конфиг перестал отвечать, модуль сам переходит на следующий.</div>
+<div class="hint">«Сохранить» кладёт конфиг в «Загрузки», «Сохранить все в zip» — все сразу, как экспорт AmneziaVPN. В файле закрытый ключ: его видят приложения с доступом к памяти — не публикуйте и удалите после переноса.</div>
+</section>
+
 <section class="tab" data-tab="tools">
 <h2>Диагностика сети</h2>
 <div class="card">
   <div class="row col">
     <div class="head">
       <div class="txt"><div class="t">Проверка оператора</div>
-        <div class="s">Проверка подмены DNS, обрыва соединений, белых списков и доступности Telegram. Около минуты.</div></div>
+        <div class="s">Подменяет ли оператор DNS, рвёт ли соединения, включил ли белые списки, открыт ли Telegram. Около минуты.</div></div>
       <button class="btn small" id="diagBtn">Проверить</button>
     </div>
     <div class="kv" id="diagOut" style="display:none"></div>
@@ -540,7 +622,7 @@ details.more > summary { color: var(--muted); }
 <div class="card pad">
   <div class="s muted" style="font-size:13px;margin-top:2px">Доступность сайта мимо VPN — без обхода и с текущей стратегией.</div>
   <div class="inline">
-    <input type="text" id="stHost" enterkeyhint="go" placeholder="youtube.com" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <input type="text" id="stHost" enterkeyhint="go" aria-label="Адрес сайта" placeholder="youtube.com" autocapitalize="off" autocorrect="off" spellcheck="false">
     <button class="btn" id="stBtn">Проверить</button>
   </div>
   <button class="btn" id="ytBtn" style="margin-top:10px">Скорость YouTube</button>
@@ -550,12 +632,12 @@ details.more > summary { color: var(--muted); }
 
 <h2>Проверки</h2>
 <div class="card">
-  <div class="row">
-    <div class="txt"><div class="t">Проверка DNS</div><div class="s" id="dohRes">Проверка работы DNS через dnsproxy.</div></div>
+  <div class="row wrap">
+    <div class="txt"><div class="t">Проверка DNS</div><div class="s" id="dohRes">Отвечает ли зашифрованный DNS (dnsproxy).</div></div>
     <button class="btn small" id="dohBtn">Проверить</button>
   </div>
-  <div class="row">
-    <div class="txt"><div class="t">Сбросить кэш DNS</div><div class="s" id="dnsFlushRes">Если сайт пишет «недоступно в вашем регионе», хотя должен открываться: dnsproxy забудет старые адреса. На ноутбуке после этого — ipconfig /flushdns или переподключение к точке.</div></div>
+  <div class="row wrap">
+    <div class="txt"><div class="t">Сбросить кэш DNS</div><div class="s" id="dnsFlushRes">Если сайт пишет «недоступно в вашем регионе», хотя должен открываться. На ноутбуке затем — ipconfig /flushdns или переподключение к точке.</div></div>
     <button class="btn small" id="dnsFlushBtn">Сбросить</button>
   </div>
   <div class="row col">
@@ -569,9 +651,9 @@ details.more > summary { color: var(--muted); }
 
 <h2>Журналы</h2>
 <div class="card">
-  <div class="row">
+  <div class="row wrap">
     <div class="txt"><div class="t">Отправить логи</div>
-      <div class="s" id="logSendRes">Журналы и настройки одним файлом в «Загрузки» с отправкой через «Поделиться». Файл содержит названия сетей Wi-Fi и локальные адреса.</div></div>
+      <div class="s" id="logSendRes">Журналы и настройки одним файлом в «Загрузки» и сразу в «Поделиться». В файле есть названия сетей Wi-Fi и локальные адреса.</div></div>
     <button class="btn small" id="logSend">Отправить</button>
   </div>
   <details id="zevBox">
@@ -580,7 +662,7 @@ details.more > summary { color: var(--muted); }
   </details>
   <details id="logBox">
     <summary>Журнал модуля</summary>
-    <div class="row btn-row" style="border-top:0;padding-top:0">
+    <div class="row btn-row fill" style="border-top:0;padding-top:0">
       <button class="btn small" id="logRefresh">Обновить</button>
       <button class="btn small" id="logCopy">Скопировать</button>
       <button class="btn small" id="logPrev">Прошлый запуск</button>
@@ -594,7 +676,8 @@ details.more > summary { color: var(--muted); }
   <button data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg><span>Главная</span></button>
   <button data-tab="bypass"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11l-3-3"/><path d="M20 17H9l3 3"/></svg><span>Обход</span></button>
   <button data-tab="net"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg><span>Сеть</span></button>
-  <button data-tab="tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>Инструменты</span></button>
+  <button data-tab="warp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18h10.5a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.6 9.1 4.5 4.5 0 0 0 7 18z"/></svg><span>WARP</span></button>
+  <button data-tab="tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>Сервис</span></button>
 </div></nav>
 
 <div class="applybar" id="applybar"><div class="in">
@@ -604,17 +687,17 @@ details.more > summary { color: var(--muted); }
 </div></div>
 
 <div class="sheet-bg" id="sheetBg"></div>
-<div class="sheet" id="sheet">
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
   <div class="head">
     <div style="display:flex;justify-content:space-between;align-items:center">
-      <b>Выберите приложения</b><button class="btn small" id="sheetDone">Готово</button>
+      <b id="sheetTitle">Выберите приложения</b><button class="btn small" id="sheetDone">Готово</button>
     </div>
-    <input type="search" id="appSearch" placeholder="Поиск">
+    <input type="search" id="appSearch" placeholder="Поиск" aria-label="Поиск приложения">
   </div>
   <div class="list" id="appList"></div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
 'use strict';
@@ -708,12 +791,12 @@ function renderStatus(s) {
   }
   if (s.daemon !== '1') {
     dot.className = 'dot big red'; title.textContent = 'Модуль не запущен';
-    sub.textContent = 'Перезагрузите телефон. Если не поможет — отправьте логи (Инструменты).';
+    sub.textContent = 'Перезагрузите телефон. Если не поможет — отправьте логи (вкладка «Сервис»).';
     $('#kv').innerHTML = ''; btn.disabled = true; btn.textContent = 'Переключить';
     return;
   }
   btn.disabled = false;
-  btn.textContent = s.target === 'vpn' ? 'Переключить на прямую раздачу' : 'Переключить на VPN';
+  btn.textContent = s.target === 'vpn' ? 'Раздавать напрямую' : 'Раздавать через VPN';
 
   if (!names) {
     dot.className = 'dot big'; title.textContent = 'Раздача выключена';
@@ -723,14 +806,14 @@ function renderStatus(s) {
     sub.textContent = 'Устройства выходят в интернет только через VPN.';
   } else if (s.mode === 'blocked') {
     dot.className = 'dot big red'; title.textContent = 'VPN не подключён';
-    sub.textContent = 'Раздача приостановлена, чтобы не раскрыть реальный IP. После подключения VPN она возобновится автоматически.';
+    sub.textContent = 'Раздача приостановлена, чтобы не раскрыть реальный IP. Возобновится сама, когда VPN подключится.';
   } else {
     dot.className = 'dot big blue'; title.textContent = 'Раздача напрямую';
     sub.textContent = 'Без VPN, через оператора.' + (s.target === 'vpn' ? ' Выбран режим VPN: раздача перейдёт на VPN, когда он подключится.' : '');
   }
 
   let h = '';
-  if (names) h += kvRow('Раздаю на', esc(names));
+  if (names) h += kvRow('Раздача', esc(names));
   h += kvRow('VPN', s.vpn_up === '1' ? 'подключён' : 'не подключён', s.vpn_up === '1' ? 'green' : '');
 
   // DNS раздачи
@@ -758,15 +841,16 @@ function renderStatus(s) {
     h += kvRow('Скрытие раздачи', f ? (s.stealth_strict === '1' ? 'отбито пакетов с чужим TTL: ' + f : 'чужой TTL у устройства раздачи (' + f + ' пак.) — установите на нём TTL 64') : 'включено, чужого TTL нет', f ? 'amber' : 'green');
   }
   if (s.stealth_rivals) h += kvRow('Лишний модуль', esc(s.stealth_rivals) + (s.stealth === 'on'
-      ? ' тоже меняет TTL/раздачу и мешает — отключи или удали его'
+      ? ' тоже меняет TTL/раздачу и мешает — отключите или удалите его'
       : ' меняет TTL/раздачу (это умеет и переключатель «Скрытие раздачи»)'), s.stealth === 'on' ? 'amber' : '');
   else if (s.stealth === 'on' && +s.stealth_rival_rules > 0) h += kvRow('Чужие правила TTL', esc(s.stealth_rival_rules) + ' — их ставит другой модуль или приложение', 'amber');
   if (s.mode === 'vpn') {
-    h += kvRow('Защита от утечек', s.kill_switch === '1' ? 'включён' : 'выключен', s.kill_switch === '1' ? 'green' : 'amber');
+    h += kvRow('Защита от утечек', s.kill_switch === '1' ? 'включена' : 'выключена', s.kill_switch === '1' ? 'green' : 'amber');
     if (s.mtu && +s.mss > 0) h += kvRow('MTU / MSS', esc(s.mtu + ' / ' + s.mss));
   }
   if (s.zapret === 'on') {
     let zt = 'включён';
+    if (/cb=0/.test(s.zapret_caps || '')) zt += ' · упрощённый режим (ядро без connbytes)';
     if (s.zapret_strategy) zt += ' · ' + esc(stratName(s.zapret_strategy, s.zapret_eff_args)) +
       (s.zapret_src === 'net' ? ' (своя для «' + esc(s.net_label) + '»)' : s.zapret_src === 'label' ? ' (как у «' + esc(s.net_label) + '», код сети ' + esc(s.net_key) + ')' : ' (общая)');
     if (s.zapret_eff_yt) zt += ' · YouTube: ' + esc(stratLabel(s.zapret_eff_yt));
@@ -783,17 +867,22 @@ function renderStatus(s) {
     }
     if (s.zwd === '1') {
       const w = (s.zwd_last || '').split('|'), t = w[1] || '';
-      h += kvRow('Автопроверка', s.zwd_last ? esc(w[0] + ' · ' + t) : 'ещё не проверял',
+      h += kvRow('Автопроверка', s.zwd_last ? esc(w[0] + ' · ' + t) : 'проверок ещё не было',
         /^(работает|починил|ничего)/.test(t) ? 'green' : t ? 'red' : '');
     }
   }
   else if (s.zapret === 'fail') h += kvRow('Обход блокировок', 'nfqws не запустился, повтор через минуту', 'red');
+  else if (s.zapret === 'nokernel') h += kvRow('Обход блокировок', 'ядро телефона не поддерживает NFQUEUE — обход невозможен, нужен VPN', 'red');
+  else if (s.zapret === 'wl') h += kvRow('Обход блокировок', 'пауза: похоже, белые списки оператора — обход не поможет, нужен VPN', 'amber');
   if (s.dnsproxy_enable === '1' && s.meta_eu === '1') {
     if (s.meta_eu_on === '1') h += kvRow('Instagram и Facebook', 'как из Европы (ECS ' + esc(s.meta_ecs) + ')', 'green');
     else if (s.vpn_up === '1') h += kvRow('Instagram и Facebook', 'через VPN, Европа не нужна', '');
     else h += kvRow('Instagram и Facebook', 'обычный: DoH без VPN сейчас не используется', '');
   }
   if (s.zapret_per_net === '1' && s.net_key && s.net_key !== ZN.cur && !znetLoading) loadZnet();
+  const w = warpState(s);
+  renderWarpState(w);
+  if (s.warp && s.warp !== 'disabled') h += kvRow('WARP', esc(w.t + (w.s ? ' · ' + w.s : '')), w.d);
   if (s.quic_uids) h += kvRow('Без QUIC', esc(String(s.quic_uids.split(' ').length)) + ' прил.');
   const bad = (s.conf_note || '').split(' ').filter((x) => x[0] === '!' || x[0] === '?');
   if (bad.length) h += kvRow('Конфиг', 'пропущено: ' + esc(bad.join(', ')), 'amber');
@@ -819,7 +908,8 @@ const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAM
   'DNS_BOOTSTRAP','DNS_HEALTH_INTERVAL','DNS_HEALTH_RECOVER','KILL_SWITCH','KILL_SWITCH_STRICT','NET_PROFILE_ADAPTIVE',
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK',
   'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK','YT_DEAD_FAILFAST','ZAPRET_WATCHDOG','ZAPRET_WATCHDOG_MIN',
-  'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','YT_SLOW_RETRY','ZAPRET_AUTO_FAIL'];   // = CONF_KEYS в service.sh
+  'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','YT_SLOW_RETRY','ZAPRET_AUTO_FAIL',
+  'WARP_ENABLE','WARP_CONF','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE'];   // = CONF_KEYS в service.sh
 // интервал в минутах человеческим языком: 15 -> «15 минут», 180 -> «3 часа»
 function fmtMin(v, def) {
   const m = +v || def;
@@ -902,16 +992,57 @@ $$('[data-key]').forEach((el) => {
   });
 });
 $('#zlist').addEventListener('input', () => { $('#zlistErr').style.display = 'none'; renderBar(); });
+// для диктора: у переключателя и поля в строке своей подписи нет — берём заголовок строки
+$$('.row input, .row select, .row textarea').forEach((el) => {
+  const t = el.closest('.row').querySelector('.t');
+  if (t && el.type !== 'file' && !el.hasAttribute('aria-label')) el.setAttribute('aria-label', t.textContent.trim());
+});
+
+// ---------------------------------------------------------------- устройства в раздаче (3.18)
+// "ip|mac|состояние|имя|соединений|байт|1=заблокировано" (webctl clients)
+const fmtBytes = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + ' МБ' : b >= 1024 ? Math.round(b / 1024) + ' КБ' : b + ' Б';
+function clientRow(f) {
+  const [ip, mac, st, name, c, by, bl] = f, blocked = bl === '1';
+  const nm = name && name !== 'null' ? name : 'Без имени';
+  const on = st === 'REACHABLE' || st === 'DELAY' || st === 'PROBE';
+  let info = (ip ? ip + ' · ' : '') + mac;
+  if (blocked) info += ' · заблокировано';
+  else if (st === '-') info += ' · не подключено';
+  else info += ' · ' + (on ? 'в сети' : 'был недавно') + (+c ? ' · соединений: ' + c + (+by ? ' · ' + fmtBytes(+by) : '') : '');
+  return '<div class="row wrap" style="gap:8px"><span class="dot ' + (blocked ? 'red' : on ? 'green' : '') + '"></span>' +
+    '<div class="txt"><div class="t">' + esc(nm) + '</div><div class="s">' + esc(info) + '</div></div>' +
+    '<button class="btn small" data-cmac="' + esc(mac) + '" data-cname="' + esc(nm) + '" data-cbl="' + (blocked ? '1' : '0') + '">' +
+    (blocked ? 'Разблокировать' : 'Блок') + '</button></div>';
+}
+async function loadClients() {
+  const r = await ctl('clients');
+  const rows = (r.out || '').split('\n').filter((l) => l.split('|').length >= 7).map((l) => l.split('|'));
+  $('#clients').innerHTML = rows.length ? rows.map(clientRow).join('')
+    : '<div class="row"><div class="txt"><div class="s">Сейчас никто не подключён к раздаче.</div></div></div>';
+}
+$('#clients').addEventListener('click', async (e) => {
+  const b = e.target.closest && e.target.closest('button[data-cmac]'); if (!b) return;
+  const unblock = b.dataset.cbl === '1';
+  b.disabled = true;
+  const r = await ctl((unblock ? 'client-unblock ' : 'client-block ') + q(b.dataset.cmac) + ' ' + q(b.dataset.cname));
+  toast(isOk(r) ? (unblock ? 'Разблокировано: ' : 'Заблокировано: ') + b.dataset.cname : errText(r, 'Не получилось'));
+  // демон применяет за ~2 с
+  setTimeout(loadClients, 2500);
+});
 
 // ---------------------------------------------------------------- вкладки (3.10)
 function showTab(t) {
   if (!$('.tab[data-tab="' + t + '"]')) t = 'home';
   $$('.tab').forEach((el) => el.classList.toggle('on', el.dataset.tab === t));
-  $$('#tabbar button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
+  $$('#tabbar button').forEach((b) => { b.classList.toggle('on', b.dataset.tab === t); b.setAttribute('aria-current', b.dataset.tab === t ? 'page' : 'false'); });
   try { localStorage.setItem('vtTab', t); } catch (e) { /* без хранилища — просто не запоминаем */ }
 }
 $$('#tabbar button').forEach((b) => b.addEventListener('click', () => { showTab(b.dataset.tab); document.body.scrollTo(0, 0); }));
-$$('[data-offnote]').forEach((n) => n.addEventListener('click', () => { showTab('home'); document.body.scrollTo(0, 0); }));
+$$('[data-offnote]').forEach((n) => {
+  n.tabIndex = 0;
+  n.addEventListener('click', () => { showTab('home'); document.body.scrollTo(0, 0); });
+  n.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); n.click(); } });
+});
 let _tab0 = 'home';
 try { _tab0 = localStorage.getItem('vtTab') || 'home'; } catch (e) { /* по умолчанию — Главная */ }
 showTab(_tab0);
@@ -933,20 +1064,27 @@ $('#upCustom').addEventListener('input', () => setCur('DNS_UPSTREAMS', upValue()
 // ---------------------------------------------------------------- QUIC: приложения
 let APPS = null;   // [{pkg, label}]
 const label = (pkg) => { const a = (APPS || []).find((x) => x.pkg === pkg); return a ? a.label : pkg; };
-const quicList = () => (CUR.QUIC_BLOCK_APPS || '').split(/\s+/).filter(Boolean);
+// один выбор приложений на две настройки: QUIC_BLOCK_APPS и WARP_APPS
+let SHEET_KEY = 'QUIC_BLOCK_APPS';
+const appKeyList = (k) => (CUR[k] || '').split(/\s+/).filter(Boolean);
+const quicList = () => appKeyList(SHEET_KEY);
+const CHIPS = { QUIC_BLOCK_APPS: ['#quicChips', 'Нет приложений — QUIC ни у кого не закрыт.'],
+  WARP_APPS: ['#warpChips', 'Нет — только Telegram, Google и сайты выше.'] };
 
 function renderChips() {
-  const list = quicList();
-  $('#quicChips').innerHTML = list.length
-    ? list.map((p) => '<span class="chip"><span>' + esc(label(p)) + '</span><button data-rm="' + esc(p) + '" aria-label="Убрать">×</button></span>').join('')
-    : '<div class="empty">Нет приложений — QUIC ни у кого не закрыт.</div>';
+  Object.keys(CHIPS).forEach((k) => {
+    const list = appKeyList(k);
+    $(CHIPS[k][0]).innerHTML = list.length
+      ? list.map((p) => '<span class="chip"><span>' + esc(label(p)) + '</span><button data-rm="' + esc(p) + '" data-rk="' + k + '" aria-label="Убрать ' + esc(label(p)) + '">×</button></span>').join('')
+      : '<div class="empty">' + CHIPS[k][1] + '</div>';
+  });
 }
-$('#quicChips').addEventListener('click', (e) => {
-  const p = e.target.dataset && e.target.dataset.rm;
-  if (!p) return;
-  setCur('QUIC_BLOCK_APPS', quicList().filter((x) => x !== p).join(' '));
+['#quicChips', '#warpChips'].forEach((id) => $(id).addEventListener('click', (e) => {
+  const p = e.target.dataset && e.target.dataset.rm, k = e.target.dataset && e.target.dataset.rk;
+  if (!p || !k) return;
+  setCur(k, appKeyList(k).filter((x) => x !== p).join(' '));
   renderChips();
-});
+}));
 
 async function loadApps() {
   if (APPS) return APPS;
@@ -981,14 +1119,17 @@ function renderAppList() {
 $('#appList').addEventListener('click', (e) => {
   const row = e.target.closest('.app'); if (!row) return;
   const p = row.dataset.pkg, list = quicList();
-  setCur('QUIC_BLOCK_APPS', (list.includes(p) ? list.filter((x) => x !== p) : list.concat(p)).join(' '));
+  setCur(SHEET_KEY, (list.includes(p) ? list.filter((x) => x !== p) : list.concat(p)).join(' '));
   row.classList.toggle('sel');
   renderChips();
 });
 function openSheet(on) {
   $('#sheet').classList.toggle('show', on); $('#sheetBg').classList.toggle('show', on);
 }
-$('#quicAdd').addEventListener('click', async () => {
+$('#warpAdd').addEventListener('click', () => { SHEET_KEY = 'WARP_APPS'; $('#quicAdd').click(); });
+$('#quicAdd').addEventListener('click', async (e) => {
+  if (e.isTrusted) SHEET_KEY = 'QUIC_BLOCK_APPS';
+  $('#sheetTitle').textContent = SHEET_KEY === 'WARP_APPS' ? 'Приложения через WARP' : 'Приложения без QUIC';
   $('#appSearch').value = ''; $('#appList').innerHTML = '<div class="empty" style="padding:0 16px">Загружаю список…</div>';
   openSheet(true);
   await loadApps(); renderAppList(); renderChips();
@@ -1004,9 +1145,15 @@ function validate() {
   $('#upErr').style.display = bad ? '' : 'none';
   $('#upErr').textContent = bad ? 'Нужен адрес вида https://сервер/dns-query' : '';
   if (bad) { toast('Сервер DNS: нужен адрес вида https://сервер/dns-query'); return false; }
+  // домены WARP: регистр, запятые, http(s):// и пути — к виду «a.com b.org»
+  const wd = (CUR.WARP_DOMAINS || '').toLowerCase().split(/[\s,;]+/).filter(Boolean)
+    .map((d) => d.replace(/^https?:\/\//, '').replace(/[/?#].*$/, '').replace(/^\.+|\.+$/g, ''));
+  const wbad = wd.find((d) => !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d));
+  if (wbad) { toast('WARP, сайты: «' + wbad + '» — не домен'); return false; }
+  CUR.WARP_DOMAINS = Array.from(new Set(wd)).join(' ');
   const ecs = CUR.DNS_META_ECS || '';
   if (!/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(ecs) || ecs.split('.').some((o) => +o > 255)) {
-    toast('Meta: адрес «откуда спрашиваем» — нужен IPv4, например 185.15.56.0'); return false;
+    toast('Meta, регион запроса: нужен IPv4-адрес, например 185.15.56.0'); return false;
   }
   return true;
 }
@@ -1018,6 +1165,12 @@ async function waitAck(token, sec) {
     if (r.out.trim() === token) return true;
   }
   return false;
+}
+
+// ошибка сохранения — с названием настройки со страницы, а не с ключом конфига
+function keyTitle(k) {
+  const el = $('[data-key="' + k + '"]'), t = el && el.closest('.row') && el.closest('.row').querySelector('.t');
+  return t ? t.textContent : k;
 }
 
 let busy = false;
@@ -1035,15 +1188,15 @@ $('#applyBtn').addEventListener('click', async () => {
     for (const k of changedKeys()) {
       const v = CUR[k] || '';
       const r = v === (DEF[k] || '') ? await ctl('unset ' + k) : await ctl('set ' + k + ' ' + q(v));
-      if (!isOk(r)) { toast(k + ': ' + errText(r, 'ошибка')); return; }
+      if (!isOk(r)) { toast(keyTitle(k) + ': ' + errText(r, 'ошибка')); return; }
     }
     $('#applyMsg').textContent = 'Применяю…';
     const r = await ctl('apply');
     const m = /^OK (\S+)/.exec(r.out.trim());
-    if (!m) { toast('Сохранено. Применится после перезагрузки (' + errText(r, 'демон не ответил') + ')'); }
+    if (!m) { toast('Сохранено, применится после перезагрузки (' + errText(r, 'модуль не ответил') + ')'); }
     else if (await waitAck(m[1], 25)) toast('Настройки применены');
     else toast('Сохранено, но модуль не ответил за 25 с');
-    await loadConf(); await loadZ(); await loadStatus();
+    await loadConf(); await loadZ(); await loadStatus(); loadWarp();
   } finally {
     busy = false; $('#applyBtn').disabled = false; renderBar();
   }
@@ -1051,11 +1204,11 @@ $('#applyBtn').addEventListener('click', async () => {
 $('#revertBtn').addEventListener('click', () => {
   KEYS.forEach((k) => { CUR[k] = saved(k); }); $('#zlist').value = ZL_SAVED;
   $('#upErr').style.display = 'none'; $('#zlistErr').style.display = 'none';
-  renderForm();
+  renderForm(); loadWarp();
 });
 $('#resetAll').addEventListener('click', () => {
   if (!confirm('Вернуть все настройки к значениям по умолчанию?')) return;
-  KEYS.forEach((k) => { CUR[k] = DEF[k] || ''; }); renderForm();
+  KEYS.forEach((k) => { CUR[k] = DEF[k] || ''; }); renderForm(); loadWarp();
 });
 
 // ---------------------------------------------------------------- переключение
@@ -1086,6 +1239,152 @@ $('#dnsFlushBtn').addEventListener('click', async () => {
     if (/^OK/.test(r)) el.innerHTML = '<span class="dot green"></span> ' + esc(r.replace(/^OK /, ''));
     else el.innerHTML = '<span class="dot red"></span> ' + esc(errText({ out: r }, 'не получилось'));
   } finally { btn.disabled = false; }
+});
+
+// ---------------------------------------------------------------- WARP
+// статус демона -> {d: цвет, t: заголовок, s: пояснение}
+function warpState(s) {
+  const c = s.warp_conf ? ' · ' + s.warp_conf : '';
+  switch (s.warp) {
+    case 'up': return { d: 'green', t: 'Работает' + c, s: '' };
+    case 'starting': return { d: 'amber', t: 'Подключается' + c, s: '' };
+    case 'fail': return s.warp_note === 'нет конфигов'
+      ? { d: 'red', t: 'Нет конфигов', s: 'Создайте или импортируйте конфиг ниже' }
+      : s.warp_note === 'amneziawg-go не запустился'
+      ? { d: 'red', t: 'AmneziaWG не запустился', s: 'Повтор через минуту. Если так постоянно — отправьте логи (вкладка «Сервис»)' }
+      : { d: 'red', t: 'Ни один конфиг не поднялся', s: 'Повтор через 5 минут. Если так постоянно — создайте новый или импортируйте конфиг с другим Endpoint' };
+    case 'off':
+      if (s.vpn_up === '1' || s.warp_note === 'поднят VPN') return { d: '', t: 'Пауза: включён VPN', s: 'Без VPN включится сам' };
+      if (s.warp_note === 'нет сети') return { d: '', t: 'Ждёт сеть', s: '' };
+      if (s.warp_note === 'пауза kill-switch') return { d: '', t: 'Пауза: раздача остановлена без VPN', s: 'Защита от утечек: в режиме VPN WARP раздаче не открывается' };
+      if (s.warp_note === 'нет бинарей') return { d: 'red', t: 'Нет файлов AmneziaWG', s: 'Переустановите модуль' };
+      return { d: 'amber', t: 'Запускается…', s: '' };
+    default: return { d: '', t: 'Выключен', s: '' };
+  }
+}
+function renderWarpState(w) {
+  $('#warpDot').className = 'dot ' + w.d; $('#warpTitle').textContent = w.t; $('#warpSub').textContent = w.s;
+}
+
+// "имя|endpoint|gen/import|дата" (webctl warp-list)
+let WARP_N = 0, WARP_HTML = '';
+async function loadWarp() {
+  const r = await ctl('warp-list');
+  const rows = (r.out || '').split('\n').filter((l) => l.split('|').length >= 4).map((l) => l.split('|'));
+  WARP_N = rows.length;
+  const main = CUR.WARP_CONF || '', run = ST.warp === 'up' || ST.warp === 'starting' ? ST.warp_conf : '';
+  const html = rows.length ? rows.map(([n, ep, src, dt]) =>
+    // кнопки — под текстом: на телефоне три в ряд с текстом не помещаются
+    '<div class="row col"><div class="head" style="gap:8px"><span class="dot ' + (n === run ? 'green' : '') + '"></span>' +
+    '<div class="txt"><div class="t">' + esc(n) + (n === main ? '<span class="badge">основной</span>' : '') + '</div>' +
+    '<div class="s">' + esc(ep) + ' · ' + (src === 'gen' ? 'создан' : 'импорт') + ' ' + esc(dt) + (n === run ? ' · в работе' : '') + '</div></div></div>' +
+    '<div class="btn-row fill mt8">' + (n === main ? '' : '<button class="btn small" data-wmain="' + esc(n) + '" aria-label="Сделать основным ' + esc(n) + '">Основной</button>') +
+    '<button class="btn small" data-wsave="' + esc(n) + '" aria-label="Сохранить ' + esc(n) + ' в Загрузки">Сохранить</button>' +
+    '<button class="btn small" data-wdel="' + esc(n) + '" aria-label="Удалить ' + esc(n) + '">Удалить</button></div></div>').join('')
+    : '<div class="row"><div class="txt"><div class="s">Конфигов нет. Нажмите «Создать» или импортируйте свой.</div></div></div>';
+  // перерисовка без изменений сбивала фокус и съедала нажатие в момент обновления
+  if (html !== WARP_HTML) { WARP_HTML = html; $('#warpList').innerHTML = html; }
+}
+$('#warpList').addEventListener('click', async (e) => {
+  const b = e.target.closest && e.target.closest('button'); if (!b) return;
+  if (b.dataset.wmain) { setCur('WARP_CONF', b.dataset.wmain); loadWarp(); toast('Нажмите «Применить», чтобы переключиться'); return; }
+  if (b.dataset.wsave) {
+    const r = await ctl('warp-save ' + q(b.dataset.wsave));
+    toast(isOk(r) ? 'Сохранено: Загрузки/' + b.dataset.wsave + '.conf' : errText(r, 'Не получилось'));
+    return;
+  }
+  if (b.dataset.wdel) {
+    const n = b.dataset.wdel;
+    if (!confirm('Удалить конфиг «' + n + '»? Восстановить его не получится (только создать новый).')) return;
+    const r = await ctl('warp-del ' + q(n));
+    if (!isOk(r)) { toast(errText(r, 'Не получилось')); return; }
+    if (saved('WARP_CONF') === n || CUR.WARP_CONF === n) {
+      // иначе следующий «Создать» с тем же именем молча стал бы основным
+      await ctl('unset WARP_CONF'); delete USR.WARP_CONF; setCur('WARP_CONF', '');
+      if (!busy) ctl('apply');
+    }
+    toast('Удалено' + (ST.warp_conf === n ? ' — модуль перейдёт на другой, когда этот перестанет отвечать' : ''));
+    loadWarp();
+  }
+});
+$('#warpGen').addEventListener('click', async () => {
+  const b = $('#warpGen'); b.disabled = true; b.textContent = 'Регистрирую…';
+  try {
+    const r = await ctlBg('warp-gen 1');
+    toast(isOk(r) ? 'Создан: ' + r.out.trim().slice(3) : 'Не получилось: ' + errText(r, 'нет ответа'));
+    loadWarp();
+  } finally { b.disabled = false; b.textContent = 'Создать'; }
+});
+
+// имя файла -> имя конфига: латиница, цифры, _ . - (как в warp.sh)
+const warpName = (f) => (f.replace(/^.*[\\/]/, '').replace(/\.conf$/i, '').replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/^[._]+/, '') || 'warp').slice(0, 40);
+const b64 = (t) => { const u = new TextEncoder().encode(t); let s = ''; u.forEach((c) => { s += String.fromCharCode(c); }); return btoa(s); };
+async function warpImport(list) {   // [{name, text}]
+  let ok = 0; const bad = [];
+  for (const it of list) {
+    // конфиг — 0,5–3 КБ; больше 24 КБ — не тот файл (и аргумент ksu.exec не резиновый)
+    if (it.text.length > 24000) { bad.push(warpName(it.name) + ': больше 24 КБ — это не конфиг'); continue; }
+    const r = await ctl('warp-import ' + q(warpName(it.name)) + ' ' + q(b64(it.text.replace(/^\uFEFF/, ''))));
+    if (isOk(r)) ok++; else bad.push(warpName(it.name) + ': ' + errText(r, 'ошибка'));
+  }
+  toast((ok ? 'Добавлено: ' + ok : 'Ничего не добавлено') + (bad.length ? ' · пропущено: ' + bad.length + ' (' + bad[0] + (bad.length > 1 ? ' …' : '') + ')' : ''));
+  loadWarp();
+}
+// zip-экспорт AmneziaVPN: .conf из архива (stored / deflate через DecompressionStream)
+async function unzipConfs(buf) {
+  const dv = new DataView(buf), out = [], dec = new TextDecoder();
+  // конец архива — в последних 22 + 65535 байт (комментарий zip не длиннее)
+  let e = buf.byteLength - 22;
+  const lo = Math.max(0, buf.byteLength - 65557);
+  while (e >= lo && dv.getUint32(e, true) !== 0x06054b50) e--;
+  if (e < lo) throw new Error('не zip');
+  let p = dv.getUint32(e + 16, true);
+  for (let i = dv.getUint16(e + 10, true); i > 0 && dv.getUint32(p, true) === 0x02014b50; i--) {
+    const m = dv.getUint16(p + 10, true), cs = dv.getUint32(p + 20, true), nl = dv.getUint16(p + 28, true);
+    const off = dv.getUint32(p + 42, true), name = dec.decode(new Uint8Array(buf, p + 46, nl));
+    p += 46 + nl + dv.getUint16(p + 30, true) + dv.getUint16(p + 32, true);
+    if (!/\.conf$/i.test(name)) continue;
+    const data = new Uint8Array(buf, off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true), cs);
+    let raw = null;
+    if (m === 0) raw = data;
+    else if (m === 8 && typeof DecompressionStream === 'undefined') throw new Error('этот WebView не умеет распаковывать zip — распакуйте его и выберите файлы .conf');
+    else if (m === 8) raw = new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+    if (raw) out.push({ name, text: dec.decode(raw) });
+  }
+  return out;
+}
+$('#warpSaveAll').addEventListener('click', async () => {
+  const b = $('#warpSaveAll'); b.disabled = true;
+  try {
+    const r = await ctlBg('warp-saveall');
+    const m = /^OK \S*\/([^/\s]+) (\d+)/.exec(r.out.trim());
+    toast(m ? 'Сохранено конфигов: ' + m[2] + ' — Загрузки/' + m[1] : errText(r, 'Не получилось'));
+  } finally { b.disabled = false; }
+});
+$('#warpImp').addEventListener('click', () => $('#warpFile').click());
+$('#warpFile').addEventListener('change', async (e) => {
+  const list = [];
+  try {
+    for (const f of Array.from(e.target.files || [])) {
+      if (f.size > 1 << 20) { toast(f.name + ': больше 1 МБ — это не конфиг'); continue; }
+      if (/\.zip$/i.test(f.name)) list.push(...await unzipConfs(await f.arrayBuffer()));
+      else list.push({ name: f.name, text: await f.text() });
+    }
+  } catch (err) { toast('Не прочитался файл: ' + (err instanceof RangeError ? 'zip повреждён' : err.message)); }
+  e.target.value = '';
+  if (list.length) warpImport(list); else toast('В файлах нет конфигов .conf');
+});
+$('#warpPaste').addEventListener('click', () => {
+  const b = $('#warpPasteBox'); b.style.display = b.style.display ? '' : 'none';
+  $('#warpPaste').setAttribute('aria-expanded', b.style.display ? 'false' : 'true');
+});
+$('#warpPasteOk').addEventListener('click', async () => {
+  const t = $('#warpPasteText').value.trim();
+  if (!/\[Interface\]/i.test(t)) { toast('Вставьте текст конфига: [Interface] … [Peer] …'); return; }
+  const b = $('#warpPasteOk'); if (b.disabled) return; b.disabled = true;
+  try { await warpImport([{ name: $('#warpPasteName').value.trim() || 'warp', text: t }]); } finally { b.disabled = false; }
+  $('#warpPasteText').value = ''; $('#warpPasteName').value = ''; $('#warpPasteBox').style.display = 'none';
+  $('#warpPaste').setAttribute('aria-expanded', 'false');
 });
 
 async function loadLog() {
@@ -1137,7 +1436,7 @@ $('#logCopy').addEventListener('click', async () => {
   catch (e) {
     const r = document.createRange(); r.selectNodeContents($('#log'));
     const s = getSelection(); s.removeAllRanges(); s.addRange(r);
-    toast(document.execCommand('copy') ? 'Скопировано' : 'Выделено, скопируй вручную');
+    toast(document.execCommand('copy') ? 'Скопировано' : 'Выделено — скопируйте вручную');
   }
 });
 
@@ -1217,6 +1516,19 @@ function stLine(label, v) {
   const t = ok ? 'открывается, ' + (+m[2]).toFixed(1) + ' с' : (ST_RC[m[3]] || 'ошибка ' + esc(m[3]));
   return '<div class="st-line"><span class="dot ' + (ok ? 'green' : 'red') + '"></span>' + label + ': ' + t + '</div>';
 }
+// тип блокировки (3.18): по байтам direct и замерам probe "<tcp> <tls с нейтральным именем>"
+function stKind(o) {
+  const d = /^(\d{3}) ([\d.]+) (\d+) ?(\d*)/.exec(o.direct || '');
+  if (!d) return '';
+  const size = +d[4] || 0;
+  if (d[1] !== '000' && d[3] === '28' && size > 0 && size < 40000)
+    return 'Тип: обрыв после ~' + Math.max(1, Math.round(size / 1024)) + ' КБ — ТСПУ режет объём; обход помогает не всегда, надёжно — VPN';
+  if (!o.probe) return '';
+  const p = o.probe.split(' ');
+  if (p[0] === '0') return 'Тип: блок по IP — до адреса не устанавливается даже TCP; обход не поможет, нужен VPN';
+  if (p[1] === '1') return 'Тип: блок по имени сайта (DPI) — тот же адрес с другим именем открывается; это и лечит обход';
+  return 'Тип: TLS к этому адресу не проходит ни с каким именем — похоже на блок по адресу; обход вряд ли поможет';
+}
 // sitetest и ytspeed в webctl.sh берут одну очередь NFQUEUE 202 и одни правила
 // iptables — вместе они ломают друг другу замер, поэтому обе кнопки гасим разом
 const stLock = (on) => { $('#stBtn').disabled = $('#ytBtn').disabled = on; };
@@ -1225,7 +1537,7 @@ $('#stBtn').addEventListener('click', async () => {
   const host = $('#stHost').value.trim();
   if (!host) return;
   const res = $('#stRes');
-  stLock(true); res.innerHTML = '<span class="muted">Проверяю, до 20 секунд…</span>';
+  stLock(true); res.innerHTML = '<span class="muted">Проверяю, до 40 секунд…</span>';
   try {
     const r = await ctlBg('sitetest ' + q(host));
     const out = r.out.trim();
@@ -1235,8 +1547,10 @@ $('#stBtn').addEventListener('click', async () => {
     }
     const o = {};
     out.split('\n').forEach((l) => { const i = l.indexOf(' '); if (i > 0) o[l.slice(0, i)] = l.slice(i + 1); });
-    const dOk = stOk(o.direct), zOk = stOk(o.zapret);
+    // обрыв после ~16 КБ — HTTP-ответ был, но сайт не открывается
+    const kind = stKind(o), dOk = stOk(o.direct) && !/^Тип: обрыв/.test(kind), zOk = stOk(o.zapret);
     res.innerHTML = stLine('Без обхода', o.direct) + stLine('С обходом', o.zapret) +
+      (kind ? '<div class="st-line"><span class="dot amber"></span>' + kind + '</div>' : '') +
       '<div class="muted mt8" style="font-size:13px">' + (dOk ? 'Сайт и так открывается, обход не нужен.'
         : zOk ? 'Обход помогает. В режиме «из списка» добавьте сайт в «Дополнительные сайты», если его нет во встроенном списке.'
         : 'С этой стратегией не помогло. Можно подобрать сайту свою — остальные сайты останутся на прежней. Если не поможет ни одна — скорее всего, блок по IP, тут нужен VPN.') + '</div>' +
@@ -1338,7 +1652,7 @@ async function scRefresh() {
     const full = r.maxBrk === 0 && r.open === blocked.length && blocked.length > 0;
     const dot = r.maxBrk > 0 ? 'red' : full ? 'green' : r.open > 0 ? 'amber' : '';
     const info = r.maxBrk > 0 ? 'ломает обычные сайты' : 'открыл ' + r.open + ' из ' + blocked.length + (r.ms ? ' · ' + (r.ms / 1000).toFixed(1) + ' с' : '') + (r.runs > 1 ? ' · проверена ' + r.runs + '×' : '');
-    return '<div class="row" style="padding:10px 0;border-top:' + (i ? '1px solid var(--line)' : '0') + '">' +
+    return '<div class="row wrap" style="padding:10px 0;border-top:' + (i ? '1px solid var(--line)' : '0') + '">' +
       '<span class="dot ' + dot + '"></span><div class="txt"><div class="t" style="font-size:14px">' + esc(stratLabel(r.a)) + '</div>' +
       '<div class="s">' + esc(info) + (r.det && !full ? ' · не открылись: ' + esc(r.det.replace(/:x(\d+)/g, (m, c) => c === '28' ? ' (тайм-аут)' : c === '35' ? ' (обрыв)' : ' (ошибка ' + c + ')')) : '') + '</div></div>' +
       (r.maxBrk === 0 && r.open > 0 ? '<button class="btn small" data-apply="' + esc(r.a) + '">Применить</button>' : '') + '</div>';
@@ -1420,7 +1734,7 @@ function renderZnet() {
   sel.disabled = !ZN.cur;
   $('#znetListHead').textContent = ZN.list.length ? 'Запомненные сети: ' + ZN.list.length : 'Запомненных сетей пока нет.';
   $('#znetList').innerHTML = ZN.list.map((x) =>
-    '<div class="row" style="padding:10px 0;border-top:1px solid var(--line)">' +
+    '<div class="row wrap" style="padding:10px 0;border-top:1px solid var(--line)">' +
     '<span class="dot' + (x.key === ZN.cur ? ' green' : '') + '"></span><div class="txt"><div class="t" style="font-size:14px">' +
     esc(x.label) + ' <span class="muted" style="font-weight:400">· ' + esc(netKind(x.key)) + '</span></div>' +
     '<div class="s">' + esc(stratName(x.st, x.args)) + (x.note ? ' · ' + esc(x.note) : '') + (x.date ? ' · ' + esc(x.date) : '') + '</div></div>' +
@@ -1471,6 +1785,10 @@ $('#metaBtn').addEventListener('click', async () => {
   scRefresh();
   loadApps().then(renderChips);
   setInterval(() => { if (!document.hidden && !busy && !stBusy) loadStatus(); }, 3000);
+  loadClients();
+  setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="home"]').classList.contains('on')) loadClients(); }, 15000);
+  loadWarp();
+  setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="warp"]').classList.contains('on')) loadWarp(); }, 10000);
   // вернулись на страницу — сразу свежий статус, не ждать тика
   document.addEventListener('visibilitychange', () => { if (!document.hidden && !busy) { loadStatus(); scRefresh(); } });
 })();
@@ -1479,7 +1797,7 @@ $('#metaBtn').addEventListener('click', async () => {
 function mockExec(cmd) {
   const a = cmd.replace(CTL + ' ', '');
   const M = window.__mock || (window.__mock = {
-    target: 'vpn', usr: { DNSPROXY_ENABLE: '1' }, zlist: '', ack: '',
+    target: 'vpn', usr: { DNSPROXY_ENABLE: '1', WARP_ENABLE: '1' }, zlist: '', ack: '',   // WARP включён — вкладка не серая при warp=up
   });
   // set/unset/zlist-set запоминаются, чтобы после «Применить» форма не откатывалась
   const mset = /^set ([A-Z_]+) '(.*)'$/.exec(a), munset = /^unset ([A-Z_]+)$/.exec(a);
@@ -1491,8 +1809,8 @@ function mockExec(cmd) {
   }
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=предпросмотр\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
-    '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.wlrus.cfd/dns-query\nD DNS_FALLBACKS=https://dns.dagami.ru/dns-query https://not-a-dns.quic.best/dns-query https://dns.comss.one/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=180\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\n' +
+    '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nwarp=up\nwarp_conf=warp-2\nwarp_note=\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.wlrus.cfd/dns-query\nD DNS_FALLBACKS=https://dns.dagami.ru/dns-query https://not-a-dns.quic.best/dns-query https://dns.comss.one/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=180\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\n' +
     Object.keys(M.usr).map((k) => 'U ' + k + '=' + M.usr[k] + '\n').join('') };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +
@@ -1504,6 +1822,15 @@ function mockExec(cmd) {
   if (a === 'ack') return { errno: 0, out: M.ack };
   if (a === 'apps') return { errno: 0, out: 'com.avito.android\nru.ozon.app.android\norg.telegram.messenger\ncom.google.android.youtube\n' };
   if (a === 'doh') return { errno: 0, out: 'ok 184' };
+  if (a === 'warp-list') return { errno: 0, out: (M.warp || (M.warp = ['warp|engage.cloudflareclient.com:4500|gen|2026-10-26 23:41',
+    'warp-2|engage.cloudflareclient.com:4500|gen|2026-10-26 23:41', 'WARP_STR1693|engage.cloudflareclient.com:4500|import|2026-10-27 00:10'])).join('\n') + '\n' };
+  if (/^warp-gen/.test(a)) { M.warp.push('warp-' + (M.warp.length + 1) + '|engage.cloudflareclient.com:4500|gen|2026-10-27 00:20'); return { errno: 0, out: 'OK warp-' + M.warp.length }; }
+  if (/^warp-import /.test(a)) { const n = /^warp-import '([^']+)'/.exec(a)[1]; M.warp.push(n + '|engage.cloudflareclient.com:4500|import|2026-10-27 00:21'); return { errno: 0, out: 'OK ' + n }; }
+  if (/^warp-del /.test(a)) { const n = a.slice(10).replace(/'/g, ''); M.warp = M.warp.filter((l) => l.split('|')[0] !== n); return { errno: 0, out: 'OK' }; }
+  if (/^warp-save /.test(a)) return { errno: 0, out: 'OK /storage/emulated/0/Download/x.conf' };
+  if (a === 'warp-saveall') return { errno: 0, out: 'OK /storage/emulated/0/Download/warp-configs_20261027_1040.zip 3' };
+  if (a === 'clients') return { errno: 0, out: '192.168.43.77|e0:2b:e9:75:60:84|REACHABLE|DESKTOP-LAPTOP|31|21545980|0\n192.168.43.67|42:96:f4:ac:3a:91|STALE|realme-9-Pro-5G|2|7553|0\n|00:27:15:ec:84:bd|-|android-tv|0|0|1\n' };
+  if (/^client-(un)?block /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'dnsflush') return { errno: 0, out: 'OK кэш сброшен (dnsproxy перезапущен). На ноутбуке — ещё ipconfig /flushdns' };
   if (a === 'zlist') return { errno: 0, out: M.zlist };
   if (a === 'zdefault') return { errno: 0, out: 'youtube.com\ngooglevideo.com\ndiscord.com\nx.com\n' };
@@ -1524,7 +1851,7 @@ function mockExec(cmd) {
     '0|10|2|0|--dpi-desync=fake,multisplit --dpi-desync-autottl --dpi-desync-split-pos=1 --dpi-desync-fake-tls=@G|быстрый| ya.ru:x28 google.com:x28\n' };
   if (/^zscan-start /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'zscan-stop') return { errno: 0, out: 'OK' };
-  if (/^sitetest /.test(a)) return { errno: 0, out: 'ip 142.251.155.4\ndirect 000 8.001 28\nzapret 200 1.02 0\n' };
+  if (/^sitetest /.test(a)) return { errno: 0, out: 'ip 142.251.155.4\ndirect 000 8.001 28 0\nprobe 1 1\nzapret 200 1.02 0 18342\n' };
   if (a === 'ytspeed') return { errno: 0, out: 'ip 64.233.161.190\ndirect 000 0 28\nzapret 200 6912000 0\n' };
   if (/^log/.test(a)) return { errno: 0, out: '[20:15:01] Toggle signal received\n[20:15:02] VPN setup complete\n' };
   return { errno: 1, out: 'ERR' };

@@ -7,3 +7,4 @@ youtube.googleapis.com
 ytimg.com
 ggpht.com
 googlevideo.com
+youtubeembeddedplayer.googleapis.com

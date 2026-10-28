@@ -508,6 +508,40 @@
 #   пакет) у gvt1.com — мёртвый сервер, а не DPI (имя gvt1 YOTA не режет):
 #   отбой и ss -K, Play уходит на другой узел. 26.10: Play висел на
 #   172.217.133.234 / 173.194.188.42 (TLS нет и с www.google.com).
+# v3.18 — идеи из похожих модулей (nfqws2-android, VPNHotspot):
+#   - устройства в раздаче: WebUI-список (имя из DHCP, IP, MAC, соединения),
+#     блокировка по MAC — цепочка VPN_TETHER_BLOCK в mangle PREROUTING
+#     (BLOCK_FILE, block_reconcile по stat файла);
+#   - белые списки оператора: после отката DNS раз в минуту TLS мимо обхода
+#     до 1.1.1.1, 9.9.9.9 и Яндекса; Яндекс да, зарубежные нет — обход на
+#     паузе (ZAPRET_STATE=wl), ожил зарубежный — обратно;
+#   - «Проверить сайт»: тип блокировки (по IP / по имени / обрыв ~16 КБ);
+#     запасной nslookup — только IPv4;
+#   - списки: threads, substack, udemy, coursera, grammarly, digitalocean,
+#     nicovideo, hetzner; встроенный плеер YouTube — в список YouTube.
+#   (3.18 отдельно не выпускалась — вошла в 3.19.0.)
+# v3.19.0 — WARP (AmneziaWG) в режиме «напрямую», вкладка «Сервис»:
+#   - lib/warp.sh: userspace amneziawg-go + awg (bin/, сборка — Actions
+#     build-awg.yml, NDK r30, awg динамически API 21 — статический bionic
+#     падал на ядре 3.18), интерфейс warp0, таблица 3996, метка 0x20000000;
+#     только без VPN; проверка — trace 1.1.1.1 через туннель (WARP_CF — нужен
+#     warp=on); не отвечает 3 раза — следующий конфиг, имя Endpoint не
+#     находится — конфиг пропускается; все мимо — повтор через 5 мин;
+#     создание первых конфигов не вышло — повтор с удвоением до 1 ч;
+#   - группы: Telegram (5 AS), Google без Google Cloud (warp/google-*),
+#     домены (адреса из ответов dnsproxy, общие CDN — мимо), приложения по
+#     uid; WARP_TELEGRAM=1 — клиенты Telegram телефона целиком (запасные узлы
+#     вне сетей Telegram, лог 27.10); v6 в группы — отбиваем (нет ip6 nat);
+#   - ss -K сокетов телефона к сетям групп при подъёме/снятии/смене групп
+#     (только WARP_PHONE=1) — Telegram переподключается за ~20 с, не ~4 мин;
+#   - warp/warp.sh: хранилище /data/adb/vpn_tether_warp — создать (Cloudflare
+#     API), импорт .conf/zip AmneziaVPN, экспорт по одному и zip;
+#   - zapret: проверка ядра (connbytes/string/NFQUEUE) во временной цепочке;
+#     без connbytes — упрощённый режим (NFQUEUE на весь исходящий 443), без
+#     NFQUEUE — не включается; файл vpn_tether_zcaps для scan.sh/WebUI;
+#   - net: bbr3 -> bbr2 -> bbr -> cubic (issue #17); WebUI: пять вкладок («Сервис»
+#     вместо «Инструментов», WARP), тексты/320 px/доступность; устройства с
+#     истёкшей арендой DHCP и без трафика из списка убраны.
 # ============================================================================
 # ============================================================================
 
@@ -669,6 +703,18 @@ ZAPRET_ALT_MIN=180
 # Автосписок (режим «из списка»): после скольких сбоев за минуту nfqws
 # добавляет сайт. Причины пишутся в ZAPRET_AUTO_LOG, WebUI их показывает (3.9).
 ZAPRET_AUTO_FAIL=3
+# WARP (AmneziaWG) в режиме «напрямую»: туннель до Cloudflare, конфиги —
+# /data/adb/vpn_tether_warp (WebUI: создать, импортировать, удалить). При
+# первом включении модуль создаёт 3 сам. Поднимается, только когда VPN на
+# телефоне не поднят; не отвечает — следующий конфиг.
+WARP_ENABLE=0
+WARP_CONF=""            # предпочтительный конфиг (имя); пусто — по порядку
+# Что пускать в WARP (только по адресам самих сервисов, не общих CDN):
+WARP_GOOGLE=0           # сети Google (goog.json) — в «волны» ТСПУ
+WARP_TELEGRAM=1         # сети Telegram (заблокирован по IP)
+WARP_APPS=""            # приложения телефона целиком (пакеты через пробел)
+WARP_DOMAINS=""         # домены; их адреса на Cloudflare/Akamai/Fastly/CloudFront — мимо
+WARP_PHONE=1            # группы — и для приложений телефона, не только раздачи
 # Скрыть раздачу от оператора (3.2; раньше — модуль tether_unblock).
 #  - net.tethering.noprovisioning: Android не спрашивает оператора, можно ли
 #    раздавать (иначе оператор может не дать включить точку или оборвать);
@@ -738,7 +784,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY)
+        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
@@ -747,6 +793,9 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
         ZAPRET_AUTO_FAIL)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 2 ] && [ "$val" -le 10 ] || ok=0 ;; esac ;;
         ZAPRET_MODE)     case "$val" in list|all) ;; *) ok=0 ;; esac ;;
+        WARP_CONF)       # имя конфига, как в warp/warp.sh; пусто — по порядку
+            case "$val" in *[!A-Za-z0-9_.-]*|.*) ok=0 ;; esac
+            [ ${#val} -le 40 ] || ok=0 ;;
         ZAPRET_STRATEGY) zapret_strategy_valid "$val" || ok=0 ;;
         ZAPRET_ARGS)     zapret_args_valid "$val" || ok=0 ;;
         DNS_META_ECS)    _ip4_valid "$val" || ok=0 ;;
@@ -762,7 +811,11 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
             # bootstrap — только ip:порт: имя в -b dnsproxy не примет и не стартует
             # (tls://1.1.1.1 с IP он принял бы, но ip:порт — проще и хватает)
             [ "$key" = "DNS_BOOTSTRAP" ] && case "$val" in *[!0-9a-fA-F.:\ \[\]]*) ok=0 ;; esac ;;
-        QUIC_BLOCK_APPS)
+        WARP_DOMAINS)
+            # домены через пробел; пусто — выключить
+            case "$val" in *[!a-z0-9.\ -]*) ok=0 ;; esac
+            [ ${#val} -le 2000 ] || ok=0 ;;
+        QUIC_BLOCK_APPS|WARP_APPS)
             # имена пакетов; пусто — допустимо (выключить)
             case "$val" in *[!A-Za-z0-9._\ ]*) ok=0 ;; esac ;;
         *) ok=0 ;;
@@ -793,7 +846,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -1004,6 +1057,10 @@ CHAIN_MSS="VPN_BASE_MSS"
 CHAIN_DNS="VPN_TETHER_DNS"
 CHAIN_DNS6="VPN_TETHER_DNS6"
 CHAIN_GUARD="VPN_TETHER_GUARD"
+CHAIN_BLOCK="VPN_TETHER_BLOCK"   # mangle PREROUTING: устройства раздачи, заблокированные в WebUI
+BLOCK_FILE="/data/adb/vpn_tether_blocked"   # "MAC|имя" — переживает перезагрузку
+BLOCK_STAMP="-"        # stat файла при последнем применении («-» — ещё не применяли)
+BLOCK_TICK=0
 CHAIN_GUARD_IN="VPN_TETHER_GUARD_IN"
 
 VPN_DOWN_COUNT=0
@@ -1080,6 +1137,17 @@ NFQWS_BIN=""
 for _c in $_NQ_CANDIDATES; do
     [ -x "$_c" ] && NFQWS_BIN="$_c" && break
 done
+# --- WARP (AmneziaWG) ---
+case "$(uname -m 2>/dev/null)" in
+    aarch64|arm64) _WG_ARCH="arm64" ;;
+    armv*|arm)     _WG_ARCH="arm" ;;
+    *)             _WG_ARCH="arm64 arm" ;;
+esac
+AWG_BIN=""; AWG_GO_BIN=""
+for _c in $_WG_ARCH; do
+    [ -x "$MODULE_DIR/bin/awg-$_c" ] && [ -x "$MODULE_DIR/bin/amneziawg-go-$_c" ] && {
+        AWG_BIN="$MODULE_DIR/bin/awg-$_c"; AWG_GO_BIN="$MODULE_DIR/bin/amneziawg-go-$_c"; break; }
+done
 ZAPRET_DIR="$MODULE_DIR/zapret"
 ZAPRET_LIST_DEFAULT="$ZAPRET_DIR/list-default.txt"
 ZAPRET_LIST_YT="$ZAPRET_DIR/list-youtube.txt"        # своя стратегия YouTube (3.4)
@@ -1142,7 +1210,10 @@ ZAPRET_OWNER_TUN="-"    # для какого tun уже узнали владе
 # VPN-клиенты: их собственное соединение с сервером (часто TLS на 443) zapret
 # трогать не должен — иначе можно сломать переподключение VPN.
 VPN_CLIENT_PKGS="llc.itdev.incy com.happproxy org.amnezia.vpn org.amnezia.awg com.wireguard.android com.zaneschepke.wireguardautotunnel com.zaneschepke.wireguardautotunnel.nightly com.v2ray.ang app.hiddify.com moe.nb4a io.nekohasekai.sfa com.github.dyhkwong.sagernet io.github.saeeddev94.xray com.github.kr328.clash com.github.metacubex.clash.meta de.blinkt.openvpn net.openvpn.openvpn org.outline.android.client com.cloudflare.onedotonedotonedotone com.v2raytun.android dev.hexasoftware.v2box com.exclave.exclave"
-ZAPRET_STATE="off"     # off | on | fail
+ZAPRET_STATE="off"     # off | on | fail | wl (пауза: белые списки оператора)
+ZAPRET_WL=0            # 1 = похоже на белые списки — обход на паузе (zapret_whitelist_check)
+ZAPRET_WL_LAST=0       # когда последний раз проверяли
+ZAPRET_WL_WAN=""       # на каком WAN проверяли (сменился — проверить сразу)
 ZAPRET_SIG=""          # аргументы + исключения запущенного экземпляра
 ZAPRET_RETRY=0
 ZAPRET_TICK=0
@@ -1247,6 +1318,8 @@ LOG_REPEAT_THRESHOLD=5
 . "$MODULE_DIR/lib/stealth.sh"
 # shellcheck source=lib/rules.sh
 . "$MODULE_DIR/lib/rules.sh"
+# shellcheck source=lib/warp.sh
+. "$MODULE_DIR/lib/warp.sh"
 # shellcheck source=lib/loop.sh
 . "$MODULE_DIR/lib/loop.sh"
 
@@ -1260,7 +1333,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.17.1 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.19.0 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
@@ -1298,6 +1371,8 @@ TUN_NAME=$(detect_tun_name)
 log "TUN: $TUN_NAME"
 
 dnsproxy_kill_strays
+warp_routes_off force      # туннель и его маршруты от убитого демона
+warp_down
 phone_dns_rules_off
 rm -f "$DNSPROXY_PID_FILE" /data/local/tmp/vpn_tether_probe.*
 dnsproxy_port_guard_down

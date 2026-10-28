@@ -67,12 +67,17 @@ event() {
 
 # ! --gid-owner 3999: DoH dnsproxy (root, группа 3999) тестовые стратегии не
 # трогают — иначе его новые соединения во время подбора резались/ломались
-RULE="-o $WAN -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
+# ядро без connbytes (zapret_caps демона): в очередь — все пакеты сканера,
+# ответы — тоже все, но только его соединений (connmark), трафика мало
+CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9"
+CB_IN="-m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3"
+grep -q '^cb=0' /data/local/tmp/vpn_tether_zcaps 2>/dev/null && { CB_OUT=""; CB_IN=""; }
+RULE="-o $WAN -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
 # первые ответы сервера на запросы сканера — тоже в nfqws: без них не
 # работают --wssize и autottl (3.6). Соединения сканера — по биту connmark.
 SCMARK=0x08000000
 RULE_MK="-o $WAN -m owner --uid-owner 0 -p tcp --dport 443 -j CONNMARK --set-xmark $SCMARK/$SCMARK"
-RULE_IN="-i $WAN -p tcp --sport 443 -m connmark --mark $SCMARK/$SCMARK -m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3 -j NFQUEUE --queue-num $Q --queue-bypass"
+RULE_IN="-i $WAN -p tcp --sport 443 -m connmark --mark $SCMARK/$SCMARK $CB_IN -j NFQUEUE --queue-num $Q --queue-bypass"
 NQPID=""
 BYPASS=0    # 1 = исключения uid 0 (nat OUTPUT, VPN_ZAPRET) поставлены нами
 cleanup() {
@@ -110,6 +115,10 @@ trap on_exit EXIT
 trap 'exit 0' INT TERM
 
 echo $$ > "$OUT.pid"
+# идёт регистрация WARP (warp/warp.sh gen) — подождать. После pid: пока ждём,
+# демон и WebUI видят «подбор идёт» и второй scan.sh не запустят. Замок старше
+# 3 мин — от убитого процесса (gen обновляет его на каждом конфиге)
+_i=0; while [ -n "$(find /data/local/tmp/vpn_tether_warpgen.lock -maxdepth 0 -mmin -3 2>/dev/null)" ] && [ $_i -lt 90 ]; do sleep 1; _i=$((_i + 1)); done
 # nfqws на нашей очереди от убитого (kill -9, OOM) прогона: иначе очередь
 # занята, все прогоны «nfqws: …», и сирота портит HTTPS от root
 for _p in $(pgrep -f "nfqws.*--qnum=$Q " 2>/dev/null); do kill -9 "$_p" 2>/dev/null; done

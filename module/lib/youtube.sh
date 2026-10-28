@@ -8,6 +8,7 @@
 # filter, а не mangle: отказ до NFQUEUE, nfqws этот ClientHello не видит.
 # OUTPUT — телефон (если zapret для телефона включён), FORWARD — раздача.
 # tun+ — мимо: через VPN кэш оператора не попадается.
+GGC_FAILS=0
 zapret_ggc_hooks_off() {
     local t="$1" c _n
     for c in OUTPUT FORWARD; do
@@ -17,6 +18,8 @@ zapret_ggc_hooks_off() {
 
 zapret_ggc_on() {
     local t f p n st=""
+    # ядро без string — нечем узнать googlevideo.com (zapret_caps)
+    zapret_cap str || { [ -n "$GGC_STATE" ] && zapret_ggc_off; GGC_STATE=""; return 0; }
     for t in "$iptables" "$ip6tables"; do
         zapret_ggc_hooks_off "$t"
         if [ "$t" = "$iptables" ]; then f="$ZAPRET_DIR/google-ipv4.txt"; else f="$ZAPRET_DIR/google-ipv6.txt"; fi
@@ -41,8 +44,17 @@ zapret_ggc_on() {
         $t -A "$CHAIN_ZAPRET_GGC" -p tcp -j REJECT --reject-with tcp-reset 2>/dev/null
         $t -I FORWARD 1 $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null
         [ "$ZAPRET_PHONE" = "1" ] && $t -I OUTPUT 1 $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null
+        # хук не встал — не считаем включённым и убираем начатое (цепочку с REJECT,
+        # хук в OUTPUT); сторож попробует ещё пару раз (GGC_FAILS), потом сдаётся
+        if ! $t -C FORWARD $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null; then
+            zapret_ggc_hooks_off "$t"; $t -F "$CHAIN_ZAPRET_GGC" 2>/dev/null; $t -X "$CHAIN_ZAPRET_GGC" 2>/dev/null
+            [ "$t" = "$iptables" ] && GGC_FAILS=$((GGC_FAILS + 1))
+            continue
+        fi
         st="$st${st:++}$([ "$t" = "$iptables" ] && echo v4 || echo v6)"
     done
+    case "$st" in v4*) GGC_FAILS=0 ;; esac
+    [ "$GGC_FAILS" = 3 ] && log "WARNING: zapret: правила «YouTube мимо кэшей оператора» не встали 3 раза — выключено до смены сети"
     [ "$st" != "$GGC_STATE" ] && [ -n "$st" ] && log "zapret: YouTube мимо кэшей оператора включено ($st)"
     GGC_STATE="$st"
 }
@@ -67,12 +79,16 @@ zapret_ggc_hits() {
 # FORWARD (раздача): там ClientHello ещё целый, nfqws его режет позже, в
 # POSTROUTING. Отбой — filter, как у GGC: RST на ClientHello к подсети из
 # списка. tun+ — мимо: через VPN сервер достижим.
-YT_MARK_OUT="! -o tun+ -m owner ! --uid-owner 0 $GGC_MATCH -j CONNMARK --set-xmark $YT_CTMARK/$YT_CTMARK"
-YT_MARK_FWD="! -o tun+ $GGC_MATCH -j CONNMARK --set-xmark $YT_CTMARK/$YT_CTMARK"
-# Play Маркет (gvt1.com) — свой бит: обрыв медленных его не трогает
-YT_GMARK_OUT="! -o tun+ -m owner ! --uid-owner 0 $GVT_MATCH -j CONNMARK --set-xmark $YT_GCTMARK/$YT_GCTMARK"
-YT_GMARK_FWD="! -o tun+ $GVT_MATCH -j CONNMARK --set-xmark $YT_GCTMARK/$YT_GCTMARK"
+yt_match_build() {   # zapret_caps зовёт снова, если ядро без connbytes
+    YT_MARK_OUT="! -o tun+ -m owner ! --uid-owner 0 $GGC_MATCH -j CONNMARK --set-xmark $YT_CTMARK/$YT_CTMARK"
+    YT_MARK_FWD="! -o tun+ $GGC_MATCH -j CONNMARK --set-xmark $YT_CTMARK/$YT_CTMARK"
+    # Play Маркет (gvt1.com) — свой бит: обрыв медленных его не трогает
+    YT_GMARK_OUT="! -o tun+ -m owner ! --uid-owner 0 $GVT_MATCH -j CONNMARK --set-xmark $YT_GCTMARK/$YT_GCTMARK"
+    YT_GMARK_FWD="! -o tun+ $GVT_MATCH -j CONNMARK --set-xmark $YT_GCTMARK/$YT_GCTMARK"
+}
+yt_match_build
 
+YT_DEAD_FAILS=0
 yt_dead_hooks_off() {
     local c m _n
     _n=0; while [ $_n -lt 8 ] && $iptables -t mangle -D OUTPUT $YT_MARK_OUT 2>/dev/null; do _n=$((_n + 1)); done
@@ -88,7 +104,8 @@ yt_dead_hooks_off() {
 
 yt_dead_on() {
     yt_dead_hooks_off
-    if [ "$YT_DEAD_FAILFAST" != "1" ] || [ -z "$CONNTRACK_BIN" ]; then
+    # без string (zapret_caps) мёртвые серверы не узнать — выключено
+    if [ "$YT_DEAD_FAILFAST" != "1" ] || [ -z "$CONNTRACK_BIN" ] || ! zapret_cap str; then
         yt_dead_off
         return 0
     fi
@@ -109,6 +126,14 @@ yt_dead_on() {
         $iptables -I OUTPUT 1 $GVT_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
         $iptables -I OUTPUT 1 $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     fi
+    # хук не встал — не «on»: иначе сторож zapret ставил бы правила по кругу
+    if ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null; then
+        YT_DEAD_FAILS=$((YT_DEAD_FAILS + 1))
+        [ "$YT_DEAD_FAILS" -ge 3 ] && [ "$YT_DEAD_STATE" != "fail" ] && \
+            log "WARNING: zapret: правила отбоя мёртвых серверов YouTube не встали 3 раза — отбой выключен"
+        yt_dead_hooks_off; YT_DEAD_STATE="fail"; return 0
+    fi
+    YT_DEAD_FAILS=0
     [ "$YT_DEAD_STATE" = "on" ] || log "zapret: отбой мёртвых и молчащих серверов YouTube и Play включён (нет ответа ${YT_DEAD_AFTER}с, на запрос ${YT_SILENT_AFTER}с и проверка не прошла -> RST на $((YT_DEAD_TTL / 60)) мин)"
     YT_DEAD_STATE="on"
 }

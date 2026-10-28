@@ -83,6 +83,7 @@ handle_change() {
         VPN_DNS_CACHE_TIME=0
     elif $net_diff; then
         log "Network change: iface=$LAST_WAN_IFACE→$current_wan ip=$LAST_WAN_IP→$current_wan_ip gw=$LAST_WAN_GW→$current_gw"
+        WARP_CHECK_TS=0     # WARP: проверить туннель на новой сети сразу
         flush_conntrack
         $ip route flush cache 2>/dev/null || true
         ndc resolver flushdefaultif 2>/dev/null || true
@@ -199,6 +200,8 @@ CONF_GRP_DNS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FAL
 CONF_GRP_KS="KILL_SWITCH KILL_SWITCH_STRICT"
 CONF_GRP_QUIC="QUIC_BLOCK_APPS"
 CONF_GRP_STEALTH="TETHER_STEALTH TETHER_TTL_STRICT"
+CONF_GRP_WARP="WARP_ENABLE WARP_CONF"
+CONF_GRP_WARPR="WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE"
 CONF_GRP_ZAPRET="ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_PER_NET YT_GGC_BLOCK YT_DEAD_FAILFAST"
 _conf_grp_sig() {   # $1 = имя переменной-результата, дальше ключи
     local _v="$1" _k _o=""; shift
@@ -208,12 +211,14 @@ _conf_grp_sig() {   # $1 = имя переменной-результата, д�
 RELOAD_NEED_REBUILD=1
 
 reload_config() {
-    local old_ks="$KILL_SWITCH" s_dns0 s_ks0 s_quic0 s_zap0 s_dns1 s_ks1 s_quic1 s_zap1 s_st0 s_st1 what=""
+    local old_ks="$KILL_SWITCH" s_dns0 s_ks0 s_quic0 s_zap0 s_dns1 s_ks1 s_quic1 s_zap1 s_st0 s_st1 s_wp0 s_wp1 s_wr0 s_wr1 what=""
     _conf_grp_sig s_dns0 $CONF_GRP_DNS
     _conf_grp_sig s_ks0 $CONF_GRP_KS
     _conf_grp_sig s_quic0 $CONF_GRP_QUIC
     _conf_grp_sig s_zap0 $CONF_GRP_ZAPRET
     _conf_grp_sig s_st0 $CONF_GRP_STEALTH
+    _conf_grp_sig s_wp0 $CONF_GRP_WARP
+    _conf_grp_sig s_wr0 $CONF_GRP_WARPR
     conf_restore_defaults
     USER_CONF_NOTE=""
     load_user_conf
@@ -225,12 +230,16 @@ reload_config() {
     _conf_grp_sig s_quic1 $CONF_GRP_QUIC
     _conf_grp_sig s_zap1 $CONF_GRP_ZAPRET
     _conf_grp_sig s_st1 $CONF_GRP_STEALTH
+    _conf_grp_sig s_wp1 $CONF_GRP_WARP
+    _conf_grp_sig s_wr1 $CONF_GRP_WARPR
     RELOAD_NEED_REBUILD=0
     [ "$s_dns0" != "$s_dns1" ] && { what="$what DNS"; RELOAD_NEED_REBUILD=1; }
     [ "$s_ks0" != "$s_ks1" ] && { what="$what kill-switch"; RELOAD_NEED_REBUILD=1; }
     [ "$s_quic0" != "$s_quic1" ] && what="$what QUIC-приложений"
     [ "$s_zap0" != "$s_zap1" ] && what="$what zapret"
     [ "$s_st0" != "$s_st1" ] && what="$what скрытие-раздачи"
+    [ "$s_wp0" != "$s_wp1" ] && what="$what WARP"
+    [ "$s_wr0" != "$s_wr1" ] && what="$what что-идёт-в-WARP"
     log "Настройки перечитаны:${USER_CONF_NOTE:- (всё по умолчанию)}"
     log "Применяю:${what:- ничего не поменялось}$([ "$RELOAD_NEED_REBUILD" = 1 ] && echo ' — пересборка правил раздачи' || echo ' — без пересборки раздачи')"
     log "Config: DNSPROXY=$DNSPROXY_ENABLE KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE UPSTREAMS=[$DNS_UPSTREAMS] QUIC_BLOCK=[$QUIC_BLOCK_APPS] ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/phone=$ZAPRET_PHONE/quic=$ZAPRET_QUIC_BLOCK/per_net=$ZAPRET_PER_NET META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s"
@@ -265,6 +274,17 @@ reload_config() {
 
     [ "$s_st0" != "$s_st1" ] && stealth_apply
 
+    if [ "$s_wp0" != "$s_wp1" ]; then
+        # WARP: снять, сторож поднимет заново с новым конфигом (~2с)
+        warp_down "настройки"
+        WARP_BAD=""; WARP_RETRY_TS=0; WARP_ENSURE_DONE=0
+        warp_set_state off ""
+    fi
+    if [ "$s_wr0" != "$s_wr1" ]; then
+        # группы: туннель не трогаем, правила пересоберёт сторож (~2с)
+        WARP_RT_SIG=""; WARP_DOM_TS=0; WARP_DOM_IPS=""; WARP_APP_TS=0
+    fi
+
     if [ "$s_zap0" != "$s_zap1" ]; then
         # zapret: снять всё, цикл поднимет заново под новые настройки (~2с)
         zapret_down
@@ -295,6 +315,8 @@ cleanup_on_exit() {
     dnsproxy_port_guard_down
     guard_down
     restore_hw_offload
+    block_down
+    warp_down "выход"
     # в конце: zapret_down -> phone_status_refresh -> update_status писал
     # описание заново («Раздача через VPN…» после выхода демона)
     [ "$STATUS_IN_DESCRIPTION" = "1" ] && set_description "$MODULE_DESC_DEFAULT"
@@ -339,12 +361,15 @@ monitor_loop() {
         elif [ -n "$LAST_TETHER_IFACES$LAST_WAN_IFACE" ]; then
             bpf_offload_detach $LAST_TETHER_IFACES $LAST_WAN_IFACE
         fi
+        block_reconcile
+        zapret_whitelist_check
         zapret_reconcile
         [ $((_loop_count % 2)) -eq 1 ] && yt_dead_scan
         [ $((_loop_count % 30)) -eq 17 ] && yt_dead_recheck
         [ $((_loop_count % 5)) -eq 4 ] && yt_slow_reconcile
         zapret_watchdog
         zapret_sites_check
+        warp_reconcile
         _loop_count=$(( _loop_count + 1 ))
     done
 }

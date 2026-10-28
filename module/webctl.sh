@@ -32,6 +32,8 @@
 #   webctl.sh zalt                    сайты со своей стратегией в текущей сети: сайт|аргументы|дата
 #   webctl.sh zalt-clear              забыть их (и «не открылись ничем»)
 #   webctl.sh zscan-start sites ['сайты']  подобрать своё сайтам (без списка — из списков zapret)
+#   webctl.sh warp-list|warp-gen [N]|warp-import ИМЯ BASE64|warp-del ИМЯ|warp-export ИМЯ|warp-save ИМЯ|warp-saveall
+#                                     конфиги WARP (AmneziaWG) — см. warp/warp.sh
 # ============================================================================
 
 MODDIR="${0%/*}"
@@ -83,6 +85,14 @@ zscan_busy() {
     case "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" in *zapret/scan.sh*) return 0 ;; esac
     return 1
 }
+
+# идёт регистрация WARP (warp/warp.sh gen): её nfqws тоже ловит curl от root
+# замок старше 3 мин — от убитого процесса (gen обновляет его на каждом конфиге)
+warpgen_busy() { [ -n "$(find /data/local/tmp/vpn_tether_warpgen.lock -maxdepth 0 -mmin -3 2>/dev/null)" ]; }
+
+# ядро без connbytes (демон проверил, zapret_caps) — правило проверки без него
+CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9"
+grep -q '^cb=0' /data/local/tmp/vpn_tether_zcaps 2>/dev/null && CB_OUT=""
 
 # Текущая сеть: "<ключ>|<название>" (zapret/netid.sh по WAN из status)
 cur_net() {
@@ -312,6 +322,54 @@ case "$1" in
         fi
         ;;
 
+    clients)
+        # Устройства в раздаче: "ip|mac|состояние|имя|соединений|байт|1=заблокировано".
+        # IP и MAC — ip neigh по интерфейсам раздачи; имя — из журнала DHCP
+        # раздачи (dumpsys network_stack); соединения и байты — открытые
+        # записи conntrack от этого IP. Заблокированные, которых сейчас нет, —
+        # тоже (чтобы можно было разблокировать).
+        ifs=$(sed -n 's/^ifaces=//p' "$STATUS_FILE" 2>/dev/null | tr '/,' '  ')
+        BL=/data/adb/vpn_tether_blocked
+        # по архитектуре: в zip оба бинаря с +x, а arm64 на armv7 не исполняется
+        case "$(uname -m)" in aarch64|arm64) CT="$MODDIR/bin/conntrack-arm64" ;; *) CT="$MODDIR/bin/conntrack-arm" ;; esac
+        { for i in $ifs; do ip -4 neigh show dev "$i" 2>/dev/null | awk '/lladdr/ {print "N", $1, $3, $NF}'; done
+          # конец аренды (expTime) — в мс от загрузки, те же часы, что /proc/uptime
+          awk '{printf "U %.0f\n", $1 * 1000}' /proc/uptime
+          dumpsys network_stack 2>/dev/null | sed -n 's/.*hwAddr: \([0-9a-f:]*\),.*expTime: \([0-9]*\),.*hostname: \([^,]*\).*/H \1 \2 \3/p'
+          [ -x "$CT" ] && "$CT" -L 2>/dev/null | awk '{s=""; b=0; for(i=1;i<=NF;i++){ if($i ~ /^src=/ && s=="") s=substr($i,5); if($i ~ /^bytes=/) b+=substr($i,7) } if(s!="") print "C", s, b}'
+          sed 's/|/ /; s/^/B /' "$BL" 2>/dev/null
+        } | awk '
+            $1 == "N" { ip[$3] = $2; st[$3] = $4; ord[++n] = $3 }
+            # имя — весь хвост строки (бывает с пробелами), без «|» (разделитель)
+            $1 == "U" { now = $2 }
+            $1 == "H" { s = $0; sub(/^H [^ ]* [^ ]* /, "", s); gsub(/\|/, "", s); nm[$2] = s; ex[$2] = $3 }
+            $1 == "C" { c[$2]++; by[$2] += $3 }
+            $1 == "B" { bl[$2] = 1; s = $0; sub(/^B [^ ]* ?/, "", s); gsub(/\|/, "", s); if (!($2 in nm) && s != "") nm[$2] = s }
+            END {
+                for (k = 1; k <= n; k++) { m = ord[k]; if (seen[m]++) continue
+                    # аренда истекла, трафика нет — ушёл (ядро держит STALE часами);
+                    # нет аренды в журнале (статический IP, журнал прокрутился) — показываем
+                    if ((m in ex) && now > 0 && ex[m] + 0 < now && st[m] !~ /REACHABLE|DELAY|PROBE/ && !c[ip[m]] && !bl[m]) continue
+                    print ip[m] "|" m "|" st[m] "|" nm[m] "|" (c[ip[m]] + 0) "|" (by[ip[m]] + 0) "|" (bl[m] ? 1 : 0) }
+                for (m in bl) if (!seen[m]) print "|" m "|-|" nm[m] "|0|0|1"
+            }'
+        ;;
+    client-block|client-unblock)
+        m=$(printf '%s' "$2" | tr 'A-F' 'a-f')
+        case "$m" in [0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]) ;; *) echo "ERR неверный MAC"; exit 1 ;; esac
+        # нулевой и групповой (младший бит первого байта) — это не устройство
+        case "$m" in 00:00:00:00:00:00|?[13579bdf]:*) echo "ERR это не адрес устройства"; exit 1 ;; esac
+        BL=/data/adb/vpn_tether_blocked
+        # имя — только для показа: буквы, цифры, пробел, . _ -
+        nm=$(printf '%s' "$3" | tr -cd 'A-Za-z0-9 ._-' | cut -c1-40)
+        if [ "$1" = client-block ]; then
+            grep -q "^$m|" "$BL" 2>/dev/null || echo "$m|$nm" >> "$BL"
+        else
+            [ -f "$BL" ] && { grep -v "^$m|" "$BL" > "$BL.tmp.$$"; mv -f "$BL.tmp.$$" "$BL"; }
+        fi
+        # демон подхватит по stat файла за ~2 с (block_reconcile)
+        echo "OK" ;;
+
     # --- zapret ------------------------------------------------------------
     zlist)      cat "$ZLIST_USER" 2>/dev/null ;;
     zdefault)   cat "$MODDIR/zapret/list-default.txt" 2>/dev/null ;;
@@ -401,6 +459,7 @@ case "$1" in
     sitetest)
         # Открывается ли сайт мимо VPN: без обхода и с текущей стратегией.
         zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
+        warpgen_busy && { echo "ERR идёт создание конфига WARP — повторите через минуту"; exit 1; }
         h=$(printf '%s' "$2" | tr 'A-Z' 'a-z')
         h=${h#http://}; h=${h#https://}; h=${h%%/*}
         case "$h" in ''|*[!a-z0-9.-]*|*..*|.*) echo "ERR адрес"; exit 1 ;; esac
@@ -412,7 +471,7 @@ case "$1" in
         CA=/apex/com.android.conscrypt/cacerts
         [ -d "$CA" ] || CA=/system/etc/security/cacerts
         Q=202
-        RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
+        RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
         st_cleanup() {
             [ -n "$nqpid" ] && kill "$nqpid" 2>/dev/null
             iptables -w 2 -t mangle -D POSTROUTING $RULE_NFQ 2>/dev/null
@@ -429,15 +488,34 @@ case "$1" in
         # адрес — через DoH (обычный DNS мимо VPN оператор может подменить)
         ip=$(curl -s -m 6 --capath "$CA" -H 'accept: application/dns-json' \
             "https://1.1.1.1/dns-query?name=$h&type=A" 2>/dev/null | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')
-        [ -n "$ip" ] || ip=$("$BB" nslookup "$h" 1.1.1.1 2>/dev/null | sed -n '/^Name/,$p' | grep -oE 'Address 1: [0-9.]+' | awk '{print $3}')
-        [ -n "$ip" ] || { echo "ERR не удалось узнать адрес $h"; exit 1; }
+        # запасной nslookup: только IPv4 — «Address 1: 2a06:…» давал «ip 2»
+        [ -n "$ip" ] || ip=$("$BB" nslookup "$h" 1.1.1.1 2>/dev/null | sed -n '/^Name/,$p' | grep -oE 'Address( [0-9]+)?:[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1 | awk '{print $NF}')
+        case "$ip" in *.*.*.*) ;; *) echo "ERR не удалось узнать адрес $h"; exit 1 ;; esac
+        # "код время rc байт" — байт нужны, чтобы увидеть обрыв после ~16 КБ
         one() {
-            curl -s -o /dev/null -m 8 --interface "$wan" --capath "$CA" --resolve "$h:443:$ip" \
-                -w '%{http_code} %{time_total}' "https://$h/" 2>/dev/null
-            echo " $?"
+            local o rc
+            o=$(curl -s -o /dev/null -m 8 --interface "$wan" --capath "$CA" --resolve "$h:443:$ip" \
+                -w '%{http_code} %{time_total} %{size_download}' "https://$h/" 2>/dev/null)
+            rc=$?
+            set -- $o
+            echo "${1:-000} ${2:-0} $rc ${3:-0}"
         }
         echo "ip $ip"
-        echo "direct $(one)"
+        d=$(one)
+        echo "direct $d"
+        # Без обхода не открылось чисто — какой тип блокировки (мимо обхода):
+        # TCP до адреса (нет — блок по IP) и TLS на тот же адрес с нейтральным
+        # именем (проходит — режут именно имя сайта, DPI). Обрыв после ~16 КБ
+        # видно по байтам в direct. "probe <tcp 0|1> <tls_нейтральное 0|1>"
+        case "$d" in
+            "000 "*|*" 28 "*|*" 35 "*|*" 56 "*)
+                tcp=0; curl -v -s -o /dev/null -m 4 --interface "$wan" "http://$ip:443/" 2>&1 | grep -q "Connected to" && tcp=1
+                neu=0; [ "$tcp" = 1 ] && curl -v -sk -o /dev/null -m 5 --interface "$wan" --resolve "example.com:443:$ip" \
+                    https://example.com/ 2>&1 | grep -qiE "Server hello|SSL connection using|TLS handshake, Finished|alert" && neu=1
+                # «ответил сервер» — и ServerHello, и alert (Cloudflare на чужое имя): блок по
+                # IP и DPI на нейтральном имени дают тайм-аут или RST, а не ответ
+                echo "probe $tcp $neu" ;;
+        esac
         iptables -w 2 -t mangle -I POSTROUTING 1 $RULE_NFQ
         nk=$(cur_net); nl=${nk#*"|"}; nk=${nk%%"|"*}
         # группа 3998 (ZAPRET_GID): основной zapret пропускает её пакеты, даже
@@ -451,6 +529,7 @@ case "$1" in
 
     ytspeed)
         zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
+        warpgen_busy && { echo "ERR идёт создание конфига WARP — повторите через минуту"; exit 1; }
         # Скорость видео мимо VPN. ТСПУ режет по имени видеосервера в TLS (SNI),
         # а у настоящих видеосерверов нет большого файла без подписанной ссылки.
         # Поэтому: сервер Google (dl.google.com), имя в SNI — googlevideo.com,
@@ -463,7 +542,7 @@ case "$1" in
         CA=/apex/com.android.conscrypt/cacerts
         [ -d "$CA" ] || CA=/system/etc/security/cacerts
         Q=202
-        RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
+        RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
         yt_cleanup() {
             [ -n "$nqpid" ] && kill "$nqpid" 2>/dev/null
             iptables -w 2 -t mangle -D POSTROUTING $RULE_NFQ 2>/dev/null
@@ -672,6 +751,9 @@ case "$1" in
             echo "host $n ${eu:--} ${ru:--}"
         done
         ;;
+
+    warp-list|warp-gen|warp-import|warp-del|warp-export|warp-save|warp-saveall)
+        sh "$MODDIR/warp/warp.sh" "${1#warp-}" "$2" "$3" ;;
 
     *)
         echo "ERR команда"; exit 1 ;;

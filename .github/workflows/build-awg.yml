@@ -1,0 +1,74 @@
+# Сборка amneziawg-go (MIT) и awg из amneziawg-tools (GPL-2.0) под Android
+# (arm64 и armv7) для WARP-туннеля модуля. Исходники — официальные теги
+# amnezia-vpn, артефакты — бинарники + тарболы исходников (GPL: исходники
+# кладём рядом, как у conntrack в third_party/).
+# Каталог управляющего сокета на Android: /var/run нет — /data/local/tmp/amneziawg
+# (amneziawg-go — через -X ipc.socketDirectory, awg — через RUNSTATEDIR).
+name: build-awg
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [warp-awg]
+    paths: ['.github/workflows/build-awg.yml']
+
+env:
+  AWG_GO_TAG: v3.1.20260828
+  AWG_TOOLS_TAG: v3.1.20260812
+  SOCK_DIR: /data/local/tmp
+  NDK_MAJOR: 30
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Исходники
+        run: |
+          git clone --depth 1 --branch "$AWG_GO_TAG" https://github.com/amnezia-vpn/amneziawg-go.git
+          git clone --depth 1 --branch "$AWG_TOOLS_TAG" https://github.com/amnezia-vpn/amneziawg-tools.git
+          mkdir -p out
+          tar czf "out/amneziawg-go-$AWG_GO_TAG.tar.gz" --exclude=.git amneziawg-go
+          tar czf "out/amneziawg-tools-$AWG_TOOLS_TAG.tar.gz" --exclude=.git amneziawg-tools
+
+      - name: amneziawg-go (статический, Go)
+        working-directory: amneziawg-go
+        run: |
+          LD="-s -w -X github.com/amnezia-vpn/amneziawg-go/v3/ipc.socketDirectory=$SOCK_DIR/amneziawg"
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$LD" -o ../out/amneziawg-go-arm64 .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags "$LD" -o ../out/amneziawg-go-arm .
+
+      - name: awg (Android NDK)
+        working-directory: amneziawg-tools/src
+        run: |
+          # NDK закреплён по мажору (бинари 3.19 собраны r30): «последний» из образа
+          # молча сменился бы на r31 при обновлении раннера. Нет r30 — падаем.
+          NDK=$(ls -d "$ANDROID_HOME"/ndk/"$NDK_MAJOR".* 2>/dev/null | sort -V | tail -1)
+          [ -n "$NDK" ] || { echo "нет NDK r$NDK_MAJOR в образе: $(ls "$ANDROID_HOME"/ndk)"; exit 1; }
+          grep Pkg.Revision "$NDK/source.properties"
+          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          for a in aarch64-linux-android:arm64 armv7a-linux-androideabi:arm; do
+            t=${a%%:*}; n=${a##*:}
+            make clean >/dev/null 2>&1 || true
+            # цель Makefile — wg (это и есть awg); CFLAGS не трогаем: в нём
+            # Makefile сам добавляет -DRUNSTATEDIR и uapi/linux.
+            # Динамически, с системной libc, API 21: статическая libc.a NDK — под
+            # последний API и на старых ядрах падает (MT6580, 3.18: «arc4random
+            # MADV_WIPEONFORK failed»); заодно имена резолвит штатный netd.
+            make -j4 CC="$TC/${t}21-clang" PLATFORM=linux RUNSTATEDIR="$SOCK_DIR" wg
+            "$TC/llvm-strip" wg
+            cp wg "../../out/awg-$n"
+          done
+
+      - name: Проверка
+        run: |
+          file out/*
+          sha256sum out/* | tee out/SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: awg-android
+          path: out/
