@@ -1274,7 +1274,7 @@ function warpState(s) {
   switch (s.warp) {
     case 'up': {
       const k = s.warp_colo || '', where = k ? 'Выход: ' + coloName(k) : '';
-      if (s.warp_cf === '1' && COLO_RU.includes(k)) return { d: 'amber', t: 'Работает' + c, s: where + '. Через российские площадки Telegram и часть сайтов могут не открываться — другой ни на одном адресе не нашлось' };
+      if (s.warp_cf === '1' && COLO_RU.includes(k)) return { d: 'amber', t: 'Работает' + c, s: where + '. Через российские площадки Telegram и часть сайтов могут не открываться' };
       return { d: 'green', t: 'Работает' + c, s: where };
     }
     case 'starting': return { d: 'amber', t: 'Подключается' + c, s: '' };

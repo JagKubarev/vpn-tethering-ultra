@@ -44,6 +44,7 @@ WARP_COLO_UP=""          # площадка работающего туннел�
 # другой площадки ни на одном адресе нет. По списку Cloudflare в России — DME и LED
 WARP_RU_COLOS=" DME LED KJA "
 WARP_RU_EP=""            # адрес, выводивший на российскую площадку, — запасной
+WARP_RU_TRY=0            # к запасному российскому уже вернулись (его молчание — не «пул закрыт»)
 WARP_ENSURE_WAIT=300     # пауза перед повтором создания конфигов: удваивается, до часа
 WARP_BAD=""              # «имя:epoch …»
 WARP_RETRY_TS=0
@@ -243,7 +244,7 @@ warp_start() {   # имя конфига
     $ip -6 rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     WARP_CUR="$n"; WARP_STATE=starting; WARP_TS=$(date +%s); WARP_CHECK_TS=0; WARP_FAILS=0; WARP_NETCHG=0
     log "WARP: запускаю $n ($(sed -n 's/^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*//p' "$f" | head -1))"
-    WARP_HS=0; WARP_EP_TRIED=""; WARP_EP_SILENT=""; WARP_EP_Q=""; WARP_RU_EP=""
+    WARP_HS=0; WARP_EP_TRIED=""; WARP_EP_SILENT=""; WARP_EP_Q=""; WARP_RU_EP=""; WARP_RU_TRY=0
     if [ "$WARP_CF" = 1 ]; then
         WARP_EP_Q=$(warp_ep_list | awk 'NR > 1' | tr '\n' ' ')
         warp_ep_kick "$ep1"
@@ -367,13 +368,18 @@ warp_reconcile() {
                 elif ! warp_ep_step; then
                     if [ -n "$WARP_RU_EP" ]; then
                         # иначе — только российская площадка: лучше она, чем без WARP
-                        WARP_EP_Q="$WARP_RU_EP"; WARP_RU_EP=""
+                        WARP_EP_Q="$WARP_RU_EP"; WARP_RU_EP=""; WARP_RU_TRY=1
                         log "WARP: $WARP_CUR — другой площадки нет, беру $WARP_EP_Q (российская)"
                         warp_ep_next
                         return 0
                     fi
-                    log "WARP: $WARP_CUR — нет хендшейка ни на одном адресе (${WARP_EP_TRIED# }), беру следующий"
-                    WARP_EP_FULL=$((WARP_EP_FULL + 1))
+                    if [ "$WARP_RU_TRY" = 1 ]; then
+                        # хендшейк другие адреса давали — не «пул закрыт» (WARP_EP_FULL)
+                        log "WARP: $WARP_CUR — и запасной российский $WARP_EP_CUR не ответил, беру следующий"
+                    else
+                        log "WARP: $WARP_CUR — нет хендшейка ни на одном адресе (${WARP_EP_TRIED# }), беру следующий"
+                        WARP_EP_FULL=$((WARP_EP_FULL + 1))
+                    fi
                     warp_mark_bad "$WARP_CUR"; warp_down; warp_set_state off ""
                 fi
             elif warp_probe; then
@@ -401,7 +407,7 @@ warp_reconcile() {
                 if [ $WARP_FAILS -ge 3 ] && [ -n "$WARP_RU_EP" ]; then
                     # адрес после российского: хендшейк есть, трафика нет — конфиг
                     # не виноват, российский с трафиком уже был: к нему
-                    WARP_EP_Q="$WARP_RU_EP"; WARP_RU_EP=""; WARP_FAILS=0
+                    WARP_EP_Q="$WARP_RU_EP"; WARP_RU_EP=""; WARP_RU_TRY=1; WARP_FAILS=0
                     log "WARP: $WARP_CUR — через $WARP_EP_CUR нет трафика, беру $WARP_EP_Q (российская)"
                     warp_ep_next
                 elif [ $WARP_FAILS -ge 3 ]; then
