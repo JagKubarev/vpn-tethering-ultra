@@ -32,3 +32,9 @@ ozon.ru
 ozonbank.ru
 wildberries.ru
 wb.ru
+www.google.eu
+conn-service-eu-04.allawnos.com
+conn-service-eu-05.allawnos.com
+connectivitycheck.gstatic.com
+connectivitycheck.android.com
+clients3.google.com
