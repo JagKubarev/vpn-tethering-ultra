@@ -34,7 +34,12 @@ quic_block_uids() {   # пакеты
 quic_block_apply() {
     local uids t u rj pk
     pk=$(quic_block_pkgs)
-    [ -n "$pk" ] || return 0
+    # список опустел (клиент YouTube удалён, а QUIC_BLOCK_APPS пуст) — снять
+    # цепочку, иначе REJECT остаётся на uid удалённого пакета
+    if [ -z "$pk" ]; then
+        [ "$QUIC_LOGGED" = "1" ] && { quic_block_down; log "QUIC: закрывать некому — правила сняты"; }
+        return 0
+    fi
     uids=$(quic_block_uids "$pk")
     if [ "$uids" = "$QUIC_UIDS" ] && [ "$QUIC_LOGGED" = "1" ] && \
        $iptables -C OUTPUT -j "$CHAIN_QUIC" 2>/dev/null; then
