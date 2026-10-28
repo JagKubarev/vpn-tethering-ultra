@@ -215,7 +215,7 @@ meta_eu_start() {
     args="-l 127.0.0.1 -p $META_EU_PORT --edns --edns-addr=$DNS_META_ECS --timeout=3s --refuse-any"
     for u in $DNS_META_UPSTREAMS; do args="$args -u $u"; done
     for u in $DNS_FALLBACKS; do args="$args -f $u"; done
-    for u in $DNS_BOOTSTRAP; do args="$args -b $u"; done
+    for u in $DNS_BOOTSTRAP $DNS_BOOTSTRAP_ENC; do args="$args -b $u"; done
     : > "$META_EU_LOG"
     dnsproxy_spawn "$args" "$META_EU_LOG"
     i=0
@@ -377,7 +377,7 @@ dnsproxy_start() {
     fi
     # фолбэком не повторяем то, что уже основное (comss есть и в DNS_FALLBACKS)
     for u in $fb; do case " $ups " in *" $u "*) continue ;; esac; args="$args -f $u"; done
-    for u in $DNS_BOOTSTRAP; do args="$args -b $u"; done
+    for u in $DNS_BOOTSTRAP $DNS_BOOTSTRAP_ENC; do args="$args -b $u"; done
 
     : > "$DNSPROXY_LOG"
 

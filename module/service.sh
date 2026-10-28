@@ -606,6 +606,12 @@ DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-q
 # Чем резолвить имена самих апстримов (dns.wlrus.cfd и т.д.). Подмена тут не
 # страшна: TLS-сертификат апстрима всё равно проверяется.
 DNS_BOOTSTRAP="77.88.8.8:53 1.1.1.1:53 8.8.8.8:53"
+# Запасной bootstrap — DoH по IP (не в конфиге), идёт параллельно с обычным:
+# 28.10 соседский Wi-Fi Dom.ru не пускал DNS :53 наружу (только к роутеру) —
+# адреса DoH-серверов не находились, «не отвечали» все разом. DoH 1.1.1.1 и
+# 8.8.8.8 там проходил (9.9.9.9 и 77.88.8.8 по IP — нет). Ответ по TLS не
+# подменить, так что первым он прийти может безопасно.
+DNS_BOOTSTRAP_ENC="https://1.1.1.1/dns-query https://8.8.8.8/dns-query"
 DNSPROXY_PORT=5354
 # dnsproxy запускается как root:DNSPROXY_GID; по этому GID его трафик
 # исключается из перехвата AdGuard и прочих transparent-proxy (nat OUTPUT).
