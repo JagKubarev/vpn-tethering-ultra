@@ -1092,6 +1092,11 @@ async function loadApps() {
   try {
     if (HAS_KSU && typeof ksu.listPackages === 'function') {
       const pkgs = JSON.parse(ksu.listPackages('user'));
+      // + системные с иконкой (YouTube, Chrome из прошивки): в 'user' их нет
+      try {
+        const r = await ctl('apps');
+        r.out.split('\n').map((s) => s.trim()).forEach((p) => { if (p && !pkgs.includes(p)) pkgs.push(p); });
+      } catch (e) { /* только пользовательские, как раньше */ }
       let info = [];
       if (typeof ksu.getPackagesInfo === 'function') info = JSON.parse(ksu.getPackagesInfo(JSON.stringify(pkgs)));
       list = pkgs.map((p) => { const i = info.find((x) => x.packageName === p); return { pkg: p, label: (i && i.appLabel) || p }; });

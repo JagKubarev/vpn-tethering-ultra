@@ -12,7 +12,7 @@
 #   webctl.sh toggle           VPN <-> напрямую -> токен
 #   webctl.sh ack              последний подтверждённый токен
 #   webctl.sh log [N]          хвост лога
-#   webctl.sh apps             пакеты пользователя (если нет API менеджера)
+#   webctl.sh apps             пакеты пользователя + системные с иконкой
 #   webctl.sh doh              проверка DoH через запущенный dnsproxy
 #   webctl.sh zlist|zdefault|zauto    списки zapret: свой / встроенный / авто
 #   webctl.sh zlist-set 'д1 д2'       записать свой список (с проверкой)
@@ -258,7 +258,13 @@ case "$1" in
         ;;
 
     apps)
-        pm list packages -3 2>/dev/null | sed 's/^package://' | sort
+        # сторонние + системные с иконкой: YouTube и Chrome из прошивки —
+        # системные, в -3 (и в listPackages('user') менеджера) их нет.
+        # query-activities — Android 7+; нет — как раньше, только сторонние
+        { pm list packages -3 2>/dev/null | sed 's/^package://'
+          cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 2>/dev/null | \
+              sed -n 's|^ *\([A-Za-z0-9_.]*\)/.*|\1|p'
+        } | sort -u
         ;;
 
     doh)
