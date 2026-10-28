@@ -30,11 +30,20 @@ WARP_EP0=""              # адрес из конфига (engage… — чис�
 WARP_EP_FILE=$WARP_DIR/.endpoints   # «сеть|адрес» — рабочий адрес Cloudflare для сети
 WARP_EP_FULL=0           # конфигов за круг, не давших хендшейк ни на одном адресе пула
 WARP_EP_TRIED=""         # адреса, уже испробованные этим конфигом
+WARP_EP_SILENT=""        # из них не давшие хендшейк (для лога «молчали»)
 WARP_EP_Q=""             # ещё не испробованные
 WARP_EP_CUR=""           # пробуем сейчас
 WARP_EP_T0=0             # когда подан (мс от загрузки)
 WARP_HS=0                # хендшейк на WARP_EP_CUR был
 WARP_NETCHG=0            # сменилась сеть (loop.sh), туннель на ней ещё не проверен
+WARP_COLO=""             # площадка Cloudflare из последней проверки (colo= в trace)
+WARP_COLO_UP=""          # площадка работающего туннеля — в status (warp_colo)
+# Российские площадки Cloudflare: с российского адреса там режут часть
+# адресов — Telegram по IPv4 и др. (форум Cloudflare, 02 и 04.2026: DME, KJA,
+# LED; с европейских HEL/ARN/FRA работает). WARP через них — только если
+# другой площадки ни на одном адресе нет. По списку Cloudflare в России — DME и LED
+WARP_RU_COLOS=" DME LED KJA "
+WARP_RU_EP=""            # адрес, выводивший на российскую площадку, — запасной
 WARP_ENSURE_WAIT=300     # пауза перед повтором создания конфигов: удваивается, до часа
 WARP_BAD=""              # «имя:epoch …»
 WARP_RETRY_TS=0
@@ -64,7 +73,7 @@ warp_down() {   # [причина] — пусто: молча
     warp_kill_strays
     rm -f "$WARP_SOCK_DIR/$WARP_IF.sock" "$WARP_DIR/.run.wg"
     [ -n "$1" ] && [ "$WARP_STATE" != off ] && log "WARP: туннель снят ($1)"
-    WARP_PID=""; WARP_CUR=""; WARP_STATE=off; WARP_FAILS=0
+    WARP_PID=""; WARP_CUR=""; WARP_STATE=off; WARP_FAILS=0; WARP_COLO_UP=""
 }
 
 # Конфиги по порядку: выбранный в WARP_CONF первым, дальше по имени
@@ -146,20 +155,29 @@ warp_ep_step() {   # 0 — ждём или дождались (WARP_HS=1), 1 —
         # запомнить для сети — после warp=on (warp_reconcile): хендшейк без
         # трафика не повод ставить адрес первым для всех конфигов
         WARP_HS=1; WARP_EP_FULL=0
-        was="${WARP_EP_TRIED% $WARP_EP_CUR}"; was="${was# }"
+        was="${WARP_EP_SILENT# }"
         [ "$WARP_EP_CUR" = "$WARP_EP0" ] || log "WARP: $WARP_CUR — через $WARP_EP_CUR${was:+ (молчали: $was)}"
         return 0
     fi
     [ $(( $(uptime_ms) - WARP_EP_T0 )) -lt 4000 ] && return 0
+    WARP_EP_SILENT="$WARP_EP_SILENT $WARP_EP_CUR"
+    warp_ep_next
+}
+
+warp_ep_next() {   # следующий адрес из очереди в туннель; 1 — очередь пуста
+    local e
     set -- $WARP_EP_Q
     [ $# -gt 0 ] || return 1
     e="$1"; shift; WARP_EP_Q="$*"
     warp_wg_file "$WARP_DIR/$WARP_CUR.conf" "$e"
     "$AWG_BIN" setconf "$WARP_IF" "$WARP_DIR/.run.wg" >> "$WARP_RUN.log" 2>&1
     rm -f "$WARP_DIR/.run.wg"
+    WARP_HS=0
     warp_ep_kick "$e"
     return 0
 }
+
+warp_colo_ru() { case "$WARP_RU_COLOS" in *" $WARP_COLO "*) return 0 ;; esac; return 1; }
 
 warp_start() {   # имя конфига
     local n="$1" f="$WARP_DIR/$1.conf" a mtu i=0 rc ep1=""
@@ -225,7 +243,7 @@ warp_start() {   # имя конфига
     $ip -6 rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     WARP_CUR="$n"; WARP_STATE=starting; WARP_TS=$(date +%s); WARP_CHECK_TS=0; WARP_FAILS=0; WARP_NETCHG=0
     log "WARP: запускаю $n ($(sed -n 's/^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*//p' "$f" | head -1))"
-    WARP_HS=0; WARP_EP_TRIED=""; WARP_EP_Q=""
+    WARP_HS=0; WARP_EP_TRIED=""; WARP_EP_SILENT=""; WARP_EP_Q=""; WARP_RU_EP=""
     if [ "$WARP_CF" = 1 ]; then
         WARP_EP_Q=$(warp_ep_list | awk 'NR > 1' | tr '\n' ' ')
         warp_ep_kick "$ep1"
@@ -246,6 +264,7 @@ warp_probe() {
         su -g "$DNSPROXY_GID" -c true >/dev/null 2>&1 && WARP_SU_G=1
     fi
     if [ "$WARP_SU_G" = "1" ]; then out=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else out=$(eval "$cmd" 2>/dev/null); fi
+    WARP_COLO=$(echo "$out" | sed -n 's/^colo=\([A-Z]*\).*/\1/p' | head -1)
     if [ "$WARP_CF" = 1 ]; then
         case "$out" in *warp=on*|*warp=plus*) return 0 ;; esac
     else
@@ -346,13 +365,33 @@ warp_reconcile() {
                     log "WARP: $WARP_CUR — amneziawg-go завершился при запуске ($(tail -1 "$WARP_RUN.log" 2>/dev/null | cut -c1-120))"
                     warp_mark_bad "$WARP_CUR"; warp_down; warp_set_state off ""
                 elif ! warp_ep_step; then
+                    if [ -n "$WARP_RU_EP" ]; then
+                        # иначе — только российская площадка: лучше она, чем без WARP
+                        WARP_EP_Q="$WARP_RU_EP"; WARP_RU_EP=""
+                        log "WARP: $WARP_CUR — другой площадки нет, беру $WARP_EP_Q (российская)"
+                        warp_ep_next
+                        return 0
+                    fi
                     log "WARP: $WARP_CUR — нет хендшейка ни на одном адресе (${WARP_EP_TRIED# }), беру следующий"
                     WARP_EP_FULL=$((WARP_EP_FULL + 1))
                     warp_mark_bad "$WARP_CUR"; warp_down; warp_set_state off ""
                 fi
             elif warp_probe; then
-                log "WARP: $WARP_CUR поднят за $(( $(date +%s) - WARP_TS )) с"
-                [ "$WARP_CF" = 1 ] && warp_ep_save "$WARP_EP_CUR"
+                if [ "$WARP_CF" = 1 ] && warp_colo_ru && [ -n "$WARP_EP_Q" ]; then
+                    # российская площадка — сначала остальные адреса; эта — запасная
+                    log "WARP: $WARP_CUR — $WARP_EP_CUR выводит на российскую площадку $WARP_COLO (там режут Telegram и др.), пробую следующий адрес"
+                    [ -n "$WARP_RU_EP" ] || WARP_RU_EP="$WARP_EP_CUR"
+                    WARP_FAILS=0
+                    warp_ep_next
+                    return 0
+                fi
+                log "WARP: $WARP_CUR поднят за $(( $(date +%s) - WARP_TS )) с${WARP_COLO:+ (площадка $WARP_COLO)}"
+                if [ "$WARP_CF" = 1 ] && warp_colo_ru; then
+                    log "WARNING: WARP: только российская площадка Cloudflare ($WARP_COLO) — Telegram и часть сайтов через WARP могут не открываться"
+                elif [ "$WARP_CF" = 1 ]; then
+                    warp_ep_save "$WARP_EP_CUR"
+                fi
+                WARP_COLO_UP="$WARP_COLO"
                 WARP_TS=$(date +%s); WARP_CHECK_TS=$WARP_TS; WARP_FAILS=0
                 warp_set_state up ""
                 warp_routes_reconcile
@@ -385,6 +424,14 @@ warp_reconcile() {
             if warp_probe; then
                 [ $WARP_FAILS -gt 0 ] && log "WARP: $WARP_CUR снова отвечает"
                 WARP_FAILS=0; WARP_NETCHG=0
+                # Cloudflare перевёл на другую площадку (роуминг, маршруты) — в лог
+                # и в статус; на российскую посреди работы — только предупредить
+                if [ -n "$WARP_COLO" ] && [ "$WARP_COLO" != "$WARP_COLO_UP" ]; then
+                    log "WARP: площадка сменилась: ${WARP_COLO_UP:-?} -> $WARP_COLO"
+                    [ "$WARP_CF" = 1 ] && warp_colo_ru && \
+                        log "WARNING: WARP: российская площадка Cloudflare ($WARP_COLO) — Telegram и часть сайтов через WARP могут не открываться"
+                    WARP_COLO_UP="$WARP_COLO"; phone_status_refresh
+                fi
             elif [ "$WARP_NETCHG" = 1 ]; then
                 # сменилась сеть, а туннель молчит — сразу заново (хендшейк и
                 # адрес для этой сети), не ждать 3 промаха (~30 с, лог 28.10:

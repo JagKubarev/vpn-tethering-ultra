@@ -142,6 +142,7 @@ update_status() {
         echo "warp=$([ "$WARP_ENABLE" = 1 ] && echo "$WARP_STATE" || echo disabled)"
         echo "warp_conf=$WARP_CUR"
         echo "warp_note=$WARP_NOTE"
+        echo "warp_colo=$WARP_COLO_UP"
         echo "conf_note=$USER_CONF_NOTE"
         echo "updated=$(date '+%H:%M:%S')"
     } > "$STATUS_FILE.tmp" 2>/dev/null && mv -f "$STATUS_FILE.tmp" "$STATUS_FILE"
