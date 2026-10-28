@@ -29,7 +29,7 @@ KernelSU/Magisk-модуль (id `vpn-to-hotspot-usb`, автор Kubarev, те�
 - `module/webctl.sh` + `module/webroot/index.html` — WebUI, только фиксированные команды.
 - `module/zapret/` — `scan.sh` (подбор / сторож / сайты), `ytslow.sh`, `netid.sh`, списки.
 - `module/warp/` — `warp.sh` (хранилище конфигов WARP: создать, импорт, экспорт), списки
-  сетей групп (Telegram, Google без GCP, общие CDN).
+  сетей групп (Telegram, Google без GCP, общие CDN), `endpoints.txt` — пул адресов Cloudflare.
 - `module/bin/` — `nfqws`, `dnsproxy`, `conntrack`, `amneziawg-go`, `awg` (arm64 + armv7).
 - `third_party/conntrack/`, `third_party/amneziawg/` — тарболы исходников `bin/conntrack-*` и
   AmneziaWG (GPL), в zip не входят. awg/amneziawg-go собираются в Actions (`build-awg.yml`).
