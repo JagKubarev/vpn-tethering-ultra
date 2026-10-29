@@ -142,6 +142,14 @@ yt_dead_on() {
         yt_dead_hooks_off; YT_DEAD_STATE="fail"; return 0
     fi
     YT_DEAD_FAILS=0
+    # хук QUIC — ещё раз, если не встал (блокировка xtables от AdGuard при -w 2):
+    # иначе отбой «включён» без QUIC до следующей переустановки (ревью 29.10)
+    $iptables -C FORWARD $YT_QMATCH -j "$CHAIN_YT_DEAD" 2>/dev/null || \
+        $iptables -I FORWARD 1 $YT_QMATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
+    if [ "$ZAPRET_PHONE" = "1" ]; then
+        $iptables -C OUTPUT $YT_QMATCH -j "$CHAIN_YT_DEAD" 2>/dev/null || \
+            $iptables -I OUTPUT 1 $YT_QMATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
+    fi
     [ "$YT_DEAD_STATE" = "on" ] || log "zapret: отбой мёртвых и молчащих серверов YouTube и Play включён (нет ответа ${YT_DEAD_AFTER}с, на запрос ${YT_SILENT_AFTER}с и проверка не прошла -> RST на $((YT_DEAD_TTL / 60)) мин)"
     YT_DEAD_STATE="on"
 }
