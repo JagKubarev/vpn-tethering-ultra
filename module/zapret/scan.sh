@@ -172,8 +172,11 @@ if [ "$MODE" = quick ] || [ "$MODE" = full ]; then
     case " $SITES " in
         *googlevideo.com*) ;;
         *youtube.com*|*ytimg.com*)
+            # до 13 с (4 + 5 + 4) — видно в WebUI, а не «подготовка»
+            st stage="ищу видеосервер YouTube"
+            # имя не пустое: строка «=>» без имени не заслоняет следующую
             _gv=$(curl -s -m 4 --interface "$WAN" "http://redirector.googlevideo.com/report_mapping?di=no" 2>/dev/null | \
-                sed -n 's/.*=> *\([a-z0-9-]*\).*/\1/p' | head -n 1)
+                sed -n 's/.*=> *\([a-z0-9-][a-z0-9-]*\).*/\1/p' | head -n 1)
             case "$_gv" in
                 ''|*[!uzpkfa50vqlgb61wrmhc72xsnid83ytoje94-]*) ;;
                 *)
@@ -556,7 +559,8 @@ fi
 
 if [ "$MODE" = "quick" ]; then
     # проверенные шаблоны (autottl убран: ломал обычные сайты во всех 6 проверенных сетях)
-    S_total=23
+    # + S_done: после сторожа (check) прогоны уже были — иначе «30 из 23»
+    S_total=$((S_done + 23))
     st stage="быстрый подбор"
     while IFS= read -r a; do
         [ -n "$a" ] && run_strat "$a" "быстрый"
