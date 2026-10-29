@@ -68,7 +68,8 @@ quic_adguard() {   # uid клиентов YouTube с подделкой; пус�
         for u in $QUIC_AG_UIDS; do
             case " $1 " in *" $u "*) ;; *) $t -D ADGUARD_OUTPUT -p udp --dport 443 -m owner --uid-owner "$u" -j RETURN 2>/dev/null ;; esac
         done
-        if [ -n "$1" ]; then
+        # gid nfqws — и при подделке QUIC раздачи: её подделки тоже идут через OUTPUT
+        if [ -n "$1" ] || [ "$ZAPRET_QF_ON" = "1" ]; then
             $t -C ADGUARD_OUTPUT -p udp --dport 443 -m owner --gid-owner "$ZAPRET_GID" -j RETURN 2>/dev/null || \
                 $t -I ADGUARD_OUTPUT 1 -p udp --dport 443 -m owner --gid-owner "$ZAPRET_GID" -j RETURN 2>/dev/null
             for u in $1; do
@@ -97,6 +98,7 @@ quic_block_apply() {
     # цепочки, иначе REJECT остаётся на uid удалённого пакета
     if [ -z "$uids" ] && [ -z "$fuids" ]; then
         [ "$QUIC_LOGGED" = "1" ] && { quic_block_down; log "QUIC: закрывать некому — правила сняты"; }
+        quic_adguard ""   # RETURN для gid nfqws при подделке QUIC раздачи
         return 0
     fi
     if [ "$uids|$fuids" = "$QUIC_SIG" ] && [ "$QUIC_LOGGED" = "1" ] && \
