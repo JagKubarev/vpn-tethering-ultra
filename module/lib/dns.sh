@@ -750,22 +750,32 @@ wan_bytes() {
 # (метро 29.10: откат каждые ~2 мин, 3 перезапуска dnsproxy, потом ответы
 # оператора). Белые списки: оператор отвечает -> откат, как раньше.
 # 0 = «оператор мёртв»; только напрямую, адресов не нашли — 1 (откат как раньше).
-DNS_OP_CACHE=""        # «WAN|адреса» — dumpsys тяжёлый, раз на WAN
+DNS_OP_CACHE=""        # «WAN|адреса» — dumpsys тяжёлый: пока оператор отвечает
 dns_operator_dead() {
-    local w s ms="$DNS_PROBE_LAST_MS" r=1
+    local w s old="" ms="$DNS_PROBE_LAST_MS" r=1
     [ "$DNS_STATE_MODE" != "vpn" ] || return 1
     w="$LAST_WAN_IFACE"; [ -n "$w" ] || return 1
-    if [ "${DNS_OP_CACHE%%|*}" != "$w" ]; then
-        s=$(dumpsys connectivity 2>/dev/null | grep -oE "InterfaceName: [^ ]+|DnsAddresses: \[[^]]*\]" | \
-            awk -v w="$w" '$0 == "InterfaceName: " w {f = 1; next} f && /^DnsAddresses/ {print; exit} /^InterfaceName/ {f = 0}' | \
-            grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -2 | tr '\n' ' ')
-        [ -n "$s" ] || return 1
-        DNS_OP_CACHE="$w|$s"
-    fi
-    for s in ${DNS_OP_CACHE#*|}; do
+    [ "${DNS_OP_CACHE%%|*}" = "$w" ] && old="${DNS_OP_CACHE#*|}"
+    for s in $old; do
         dnsproxy_probe "$s"; r=$?
         [ "$r" = 1 ] || break
     done
+    if [ "$r" = 1 ]; then
+        # нет в кэше или из кэша молчат: адреса могли смениться при том же WAN
+        # (другая точка на wlan0, переподключение мобильной) — старый адрес
+        # роутера молчал бы, и при живом операторе откат не делался бы
+        s=$(dumpsys connectivity 2>/dev/null | grep -oE "InterfaceName: [^ ]+|DnsAddresses: \[[^]]*\]" | \
+            awk -v w="$w" '$0 == "InterfaceName: " w {f = 1; next} f && /^DnsAddresses/ {print; exit} /^InterfaceName/ {f = 0}' | \
+            grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -2 | tr '\n' ' ')
+        if [ -z "$s" ]; then DNS_OP_CACHE=""; DNS_PROBE_LAST_MS="$ms"; return 1; fi
+        DNS_OP_CACHE="$w|$s"
+        if [ "$s" != "$old" ]; then
+            for s in $s; do
+                dnsproxy_probe "$s"; r=$?
+                [ "$r" = 1 ] || break
+            done
+        fi
+    fi
     DNS_PROBE_LAST_MS="$ms"
     [ "$r" = 1 ]
 }
@@ -858,13 +868,19 @@ dns_health() {
     # Пассивный сигнал: в логе dnsproxy появились "exchange failed" — у
     # клиентов уже сыпятся ошибки, проверяем сейчас, не ждём интервал.
     sz=$(wc -c < "$DNSPROXY_LOG" 2>/dev/null || echo 0)
-    if [ "$DNS_DEGRADED" = "0" ] && [ "$sz" -gt "$DNS_LOG_SEEN" ] 2>/dev/null; then
+    # «сети нет» (DNS_NONET) — «exchange failed» сыплются на каждый запрос клиентов:
+    # не повод проверять в каждом проходе цикла (проверка там до ~17 с)
+    if [ "$DNS_DEGRADED" = "0" ] && [ "$DNS_NONET" != 1 ] && [ "$sz" -gt "$DNS_LOG_SEEN" ] 2>/dev/null; then
         tail -c $((sz - DNS_LOG_SEEN)) "$DNSPROXY_LOG" 2>/dev/null | grep -q "exchange failed" && DNS_HEALTH_LAST=0
     fi
     DNS_LOG_SEEN="$sz"
 
     period="$DNS_HEALTH_INTERVAL"
     [ "$DNS_DEGRADED" = "1" ] && [ "$DNS_FAST_RECHECK" != "1" ] && period="$DNS_HEALTH_RECOVER"
+    # сети нет: вернётся — dnsproxy заработает и без нас, ждём только белые
+    # списки (оператор отвечает) — с периодом отката
+    # (до правки метро и было откатом с этим периодом)
+    [ "$DNS_NONET" = 1 ] && period="$DNS_HEALTH_RECOVER"
     [ $((now - DNS_HEALTH_LAST)) -lt "$period" ] && return 0
 
     # Проверяем только при реальном использовании: иначе DoH-запрос раз в
