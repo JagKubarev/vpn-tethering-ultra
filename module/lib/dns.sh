@@ -940,8 +940,19 @@ dns_health() {
                 # а стоил бы кэша dnsproxy (3 перезапуска) и ответов оператора потом
                 [ "$DNS_NONET" = 1 ] || log "DoH молчит ($why), но и DNS оператора молчит — сети нет, DNS не трогаю"
                 DNS_NONET=1
-            else
+            elif [ "$DNS_NONET" = 1 ]; then
+                # сеть только что вернулась (оператор ожил), а DoH-соединение
+                # dnsproxy висит на старом пути (тест 29.10 13:06: через 2 с после
+                # возврата — откат на оператора на 36 с, окно для гео-ошибок):
+                # сначала свежий dnsproxy, откат — только если и он молчит
                 DNS_NONET=0
+                dnsproxy_restart "сеть вернулась" quiet
+                if dnsproxy_probe_cold; then
+                    log "DoH снова отвечает (сеть вернулась)"
+                else
+                    dns_try_alt "$why" || dns_degrade "$why"
+                fi
+            else
                 dns_try_alt "$why" || dns_degrade "$why"
             fi
         else
