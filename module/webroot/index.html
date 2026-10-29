@@ -615,7 +615,8 @@ details.more > summary { color: var(--muted); }
     <textarea id="warpPasteText" rows="6" aria-label="Текст конфига" placeholder="[Interface]&#10;PrivateKey = …" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
     <div class="inline"><input type="text" id="warpPasteName" placeholder="имя латиницей, необязательно" aria-label="Имя конфига, латиницей, необязательно" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="warpPasteOk">Добавить</button></div>
   </div>
-  <input type="file" id="warpFile" accept=".conf,.zip,text/plain,application/zip" multiple style="display:none">
+  <!-- без accept: у .conf на Android нет MIME, выбор файлов делал их серыми (только txt/zip); содержимое проверяет warpImport -->
+  <input type="file" id="warpFile" multiple style="display:none">
 </div>
 <div class="hint">«Создать» регистрирует новый конфиг в Cloudflare прямо с телефона. Импорт — файлы .conf из AmneziaVPN или WireGuard и zip-экспорт AmneziaVPN. «Основной» пробуется первым; если конфиг перестал отвечать, модуль сам переходит на следующий.</div>
 <div class="hint">«Сохранить» кладёт конфиг в «Загрузки», «Сохранить все в zip» — все сразу, как экспорт AmneziaVPN. В файле закрытый ключ: его видят приложения с доступом к памяти — не публикуйте и удалите после переноса.</div>
