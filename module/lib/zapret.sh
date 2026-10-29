@@ -35,8 +35,9 @@ quic_yt_pkgs() {   # установленные клиенты YouTube (при Q
 # Профиль UDP должен быть у запущенного nfqws: после «Применить» аргументы
 # пересобираются только в следующем пересчёте — без профиля QUIC прошёл бы голым
 quic_fake_on() {
+    # ZAPRET_PHONE=0 — обход только для раздачи: трафик телефона не трогаем
     [ "$QUIC_BLOCK_YT" = "1" ] && [ "$QUIC_YT_FAKE" = "1" ] && [ "$ZAPRET_STATE" = "on" ] && \
-        zapret_cap cb && zapret_cap nfq || return 1
+        [ "$ZAPRET_PHONE" = "1" ] && zapret_cap cb && zapret_cap nfq || return 1
     case "$ZAPRET_ARGS_RUN" in *quic_initial_www_google_com.bin*) return 0 ;; esac
     return 1
 }
