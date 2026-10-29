@@ -273,11 +273,13 @@ yt_dead_add() {
         log "WARNING: YouTube: слишком много «мёртвых» видеосерверов подряд — похоже, сломан обход или связь; 5 мин новые не отбиваю"
         return 1
     fi
-    nlist=$(awk 'END {print NR}' "$YT_DEAD_FILE" 2>/dev/null)
-    [ "${nlist:-0}" -ge "$YT_DEAD_MAX" ] && return 1
     # второй мёртвый в той же /28 — отбиваем её целиком (в записи —
     # все замеченные адреса: по ним перепроверка поймёт, ожила ли она)
     sib=$(awk -v p="${dip%.*}." -v b="$b" 'index($1, p) == 1 && $1 ~ /\/32$/ { a = $1; sub(/\/32$/, "", a); l = substr(a, length(p) + 1); if (l - l % 16 == b) printf "%s,", a }' "$YT_DEAD_FILE" 2>/dev/null)
+    # лимит — только для новой записи: /28 заменяет свои /32, записей не прибавит
+    # (с /28 одиночных /32 копится больше — при полном списке стойка не закрывалась)
+    nlist=$(awk 'END {print NR}' "$YT_DEAD_FILE" 2>/dev/null)
+    [ -z "$sib" ] && [ "${nlist:-0}" -ge "$YT_DEAD_MAX" ] && return 1
     if [ -n "$sib" ]; then
         awk -v p="${dip%.*}." -v b="$b" '{ a = $1; if (index(a, p) == 1 && a ~ /\/32$/) { sub(/\/32$/, "", a); l = substr(a, length(p) + 1); if (l - l % 16 == b) next } print }' "$YT_DEAD_FILE" > "$YT_DEAD_FILE.tmp" && mv -f "$YT_DEAD_FILE.tmp" "$YT_DEAD_FILE"
         echo "$n28 $((now + YT_DEAD_TTL)) $sib$dip" >> "$YT_DEAD_FILE"

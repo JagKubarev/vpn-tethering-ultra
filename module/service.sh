@@ -728,8 +728,8 @@ YT_GGC_BLOCK=0
 # Мёртвые видеосерверы YouTube (3.0). 21.10, YOTA: часть серверов Google
 # (sn-4g5…) не отвечает вовсе — сервер подтверждает ClientHello, но не шлёт
 # ни байта; плеер ждёт ~27с. Демон видит такие соединения с googlevideo.com
-# (conntrack) и на YT_DEAD_TTL сек отбивает их /24 (RST) — плеер сразу идёт
-# на другой сервер. Только мимо VPN и пока zapret включён, только IPv4.
+# (conntrack) и на YT_DEAD_TTL сек отбивает их (RST: адрес /32, второй в той же
+# /28 — её целиком) — плеер сразу идёт на другой сервер. Только мимо VPN и пока zapret включён, только IPv4.
 # 3.17: то же для серверов загрузок Play Маркета (gvt1.com, те же кластеры
 # sn-4g5…: Play ждёт молчащий сервер бесконечно, после RST берёт другой) и
 # «молчит после запроса»: рукопожатие было, а на запрос ни байта — такой
@@ -1237,13 +1237,13 @@ GVT_MATCH="-p tcp --dport 443 -m connbytes --connbytes-dir original --connbytes-
 GGC_STATE=""            # что стоит: "" | v4 | v4+v6 (для лога)
 # Мёртвые видеосерверы (YT_DEAD_FAILFAST). Соединения с googlevideo.com
 # помечаются битом connmark (у netd — младшие 0xfffff, этот бит не трогает),
-# демон ищет их в conntrack и отбивает /24 мёртвых серверов.
+# демон ищет их в conntrack и отбивает мёртвые серверы (/32, второй — /28).
 CHAIN_YT_MARK="VPN_YT_MARK"     # mangle OUTPUT/FORWARD: пометить googlevideo.com
 CHAIN_YT_DEAD="VPN_YT_DEAD"     # filter OUTPUT/FORWARD: мёртвые подсети -> RST
 YT_CTMARK=0x10000000
 YT_GCTMARK=0x04000000   # gvt1.com (Play): отбой мёртвых да, обрыв медленных (ytslow.sh) — нет
 YT_SILENT_MAX=16384     # молчит после запроса: от сервера не больше (рукопожатие ~5 КБ)
-YT_DEAD_FILE="/data/local/tmp/vpn_tether_ytdead"   # "подсеть/24 до_когда(epoch) ip"
+YT_DEAD_FILE="/data/local/tmp/vpn_tether_ytdead"   # "адрес/32|сеть/28 до_когда(epoch) ip[,ip…]"
 YT_SEEN_FILE="/data/local/tmp/vpn_tether_ytseen"   # кандидаты: "кортеж впервые вид учтён байт_ответа когда_менялись"
 YT_SPROBE_FILE="/data/local/tmp/vpn_tether_ytsprobe"  # проверка молчащих: .in .done .ok
 YT_SPROBE_PID=""
