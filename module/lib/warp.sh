@@ -24,6 +24,7 @@ WARP_PID=""
 WARP_TS=0                # когда запущен / поднялся
 WARP_CHECK_TS=0          # последняя проверка трафиком (0 — проверить сейчас)
 WARP_FAILS=0             # проверок подряд без ответа
+WARP_NONET=0             # туннель молчит, и напрямую сети нет (warp_uplink) — конфиг держим
 WARP_CRASH=""            # конфиг, упавший сразу после подъёма (второй раз — в «плохие»)
 WARP_CF=0                # Endpoint — сервер Cloudflare: проверка требует warp=on
 WARP_EP0=""              # адрес из конфига (engage… — числом)
@@ -74,7 +75,7 @@ warp_down() {   # [причина] — пусто: молча
     warp_kill_strays
     rm -f "$WARP_SOCK_DIR/$WARP_IF.sock" "$WARP_DIR/.run.wg"
     [ -n "$1" ] && [ "$WARP_STATE" != off ] && log "WARP: туннель снят ($1)"
-    WARP_PID=""; WARP_CUR=""; WARP_STATE=off; WARP_FAILS=0; WARP_COLO_UP=""
+    WARP_PID=""; WARP_CUR=""; WARP_STATE=off; WARP_FAILS=0; WARP_NONET=0; WARP_COLO_UP=""
 }
 
 # Конфиги по порядку: выбранный в WARP_CONF первым, дальше по имени
@@ -274,6 +275,23 @@ warp_probe() {
     return 1
 }
 
+# Сеть вообще есть? Туннель молчит — проверка мимо него (Cloudflare, Google по IP).
+# Метро 29.10 11:15–11:22: связь пропадала каждые ~2 мин, и WARP браковал
+# конфиг за конфигом (4 штуки), хотя молчало всё — DoH, YouTube. Белые списки
+# оператора — тоже «сети нет»: перебор конфигов там не поможет
+# (только «дошёл ли ответ» — -k, сертификат не важен)
+warp_uplink() {
+    local u
+    for u in https://1.1.1.1/cdn-cgi/trace https://8.8.8.8/; do
+        if [ "$WARP_SU_G" = "1" ]; then
+            su -g "$DNSPROXY_GID" -c "curl -s -k -m 3 -o /dev/null $u" >/dev/null 2>&1 && return 0
+        else
+            curl -s -k -m 3 -o /dev/null "$u" >/dev/null 2>&1 && return 0
+        fi
+    done
+    return 1
+}
+
 # Первый запуск: конфигов нет — создать 3 (в фоне: регистрация до ~15 с)
 warp_ensure() {
     local r
@@ -373,6 +391,12 @@ warp_reconcile() {
                         warp_ep_next
                         return 0
                     fi
+                    if ! warp_uplink; then
+                        # и напрямую сети нет (метро) — конфиг не виноват: тот же заново
+                        log "WARP: $WARP_CUR — нет хендшейка, но и напрямую сети нет — конфиг не бракую"
+                        warp_down; warp_set_state off ""
+                        return 0
+                    fi
                     if [ "$WARP_RU_TRY" = 1 ]; then
                         # хендшейк другие адреса давали — не «пул закрыт» (WARP_EP_FULL)
                         log "WARP: $WARP_CUR — и запасной российский $WARP_EP_CUR не ответил, беру следующий"
@@ -410,6 +434,9 @@ warp_reconcile() {
                     WARP_EP_Q="$WARP_RU_EP"; WARP_RU_EP=""; WARP_RU_TRY=1; WARP_FAILS=0
                     log "WARP: $WARP_CUR — через $WARP_EP_CUR нет трафика, беру $WARP_EP_Q (российская)"
                     warp_ep_next
+                elif [ $WARP_FAILS -ge 3 ] && ! warp_uplink; then
+                    log "WARP: $WARP_CUR — нет трафика, но и напрямую сети нет — конфиг не бракую"
+                    warp_down; warp_set_state off ""
                 elif [ $WARP_FAILS -ge 3 ]; then
                     log "WARP: $WARP_CUR — нет трафика через туннель, беру следующий"
                     warp_mark_bad "$WARP_CUR"; warp_down; warp_set_state off ""
@@ -434,8 +461,8 @@ warp_reconcile() {
             [ $((now - WARP_CHECK_TS)) -lt $WARP_CHECK_SECS ] && return 0
             WARP_CHECK_TS=$now
             if warp_probe; then
-                [ $WARP_FAILS -gt 0 ] && log "WARP: $WARP_CUR снова отвечает"
-                WARP_FAILS=0; WARP_NETCHG=0
+                { [ $WARP_FAILS -gt 0 ] || [ "$WARP_NONET" = 1 ]; } && log "WARP: $WARP_CUR снова отвечает"
+                WARP_FAILS=0; WARP_NETCHG=0; WARP_NONET=0
                 # Cloudflare перевёл на другую площадку (роуминг, маршруты) — в лог
                 # и в статус; на российскую посреди работы — только предупредить
                 if [ -n "$WARP_COLO" ] && [ "$WARP_COLO" != "$WARP_COLO_UP" ]; then
@@ -450,6 +477,13 @@ warp_reconcile() {
                 # Wi-Fi -> Wi-Fi без пропадания WAN). Конфиг не виноват
                 WARP_NETCHG=0
                 warp_down "сменилась сеть"; warp_set_state off ""
+            elif ! warp_uplink; then
+                # мимо туннеля тоже тишина — конфиг не виноват: держим его,
+                # проверяем чаще; оживёт сеть — «снова отвечает». Промахи — с нуля:
+                # туннелю после возврата сети нужен новый хендшейк (тест: 1 промах)
+                WARP_CHECK_TS=$((now - WARP_CHECK_SECS + 10))
+                [ "$WARP_NONET" = 1 ] || log "WARP: $WARP_CUR не отвечает, но и напрямую сети нет — конфиг не меняю"
+                WARP_NONET=1; WARP_FAILS=0
             else
                 WARP_FAILS=$((WARP_FAILS + 1))
                 # после сбоя — проверять чаще: 3 подряд ≈ полминуты
