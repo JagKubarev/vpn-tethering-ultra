@@ -296,14 +296,20 @@ uptime_ms() {
     echo $(( ${u:-0} * 10 ))
 }
 
-dnsproxy_probe() {
-    local lbl f nc_pid t0 now out
+dnsproxy_probe() {   # [адрес] — по умолчанию dnsproxy; с адресом — :53 от группы dnsproxy
+    local lbl f nc_pid t0 now out nc
     [ -n "$BUSYBOX" ] || return 0   # нечем проверить — не блокируем запуск
     lbl=$(printf 'p%09d' $(( ($(date +%s) % 100000) * 10000 + RANDOM % 10000 )))
     f="/data/local/tmp/vpn_tether_probe.$$"
     : > "$f"
+    nc="$BUSYBOX nc -u -w $DNS_PROBE_TIMEOUT 127.0.0.1 $DNSPROXY_PORT"
+    if [ -n "$1" ]; then
+        # мимо перехвата DNS телефона: от root он ушёл бы в тот же dnsproxy
+        nc="$BUSYBOX nc -u -w $DNS_PROBE_TIMEOUT $1 53"
+        [ "$DNSPROXY_SU_G" = "1" ] && nc="su -g $DNSPROXY_GID -c '$nc'"
+    fi
     printf '\022\064\001\000\000\001\000\000\000\000\000\000\012%s\007example\003com\000\000\001\000\001' "$lbl" | \
-        $BUSYBOX nc -u -w "$DNS_PROBE_TIMEOUT" 127.0.0.1 "$DNSPROXY_PORT" > "$f" 2>/dev/null &
+        eval "$nc" > "$f" 2>/dev/null &
     nc_pid=$!
     t0=$(uptime_ms)
     while :; do
@@ -737,6 +743,33 @@ wan_bytes() {
 # (с 3.17 — только DoH с обходом гео-блока). К оператору — только если молчат и они (белые
 # списки). Ожил ли основной — проверяем curl-ом раз в DNS_HEALTH_RECOVER,
 # не трогая dnsproxy (его кэш не теряется).
+# DoH молчит — а DNS оператора? Спрашиваем его напрямую (адреса — из
+# LinkProperties WAN, dumpsys; от группы dnsproxy — мимо перехвата DNS
+# телефона: dnsmasq раздачи и root ушли бы в тот же dnsproxy, тест 29.10 —
+# «оператор молчит» при живом операторе). Молчат все — сети нет вовсе
+# (метро 29.10: откат каждые ~2 мин, 3 перезапуска dnsproxy, потом ответы
+# оператора). Белые списки: оператор отвечает -> откат, как раньше.
+# 0 = «оператор мёртв»; только напрямую, адресов не нашли — 1 (откат как раньше).
+DNS_OP_CACHE=""        # «WAN|адреса» — dumpsys тяжёлый, раз на WAN
+dns_operator_dead() {
+    local w s ms="$DNS_PROBE_LAST_MS" r=1
+    [ "$DNS_STATE_MODE" != "vpn" ] || return 1
+    w="$LAST_WAN_IFACE"; [ -n "$w" ] || return 1
+    if [ "${DNS_OP_CACHE%%|*}" != "$w" ]; then
+        s=$(dumpsys connectivity 2>/dev/null | grep -oE "InterfaceName: [^ ]+|DnsAddresses: \[[^]]*\]" | \
+            awk -v w="$w" '$0 == "InterfaceName: " w {f = 1; next} f && /^DnsAddresses/ {print; exit} /^InterfaceName/ {f = 0}' | \
+            grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -2 | tr '\n' ' ')
+        [ -n "$s" ] || return 1
+        DNS_OP_CACHE="$w|$s"
+    fi
+    for s in ${DNS_OP_CACHE#*|}; do
+        dnsproxy_probe "$s"; r=$?
+        [ "$r" = 1 ] || break
+    done
+    DNS_PROBE_LAST_MS="$ms"
+    [ "$r" = 1 ]
+}
+
 dns_hosts_of() { echo $* | sed -E 's#[a-z0-9]+://([^/: ]+)[^ ]*#\1#g'; }
 
 dns_try_alt() {     # 0 = перешли на запасные DoH и они отвечают
@@ -879,12 +912,25 @@ dns_health() {
     fi
 
     if dnsproxy_probe_cold; then
+        [ "$DNS_NONET" = 1 ] && log "DoH снова отвечает (сеть вернулась)"
+        DNS_NONET=0
         dns_restore
     elif [ "$DNS_DEGRADED" = "0" ]; then
         # одна неудача — не повод (одна плохая секунда в автобусе), сразу вторая
         if ! dnsproxy_probe; then
             local why="2 проверки подряд: $DNS_PROBE_LAST_MS$(case "$DNS_PROBE_LAST_MS" in [0-9]*) echo 'мс, медленно' ;; esac)"
-            dns_try_alt "$why" || dns_degrade "$why"
+            if dns_operator_dead; then
+                # сети нет вовсе (метро): оператор тоже молчит — откат ничего не даст,
+                # а стоил бы кэша dnsproxy (3 перезапуска) и ответов оператора потом
+                [ "$DNS_NONET" = 1 ] || log "DoH молчит ($why), но и DNS оператора молчит — сети нет, DNS не трогаю"
+                DNS_NONET=1
+            else
+                DNS_NONET=0
+                dns_try_alt "$why" || dns_degrade "$why"
+            fi
+        else
+            [ "$DNS_NONET" = 1 ] && log "DoH снова отвечает (сеть вернулась)"
+            DNS_NONET=0
         fi
     else
         # в откате основной не ожил — может, ожили запасные
