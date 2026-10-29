@@ -124,6 +124,7 @@ update_status() {
         echo "mtu=$tun0_mtu"
         echo "mss=$CURRENT_MSS"
         echo "quic_uids=$QUIC_UIDS"
+        echo "quic_fake=$QUIC_FAKE_UIDS"
         echo "zapret=$ZAPRET_STATE"
         echo "zapret_caps=$ZAPRET_CAPS"
         echo "zapret_auto=$(cat "$ZAPRET_LIST_AUTO" 2>/dev/null | grep -c '[a-z0-9]')"

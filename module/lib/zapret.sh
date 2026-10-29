@@ -12,13 +12,29 @@
 # ============================================================================
 QUIC_UIDS=""
 QUIC_LOGGED=0
+QUIC_FAKE_UIDS=""        # клиенты YouTube с подделкой QUIC (QUIC_YT_FAKE)
+QUIC_SIG=""              # «закрытые|с подделкой» — пересборка только при изменении
+CHAIN_QUIC_FAKE="VPN_QUIC_FAKE"   # mangle POSTROUTING: UDP 443 клиентов YouTube -> nfqws
 # QUIC_BLOCK_YT=1: клиенты YouTube — без QUIC, если установлены
 QUIC_YT_PKGS="com.google.android.youtube com.google.android.apps.youtube.music com.google.android.apps.youtube.kids com.google.android.youtube.tv app.revanced.android.youtube app.revanced.android.apps.youtube.music app.rvx.android.youtube app.rvx.android.apps.youtube.music app.morphe.android.youtube app.morphe.android.apps.youtube.music com.vanced.android.youtube com.vanced.android.apps.youtube.music org.schabi.newpipe com.github.libretube"
-quic_block_pkgs() {   # QUIC_BLOCK_APPS + установленные клиенты YouTube, без повторов
+quic_yt_pkgs() {   # установленные клиенты YouTube (при QUIC_BLOCK_YT=1), не из ручного списка
     local p
-    { for p in $QUIC_BLOCK_APPS; do echo "$p"; done
-      [ "$QUIC_BLOCK_YT" = "1" ] && for p in $QUIC_YT_PKGS; do [ -d "/data/data/$p" ] && echo "$p"; done
-    } | awk 'NF && !s[$0]++' | tr '\n' ' '
+    [ "$QUIC_BLOCK_YT" = "1" ] || return 0
+    for p in $QUIC_YT_PKGS; do
+        case " $QUIC_BLOCK_APPS " in *" $p "*) continue ;; esac
+        [ -d "/data/data/$p" ] && echo "$p"
+    done | tr '\n' ' '
+}
+
+# Подделка QUIC вместо закрытия (QUIC_YT_FAKE=1). Замер 29.10 на YOTA: QUIC
+# YouTube без обхода — 0 ответов (ТСПУ режет молча, YouTube ждёт и уходит на
+# TCP); с fake QUIC x6 (как в magisk-zapret2) — работает, 20 МБ по QUIC за
+# 2,5 мин, перемотка быстрее. Только когда подделка точно уйдёт: nfqws
+# запущен, есть connbytes (иначе в очередь весь поток), мимо VPN/WARP — иначе
+# закрываем, как раньше: голый QUIC умирал бы молча
+quic_fake_on() {
+    [ "$QUIC_BLOCK_YT" = "1" ] && [ "$QUIC_YT_FAKE" = "1" ] && [ "$ZAPRET_STATE" = "on" ] && \
+        zapret_cap cb && zapret_cap nfq
 }
 
 quic_block_uids() {   # пакеты
@@ -31,18 +47,54 @@ quic_block_uids() {   # пакеты
     echo "${out# }"
 }
 
+# AdGuard (ADGUARD_OUTPUT в filter OUTPUT) закрывает UDP 443 всем, кого
+# фильтрует, — и клиентам YouTube, и подделкам nfqws (sendto -> EPERM, замер
+# 29.10). При подделке — RETURN в начало его цепочки: дальше обычные правила
+# Android (учёт трафика, фоновые ограничения), мимо AdGuard. Цена: QUIC
+# YouTube AdGuard не фильтрует — реклама через AdGuard может вернуться.
+# AdGuard пересоздаёт цепочку при перезапуске — сверяем каждый проход (~30 с)
+QUIC_AG_UIDS=""          # uid клиентов YouTube с RETURN в ADGUARD_OUTPUT
+quic_adguard() {   # uid клиентов YouTube с подделкой; пусто — снять свои правила
+    local t u
+    for t in "$iptables" "$ip6tables"; do
+        $t -L ADGUARD_OUTPUT -n >/dev/null 2>&1 || continue
+        for u in $QUIC_AG_UIDS; do
+            case " $1 " in *" $u "*) ;; *) $t -D ADGUARD_OUTPUT -p udp --dport 443 -m owner --uid-owner "$u" -j RETURN 2>/dev/null ;; esac
+        done
+        if [ -n "$1" ]; then
+            $t -C ADGUARD_OUTPUT -p udp --dport 443 -m owner --gid-owner "$ZAPRET_GID" -j RETURN 2>/dev/null || \
+                $t -I ADGUARD_OUTPUT 1 -p udp --dport 443 -m owner --gid-owner "$ZAPRET_GID" -j RETURN 2>/dev/null
+            for u in $1; do
+                $t -C ADGUARD_OUTPUT -p udp --dport 443 -m owner --uid-owner "$u" -j RETURN 2>/dev/null || \
+                    $t -I ADGUARD_OUTPUT 1 -p udp --dport 443 -m owner --uid-owner "$u" -j RETURN 2>/dev/null
+            done
+        else
+            $t -D ADGUARD_OUTPUT -p udp --dport 443 -m owner --gid-owner "$ZAPRET_GID" -j RETURN 2>/dev/null
+        fi
+    done
+    QUIC_AG_UIDS="$1"
+}
+
 quic_block_apply() {
-    local uids t u rj pk
-    pk=$(quic_block_pkgs)
+    local uids fuids t u rj blk yt fake=0
+    yt=$(quic_yt_pkgs)
+    quic_fake_on && fake=1
+    # закрыть: ручной список, плюс клиенты YouTube, если не подделка
+    blk="$QUIC_BLOCK_APPS"
+    [ "$fake" = 1 ] || blk="$blk $yt"
+    blk=$(echo $blk)
+    uids=$(quic_block_uids "$blk")
+    fuids=""
+    [ "$fake" = 1 ] && fuids=$(quic_block_uids "$yt")
     # список опустел (клиент YouTube удалён, а QUIC_BLOCK_APPS пуст) — снять
-    # цепочку, иначе REJECT остаётся на uid удалённого пакета
-    if [ -z "$pk" ]; then
+    # цепочки, иначе REJECT остаётся на uid удалённого пакета
+    if [ -z "$uids" ] && [ -z "$fuids" ]; then
         [ "$QUIC_LOGGED" = "1" ] && { quic_block_down; log "QUIC: закрывать некому — правила сняты"; }
         return 0
     fi
-    uids=$(quic_block_uids "$pk")
-    if [ "$uids" = "$QUIC_UIDS" ] && [ "$QUIC_LOGGED" = "1" ] && \
+    if [ "$uids|$fuids" = "$QUIC_SIG" ] && [ "$QUIC_LOGGED" = "1" ] && \
        $iptables -C OUTPUT -j "$CHAIN_QUIC" 2>/dev/null; then
+        quic_adguard "$fuids"   # AdGuard мог пересоздать цепочку
         return 0
     fi
     for t in "$iptables" "$ip6tables"; do
@@ -55,11 +107,29 @@ quic_block_apply() {
                 -j REJECT --reject-with "$rj" 2>/dev/null
         done
         $t -C OUTPUT -j "$CHAIN_QUIC" 2>/dev/null || $t -I OUTPUT 1 -j "$CHAIN_QUIC" 2>/dev/null
+        # первые пакеты QUIC клиентов YouTube — в nfqws (профиль --filter-udp=443)
+        $t -t mangle -N "$CHAIN_QUIC_FAKE" 2>/dev/null
+        $t -t mangle -F "$CHAIN_QUIC_FAKE" 2>/dev/null
+        if [ -n "$fuids" ]; then
+            $t -t mangle -A "$CHAIN_QUIC_FAKE" -o tun+ -j RETURN 2>/dev/null
+            $t -t mangle -A "$CHAIN_QUIC_FAKE" -o warp+ -j RETURN 2>/dev/null
+            for u in $fuids; do
+                # shellcheck disable=SC2086
+                $t -t mangle -A "$CHAIN_QUIC_FAKE" -p udp --dport 443 -m owner --uid-owner "$u" $ZAPRET_CB_OUT \
+                    -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
+            done
+            $t -t mangle -C POSTROUTING -j "$CHAIN_QUIC_FAKE" 2>/dev/null || \
+                $t -t mangle -A POSTROUTING -j "$CHAIN_QUIC_FAKE" 2>/dev/null
+        else
+            $t -t mangle -D POSTROUTING -j "$CHAIN_QUIC_FAKE" 2>/dev/null
+        fi
     done
-    if [ "$uids" != "$QUIC_UIDS" ] || [ "$QUIC_LOGGED" != "1" ]; then
-        log "QUIC (UDP 443) закрыт для: ${pk% } (uid: ${uids:-не установлены})"
-    fi
+    [ -n "$uids" ] && log "QUIC (UDP 443) закрыт для: ${blk% } (uid: $uids)"
+    [ -n "$fuids" ] && log "QUIC клиентов YouTube — с подделкой (uid: $fuids)$($iptables -L ADGUARD_OUTPUT -n >/dev/null 2>&1 && echo ', мимо AdGuard')"
+    quic_adguard "$fuids"
     QUIC_UIDS="$uids"
+    QUIC_FAKE_UIDS="$fuids"
+    QUIC_SIG="$uids|$fuids"
     QUIC_LOGGED=1
 }
 
@@ -70,8 +140,15 @@ quic_block_down() {
         while [ $_n -lt 8 ] && $t -D OUTPUT -j "$CHAIN_QUIC" 2>/dev/null; do _n=$((_n + 1)); done
         $t -F "$CHAIN_QUIC" 2>/dev/null
         $t -X "$CHAIN_QUIC" 2>/dev/null
+        _n=0
+        while [ $_n -lt 8 ] && $t -t mangle -D POSTROUTING -j "$CHAIN_QUIC_FAKE" 2>/dev/null; do _n=$((_n + 1)); done
+        $t -t mangle -F "$CHAIN_QUIC_FAKE" 2>/dev/null
+        $t -t mangle -X "$CHAIN_QUIC_FAKE" 2>/dev/null
     done
+    quic_adguard ""
     QUIC_UIDS=""
+    QUIC_FAKE_UIDS=""
+    QUIC_SIG=""
     QUIC_LOGGED=0
 }
 
@@ -287,7 +364,7 @@ zapret_nfqws_log_trim() {
 }
 
 zapret_args() {
-    local a="--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6" ex="" g alt rup="" rux=""
+    local a="--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6" ex="" g alt rup="" rux="" q
     # банки и Госуслуги — мимо обхода в любом профиле (и в автосписок не попадут)
     grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
     # .ru/.su/.рф: основной профиль их не трогает и в автосписок не берёт;
@@ -308,10 +385,15 @@ zapret_args() {
     # сайты со своей стратегией — самыми первыми профилями, затем YouTube:
     # nfqws берёт первый подходящий
     alt=$(zapret_alt_profiles "$ex")
+    # QUIC клиентов YouTube (QUIC_YT_FAKE): в очередь попадает только их UDP 443
+    # (quic_block_apply), по нему — 6 поддельных QUIC Initial google.com
+    q=""
+    [ "$QUIC_BLOCK_YT" = "1" ] && [ "$QUIC_YT_FAKE" = "1" ] && \
+        q="--filter-udp=443 --dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$ZAPRET_DIR/quic_initial_www_google_com.bin --new "
     if [ -n "$ZAPRET_EFF_YT" ] && grep -q '[a-z0-9]' "$ZAPRET_LIST_YT" 2>/dev/null; then
-        echo "$a $alt--filter-tcp=443 $ex --hostlist=$ZAPRET_LIST_YT $(zapret_strategy_args "$ZAPRET_DIR" custom "$ZAPRET_EFF_YT") --new $rup$g"
+        echo "$a $q$alt--filter-tcp=443 $ex --hostlist=$ZAPRET_LIST_YT $(zapret_strategy_args "$ZAPRET_DIR" custom "$ZAPRET_EFF_YT") --new $rup$g"
     else
-        echo "$a $alt$rup$g"
+        echo "$a $q$alt$rup$g"
     fi
 }
 
@@ -535,6 +617,7 @@ zapret_down() {
     zapret_kill_all
     [ "$ZAPRET_STATE" = "on" ] && log "zapret: выключен"
     ZAPRET_STATE="off"
+    quic_block_apply    # nfqws нет — клиенты YouTube обратно на закрытие QUIC
     ZAPRET_ARGS_RUN=""
     ZAPRET_EXCL_RUN=""
     ZAPRET_RETRY=0
@@ -705,6 +788,7 @@ zapret_reconcile() {
         fi
         ZAPRET_EXCL_RUN="$excl"
         ZAPRET_STATE="on"
+        quic_block_apply    # подделка QUIC возможна только при работающем nfqws
         phone_status_refresh
     fi
 }

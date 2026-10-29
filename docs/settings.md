@@ -72,6 +72,7 @@
 | `STATUS_IN_DESCRIPTION` | `1` | 0/1 | Писать текущее состояние в описание модуля. |
 | `QUIC_BLOCK_APPS` | пусто | имена пакетов через пробел | Закрыть QUIC (UDP 443, REJECT) этим приложениям телефона, чтобы они сразу шли по HTTPS. |
 | `QUIC_BLOCK_YT` | `1` | 0/1 | Закрыть QUIC и установленным клиентам YouTube (YouTube, Music, Kids, ReVanced, ReVanced Extended, Morphe, Vanced, NewPipe, LibreTube) — без добавления вручную. По HTTPS модуль может оборвать медленное видеосоединение и отбить молчащий сервер, по QUIC — нет (это при `ZAPRET_ENABLE=1`, `ZAPRET_PHONE=1` и без VPN; через VPN блокировка просто переводит YouTube на TCP в туннеле). |
+| `QUIC_YT_FAKE` | `0` | 0/1 | Клиентам YouTube вместо закрытия QUIC — подделка (nfqws: 6 поддельных QUIC Initial google.com, как в magisk-zapret2). На YOTA голый QUIC YouTube режется молча, с подделкой работает, перемотка быстрее. Действует, пока обход включён и nfqws работает (и есть `connbytes`), мимо VPN/WARP; иначе — закрытие. Ручной список `QUIC_BLOCK_APPS` главнее. AdGuard закрывает UDP 443 фильтруемым приложениям — модуль ставит в начало его цепочки RETURN для клиентов YouTube и подделок nfqws (сверяет каждые ~30 с): QUIC YouTube AdGuard не фильтрует, реклама через AdGuard может вернуться. |
 
 ### DNS
 

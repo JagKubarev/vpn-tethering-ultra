@@ -1028,6 +1028,26 @@
   автосписке; после переподключения YOTA HTTPS-проверки не прошли, сеть без VALIDATED, Chrome
   писал «Нет подключения к интернету». Причина вероятная, не доказанная.
 
+
+### Готовится (после 3.19.1) — QUIC YouTube с подделкой вместо закрытия
+- Почему знакомый с Android 16 (без AdGuard) хвалил magisk-zapret2 за YouTube: замер 29.10 на
+  YOTA (13T, connmark + conntrack по UDP 443). QUIC YouTube без обхода — 30+ соединений, у
+  каждого 4–6 пакетов туда и **0 обратно**: ТСПУ режет молча, YouTube ждёт и уходит на TCP.
+  С подделкой (nfqws `--dpi-desync=fake --dpi-desync-repeats=6`, fake QUIC Initial google.com —
+  как в их пресете) — работает: 20,3 МБ по QUIC за 2,5 мин, пик 20,4 Мбит/с (TCP — 20,6),
+  перемотка на глаз быстрее. У нас QUIC YouTube до 3.19.1 шёл без обхода и умирал молча.
+- На 13T AdGuard (`ADGUARD_OUTPUT -p udp --dport 443 -j REJECT` для всех не-исключённых uid)
+  резал QUIC YouTube всегда — поэтому прошлый замер «QUIC против TCP» ничего не показал; и
+  подделки nfqws (gid 3998) получали `sendto: Operation not permitted`.
+- `QUIC_YT_FAKE` (по умолчанию 0, переключатель «Подделка вместо закрытия» в WebUI): клиентам
+  YouTube из `QUIC_YT_PKGS` (не из ручного `QUIC_BLOCK_APPS`) вместо REJECT — первые 9 пакетов
+  UDP 443 в nfqws (цепочка `VPN_QUIC_FAKE` в mangle POSTROUTING, мимо tun/warp) и профиль
+  `--filter-udp=443` первым в аргументах. Только при `ZAPRET_STATE=on`, `connbytes` и NFQUEUE;
+  иначе — закрытие (`quic_block_apply` и при включении/выключении обхода). AdGuard: RETURN для
+  клиентов YouTube и gid nfqws в начале его цепочки, сверка каждые ~30 с; цена — QUIC YouTube
+  AdGuard не фильтрует. `quic_fake=` в status. Проверено на 13T сквозняком только на правилах
+  модуля: 40 UDP-соединений YouTube с ответами, 0 без, EPERM нет; видеосервер 18 МБ за 2 мин.
+
 ---
 
 ## Уроки: что уже пробовали и откатывали
