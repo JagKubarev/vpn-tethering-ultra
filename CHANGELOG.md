@@ -1199,6 +1199,19 @@
   старте nfqws. На 13T (копия): с padencap nfqws стартует, на YOTA он открыл 6 из 11 (YouTube —
   да, Discord, Facebook, rutracker, LinkedIn — нет), выбор не изменился; vk.com и noauto — только
   `sh -n` и проверка регулярки (yastatic.net, static.yandex.net, m.vk.com — да; notyastatic.net — нет).
+- `list-default.txt`: 205 → 234 (+29) — из списков zapretdiscordyoutube (magisk-zapret2, src) по
+  замеру на YOTA, а не целиком: у них ~1000 доменов по сервисам (Zoom, Apple, Microsoft, игры),
+  многие в России не заблокированы, а обход к незаблокированным — та же беда, что с Google в
+  3.20.2. 29.10, 13T, `scan.sh sites` на копии модуля: 778 доменов не из наших списков (без
+  Google/.ru/исключений); первый прогон шумный (основная открыла 11, потом 110 из ~340 — перегрузка),
+  закрытые перепроверены двумя партиями: закрыто 251, основная открыла 18, своя стратегия
+  (multisplit 1,host+1,midsld seqovl=1) — ещё 35, ничем — 198 (Microsoft/Office, OpenAI, Netflix,
+  Telegram, Signal, rutor, облака Cloudflare/AWS — по адресу). Взяты закрытые и открытые: Meta
+  (`facebook.net`, `fbsbx.com`, `fb.me`, `fb.watch`, `m.me`, `facebookmail.com`), `pinimg.com`,
+  Snapchat CDN, 7TV, Periscope, Streamable, `preview.redd.it`, `raw.githubusercontent.com`,
+  Prime Video, Apple Podcasts, Viber (`vb.me`), Valorant/Overwatch/BattlEye, зеркала rutracker и
+  flibusta, btdig, Radio France, сайты VPN, erome, yande.re. Не взяты: Google (list-noauto),
+  pinterest.* по странам (основной pinterest.com уже есть), неясные (indigogobot, playartifact).
 
 ---
 
