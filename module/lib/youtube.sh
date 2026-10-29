@@ -183,6 +183,9 @@ yt_dead_apply() {
     [ "$sig" = "$YT_DEAD_SIG" ] && return 0
     $iptables -F "$CHAIN_YT_DEAD" 2>/dev/null
     $iptables -A "$CHAIN_YT_DEAD" -o tun+ -j RETURN 2>/dev/null
+    # WARP (группа Google: 74.125/16, 173.194/16 …) тоже мимо: узлы, которые
+    # YOTA режет по адресу, через warp0 отвечают (29.10) — не отбивать их там
+    $iptables -A "$CHAIN_YT_DEAD" -o warp+ -j RETURN 2>/dev/null
     # -p tcp обязателен: без него REJECT --reject-with tcp-reset не встаёт
     # (3.0: правило молча не добавлялось, мёртвые сети не отбивались)
     for net in $sig; do
