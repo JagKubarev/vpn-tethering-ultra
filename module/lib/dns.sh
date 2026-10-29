@@ -755,7 +755,8 @@ dns_operator_dead() {
     local w s old="" ms="$DNS_PROBE_LAST_MS" r=1
     [ "$DNS_STATE_MODE" != "vpn" ] || return 1
     w="$LAST_WAN_IFACE"; [ -n "$w" ] || return 1
-    [ "${DNS_OP_CACHE%%|*}" = "$w" ] && old="${DNS_OP_CACHE#*|}"
+    # "|" в кавычках: в mksh голый | в шаблоне — «или», кэш не срабатывал никогда
+    [ "${DNS_OP_CACHE%%"|"*}" = "$w" ] && old="${DNS_OP_CACHE#*"|"}"
     for s in $old; do
         dnsproxy_probe "$s"; r=$?
         [ "$r" = 1 ] || break
