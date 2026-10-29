@@ -292,7 +292,7 @@ details.more > summary { color: var(--muted); }
 <div class="card">
   <div id="clients"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
 </div>
-<div class="hint">Заблокированное устройство остаётся подключённым к точке, но без интернета, и потом может отключиться само. После разблокировки иногда нужно переподключиться. Новый «случайный» MAC блокировку обходит. Трафик — по открытым сейчас соединениям.</div>
+<div class="hint">Заблокированное устройство остаётся подключённым к точке, но без интернета, и потом может отключиться само. После разблокировки иногда нужно переподключиться. Новый «случайный» MAC блокировку обходит. ↓ ↑ — трафик с подключения устройства (Wi-Fi) или с подключения USB; если телефон этого не даёт — по открытым сейчас соединениям («в открытых»).</div>
 <div class="hint">Остальные настройки — во вкладках «Обход», «Сеть» и «WARP», проверки и журналы — в «Сервисе».</div>
 
 </section>
@@ -1017,16 +1017,18 @@ $$('.row input, .row select, .row textarea').forEach((el) => {
 });
 
 // ---------------------------------------------------------------- устройства в раздаче (3.18)
-// "ip|mac|состояние|имя|соединений|байт|1=заблокировано" (webctl clients)
-const fmtBytes = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + ' МБ' : b >= 1024 ? Math.round(b / 1024) + ' КБ' : b + ' Б';
+// "ip|mac|состояние|имя|соединений|байт|1=заблокировано|↓|↑" (webctl clients);
+// ↓/↑ — накопленные с подключения (Wi-Fi) или с подъёма USB, пусто — не знаем
+const fmtBytes = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' ГБ' : b >= 1048576 ? (b / 1048576).toFixed(1) + ' МБ' : b >= 1024 ? Math.round(b / 1024) + ' КБ' : b + ' Б';
 function clientRow(f) {
-  const [ip, mac, st, name, c, by, bl] = f, blocked = bl === '1';
+  const [ip, mac, st, name, c, by, bl, dn, up] = f, blocked = bl === '1';
   const nm = name && name !== 'null' ? name : 'Без имени';
   const on = st === 'REACHABLE' || st === 'DELAY' || st === 'PROBE';
   let info = (ip ? ip + ' · ' : '') + mac;
   if (blocked) info += ' · заблокировано';
   else if (st === '-') info += ' · не подключено';
-  else info += ' · ' + (on ? 'в сети' : 'был недавно') + (+c ? ' · соединений: ' + c + (+by ? ' · ' + fmtBytes(+by) : '') : '');
+  else info += ' · ' + (on ? 'в сети' : 'был недавно') + (+c ? ' · соединений: ' + c : '') +
+    (dn ? ' · ↓ ' + fmtBytes(+dn) + ' ↑ ' + fmtBytes(+up || 0) : +c && +by ? ' · ' + fmtBytes(+by) + ' в открытых' : '');
   return '<div class="row wrap" style="gap:8px"><span class="dot ' + (blocked ? 'red' : on ? 'green' : '') + '"></span>' +
     '<div class="txt"><div class="t">' + esc(nm) + '</div><div class="s">' + esc(info) + '</div></div>' +
     '<button class="btn small" data-cmac="' + esc(mac) + '" data-cname="' + esc(nm) + '" data-cbl="' + (blocked ? '1' : '0') + '">' +
@@ -1879,7 +1881,7 @@ function mockExec(cmd) {
   if (/^warp-del /.test(a)) { const n = a.slice(10).replace(/'/g, ''); M.warp = M.warp.filter((l) => l.split('|')[0] !== n); return { errno: 0, out: 'OK' }; }
   if (/^warp-save /.test(a)) return { errno: 0, out: 'OK /storage/emulated/0/Download/x.conf' };
   if (a === 'warp-saveall') return { errno: 0, out: 'OK /storage/emulated/0/Download/warp-configs_20261027_1040.zip 3' };
-  if (a === 'clients') return { errno: 0, out: '192.168.43.77|e0:2b:e9:75:60:84|REACHABLE|DESKTOP-LAPTOP|31|21545980|0\n192.168.43.67|42:96:f4:ac:3a:91|STALE|realme-9-Pro-5G|2|7553|0\n|00:27:15:ec:84:bd|-|android-tv|0|0|1\n' };
+  if (a === 'clients') return { errno: 0, out: '192.168.43.77|e0:2b:e9:75:60:84|REACHABLE|DESKTOP-LAPTOP|31|21545980|0|1243512870|67710170\n192.168.43.67|42:96:f4:ac:3a:91|STALE|realme-9-Pro-5G|2|7553|0||\n|00:27:15:ec:84:bd|-|android-tv|0|0|1||\n' };
   if (/^client-(un)?block /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'dnsflush') return { errno: 0, out: 'OK кэш сброшен (dnsproxy перезапущен). На ноутбуке — ещё ipconfig /flushdns' };
   if (a === 'zlist') return { errno: 0, out: M.zlist };
