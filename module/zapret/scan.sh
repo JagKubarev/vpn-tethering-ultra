@@ -160,6 +160,34 @@ BYPASS=1
 $IPT -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
 $IPT -t mangle -I VPN_ZAPRET 1 -m owner --uid-owner 0 -j RETURN 2>/dev/null
 
+# Свой видеосервер YouTube в набор (идея zapretgui, blockcheck): YOTA режет
+# ClientHello с именем *.googlevideo.com (25.10), а в наборе только сайт и
+# картинки — стратегия YouTube подбиралась без видео. redirector по HTTP
+# отвечает «IP => узел» (tzfraa-cd), имя узла посимвольно переводится в
+# rr1---sn-….googlevideo.com. Только подбор и только если в наборе YouTube.
+# Берём, только если узел отвечает с чужим именем (www.google.com): тогда его
+# молчание с родным — фильтр по имени. 29.10 узел оказался 173.194.1.6 —
+# мёртвый на пути YOTA и с чужим именем (3.20.1), открыть его нечем.
+if [ "$MODE" = quick ] || [ "$MODE" = full ]; then
+    case " $SITES " in
+        *googlevideo.com*) ;;
+        *youtube.com*|*ytimg.com*)
+            _gv=$(curl -s -m 4 --interface "$WAN" "http://redirector.googlevideo.com/report_mapping?di=no" 2>/dev/null | \
+                sed -n 's/.*=> *\([a-z0-9-]*\).*/\1/p' | head -n 1)
+            case "$_gv" in
+                ''|*[!uzpkfa50vqlgb61wrmhc72xsnid83ytoje94-]*) ;;
+                *)
+                    _gh="rr1---sn-$(echo "$_gv" | tr 'uzpkfa50vqlgb61wrmhc72xsnid83ytoje94' '0123456789abcdefghijklmnopqrstuvwxyz').googlevideo.com"
+                    _gi=$(curl -s -m 5 --capath "$CA" -H 'accept: application/dns-json' \
+                        "https://1.1.1.1/dns-query?name=$_gh&type=A" 2>/dev/null | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')
+                    _gc=""
+                    [ -n "$_gi" ] && _gc=$(curl -s -k -o /dev/null -m 4 --interface "$WAN" --connect-to "www.google.com:443:$_gi:443" \
+                        -w '%{http_code}' https://www.google.com/generate_204 2>/dev/null)
+                    if [ -n "$_gc" ] && [ "$_gc" != 000 ]; then SITES="$SITES $_gh"; fi ;;
+            esac ;;
+    esac
+fi
+
 # --- адреса: DoH (обычный DNS мимо VPN оператор может подменить)
 st stage="узнаю адреса"
 : > "$TMP/ips"
