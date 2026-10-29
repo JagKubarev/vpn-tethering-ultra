@@ -398,10 +398,11 @@ zapret_args() {
     # nfqws берёт первый подходящий
     alt=$(zapret_alt_profiles "$ex")
     # QUIC клиентов YouTube (QUIC_YT_FAKE): в очередь попадает только их UDP 443
-    # (quic_block_apply), по нему — 6 поддельных QUIC Initial google.com
+    # (quic_block_apply), по нему — 6 поддельных QUIC Initial google.com.
+    # Раздаче (ZAPRET_QUIC_FAKE) — весь UDP 443, поэтому банки/Госуслуги мимо ($ex)
     q=""
     { [ "$QUIC_BLOCK_YT" = "1" ] && [ "$QUIC_YT_FAKE" = "1" ]; } || [ "$ZAPRET_QUIC_FAKE" = "1" ] && \
-        q="--filter-udp=443 --dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$ZAPRET_DIR/quic_initial_www_google_com.bin --new "
+        q="--filter-udp=443 $ex --dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$ZAPRET_DIR/quic_initial_www_google_com.bin --new "
     if [ -n "$ZAPRET_EFF_YT" ] && grep -q '[a-z0-9]' "$ZAPRET_LIST_YT" 2>/dev/null; then
         echo "$a $q$alt--filter-tcp=443 $ex --hostlist=$ZAPRET_LIST_YT $(zapret_strategy_args "$ZAPRET_DIR" custom "$ZAPRET_EFF_YT") --new $rup$g"
     else
