@@ -568,6 +568,11 @@
 #   WARP отвечают): VPN_YT_DEAD отбивает и QUIC (udp REJECT icmp-port-
 #   unreachable, хук YT_QMATCH в OUTPUT/FORWARD) — с подделкой QUIC YouTube
 #   ждал такие узлы; мимо tun+ и warp+.
+# v3.20.2 — Play висел на 43%/99%, YouTube — на «мёртвых» серверах, плавало от
+#   перезагрузки: в автосписке zapret набралось 69 доменов Google (API Play,
+#   rr…gvt1.com) — им шёл ненужный обход. zapret/list-noauto.txt (Google) — как
+#   list-rutld: вне основного профиля и автосписка, сайты из списков — профилем
+#   ZAPRET_RU_RUN; автосписок стареет (ZAPRET_AUTO_SEEN, 30 дн.); Play вне отбоя.
 # ============================================================================
 # ============================================================================
 
@@ -1390,7 +1395,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.20.1 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.20.2 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
