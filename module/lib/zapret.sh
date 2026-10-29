@@ -32,9 +32,13 @@ quic_yt_pkgs() {   # установленные клиенты YouTube (при Q
 # 2,5 мин, перемотка быстрее. Только когда подделка точно уйдёт: nfqws
 # запущен, есть connbytes (иначе в очередь весь поток), мимо VPN/WARP — иначе
 # закрываем, как раньше: голый QUIC умирал бы молча
+# Профиль UDP должен быть у запущенного nfqws: после «Применить» аргументы
+# пересобираются только в следующем пересчёте — без профиля QUIC прошёл бы голым
 quic_fake_on() {
     [ "$QUIC_BLOCK_YT" = "1" ] && [ "$QUIC_YT_FAKE" = "1" ] && [ "$ZAPRET_STATE" = "on" ] && \
-        zapret_cap cb && zapret_cap nfq
+        zapret_cap cb && zapret_cap nfq || return 1
+    case "$ZAPRET_ARGS_RUN" in *quic_initial_www_google_com.bin*) return 0 ;; esac
+    return 1
 }
 
 quic_block_uids() {   # пакеты
@@ -93,7 +97,8 @@ quic_block_apply() {
         return 0
     fi
     if [ "$uids|$fuids" = "$QUIC_SIG" ] && [ "$QUIC_LOGGED" = "1" ] && \
-       $iptables -C OUTPUT -j "$CHAIN_QUIC" 2>/dev/null; then
+       $iptables -C OUTPUT -j "$CHAIN_QUIC" 2>/dev/null && \
+       { [ -z "$fuids" ] || $iptables -t mangle -C POSTROUTING -j "$CHAIN_QUIC_FAKE" 2>/dev/null; }; then
         quic_adguard "$fuids"   # AdGuard мог пересоздать цепочку
         return 0
     fi
@@ -145,6 +150,8 @@ quic_block_down() {
         $t -t mangle -F "$CHAIN_QUIC_FAKE" 2>/dev/null
         $t -t mangle -X "$CHAIN_QUIC_FAKE" 2>/dev/null
     done
+    # и RETURN от убитого демона (kill -9, обновление): его список uid потерян
+    QUIC_AG_UIDS="$QUIC_AG_UIDS $(quic_block_uids "$QUIC_YT_PKGS")"
     quic_adguard ""
     QUIC_UIDS=""
     QUIC_FAKE_UIDS=""
@@ -746,13 +753,15 @@ zapret_reconcile() {
             ZAPRET_ARGS_RUN=""
             ZAPRET_EXCL_RUN=""
             ZAPRET_RETRY=30          # повтор через ~минуту
+            quic_block_apply         # очередь без читателя — QUIC YouTube на закрытие
             phone_status_refresh
             return 0
         fi
         ZAPRET_ARGS_RUN="$args"
         # Был включён (смена стратегии, nfqws умер) — правила на месте, их
         # не трогаем: пока nfqws перезапускался, --queue-bypass пропускал пакеты
-        if [ "$ZAPRET_STATE" = "on" ]; then phone_status_refresh; else ZAPRET_STATE="starting"; fi
+        # (подделка QUIC — по новым аргументам: профиль UDP мог появиться или уйти)
+        if [ "$ZAPRET_STATE" = "on" ]; then quic_block_apply; phone_status_refresh; else ZAPRET_STATE="starting"; fi
     fi
 
     # правила: впервые / сменились исключения / хук снесли (netd пересобрал

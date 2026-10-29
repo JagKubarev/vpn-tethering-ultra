@@ -273,6 +273,9 @@ reload_config() {
     if [ "$s_quic0" != "$s_quic1" ]; then
         quic_block_down
         quic_block_apply
+        # QUIC_YT_FAKE/QUIC_BLOCK_YT меняют аргументы nfqws (профиль UDP) —
+        # пересчитать в следующем такте, а не через ~30 с
+        ZAPRET_NET_DIRTY=1
     fi
 
     [ "$s_st0" != "$s_st1" ] && stealth_apply
@@ -311,8 +314,9 @@ cleanup_on_exit() {
     cleanup_all_rules
     phone_dns_rules_off
     PHONE_DNS_ON=0
-    quic_block_down
+    # zapret_down зовёт quic_block_apply — снимать QUIC после него, иначе REJECT остаётся
     zapret_down
+    quic_block_down
     stealth_off
     dnsproxy_stop
     dnsproxy_port_guard_down
