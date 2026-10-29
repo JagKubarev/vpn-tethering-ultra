@@ -306,7 +306,8 @@ zapret_learn_vpn_owner() {
 # записи сети с тем же названием (YOTA = 25011 и 25002). Файлы списков
 # переписываются только при изменении: nfqws сам перечитывает их.
 zapret_alt_profiles() {
-    local ex="$1" i=0 a f out=""
+    local ex="$1" i=0 a f out="" nre
+    nre=$(zapret_zone_re "$ZAPRET_LIST_NOAUTO")
     if [ "$ZAPRET_ALT" = "1" ] && [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] && [ -f "$ZALT_FILE" ]; then
         K="$NET_KEY" L="$NET_LABEL" awk -F'|' '
             $1 == ENVIRON["K"] { k[++nk] = $4 "|" $3 }
@@ -318,7 +319,12 @@ zapret_alt_profiles() {
             [ "$i" -lt 3 ] || break
             zapret_args_valid "$a" || continue
             i=$((i + 1)); f="$ZALT_RUN.$i"
-            A="$a" awk -F'|' '$1 == ENVIRON["A"] && $2 ~ /^[a-z0-9.-]+$/ { print $2 }' "$ZALT_RUN.lst" | sort -u > "$f.new"
+            # Google (list-noauto) — только сайты из списков (ZAPRET_RU_RUN):
+            # остальные попадали сюда из автосписка (29.10: 93 записи разом)
+            A="$a" R="$nre" KS=" $(tr '\n' ' ' < "$ZAPRET_RU_RUN" 2>/dev/null) " awk -F'|' '
+                $1 == ENVIRON["A"] && $2 ~ /^[a-z0-9.-]+$/ &&
+                (ENVIRON["R"] == "" || $2 !~ ENVIRON["R"] || index(ENVIRON["KS"], " " $2 " ")) { print $2 }' \
+                "$ZALT_RUN.lst" | sort -u > "$f.new"
             if [ ! -s "$f.new" ]; then rm -f "$f.new"; i=$((i - 1)); continue; fi
             if cmp -s "$f.new" "$f"; then rm -f "$f.new"; else mv -f "$f.new" "$f"; fi
             out="$out--filter-tcp=443 $ex --hostlist=$f $(zapret_strategy_args "$ZAPRET_DIR" custom "$a") --new "
@@ -337,22 +343,63 @@ zapret_alt_count() {
     echo "$n"
 }
 
-# .ru/.su/.рф-сайты, которые явно есть во встроенном или своём списке —
-# им обход нужен (заблокированные СМИ); файл переписывается только при изменении
+# ERE «домен из файла или его поддомен» (list-rutld.txt, list-noauto.txt); пусто — нет
+zapret_zone_re() {
+    local z
+    z=$(sed 's/#.*//' "$@" 2>/dev/null | tr -d ' \r' | tr 'A-Z' 'a-z' | grep -E '^[a-z0-9.-]+$' | \
+        sed 's/\./\\./g' | tr '\n' '|')
+    z="${z%|}"
+    [ -n "$z" ] && echo "(^|\\.)($z)\$"
+}
+
+# .ru/.su/.рф-сайты и сайты Google (list-noauto), которые явно есть во
+# встроенном или своём списке — им обход нужен (заблокированные СМИ, YouTube);
+# файл переписывается только при изменении
 zapret_ru_listed() {
+    local re
+    re=$(zapret_zone_re "$ZAPRET_LIST_RUTLD" "$ZAPRET_LIST_NOAUTO")
+    [ -n "$re" ] || re='^$'
     { sed 's/#.*//' "$ZAPRET_LIST_DEFAULT"; sed 's/#.*//' "$ZAPRET_LIST_USER" 2>/dev/null; } | \
-        tr -d ' \r' | tr 'A-Z' 'a-z' | grep -E '(^|\.)(ru|su|xn--p1ai)$' | sort -u > "$ZAPRET_RU_RUN.new"
+        tr -d ' \r' | tr 'A-Z' 'a-z' | grep -E "$re" | sort -u > "$ZAPRET_RU_RUN.new"
     if cmp -s "$ZAPRET_RU_RUN.new" "$ZAPRET_RU_RUN"; then rm -f "$ZAPRET_RU_RUN.new"; else mv -f "$ZAPRET_RU_RUN.new" "$ZAPRET_RU_RUN"; fi
 }
-# российские зоны из автосписка — вон (попадали туда по случайным обрывам)
+# российские зоны и Google из автосписка — вон (попадали туда по случайным обрывам)
 zapret_auto_clean_ru() {
-    local n
-    [ -s "$ZAPRET_LIST_AUTO" ] && [ -s "$ZAPRET_LIST_RUTLD" ] || return 0
-    n=$(grep -cE '(^|\.)(ru|su|xn--p1ai)$' "$ZAPRET_LIST_AUTO")
+    local n re
+    [ -s "$ZAPRET_LIST_AUTO" ] || return 0
+    re=$(zapret_zone_re "$ZAPRET_LIST_RUTLD" "$ZAPRET_LIST_NOAUTO")
+    [ -n "$re" ] || return 0
+    n=$(grep -cE "$re" "$ZAPRET_LIST_AUTO")
     [ "${n:-0}" -gt 0 ] || return 0
-    grep -vE '(^|\.)(ru|su|xn--p1ai)$' "$ZAPRET_LIST_AUTO" > "$ZAPRET_LIST_AUTO.tmp"
+    grep -vE "$re" "$ZAPRET_LIST_AUTO" > "$ZAPRET_LIST_AUTO.tmp"
     cat "$ZAPRET_LIST_AUTO.tmp" > "$ZAPRET_LIST_AUTO"; rm -f "$ZAPRET_LIST_AUTO.tmp"
-    log "zapret: из автосписка убраны российские сайты ($n): их обход не трогает"
+    log "zapret: из автосписка убраны российские сайты и Google ($n): их обход сам не берёт"
+}
+
+# Автосписок только растёт: сайт попадает туда после 3 случайных обрывов и
+# остаётся навсегда (29.10: 194 записи — Google, Авито, телеметрия). nfqws
+# даты не пишет — первое появление помним сами (ZAPRET_AUTO_SEEN); старше
+# ZAPRET_AUTO_DAYS — вон. Файл тот же (cat, не mv): nfqws его перечитывает
+zapret_auto_age() {
+    local now n
+    [ -f "$ZAPRET_LIST_AUTO" ] || return 0
+    now=$(date +%s)
+    # новые записи — с текущим временем; ушедшие из автосписка — из учёта
+    touch "$ZAPRET_AUTO_SEEN"; chmod 600 "$ZAPRET_AUTO_SEEN"
+    awk -v now="$now" 'FILENAME == ARGV[1] { if ($2 ~ /^[0-9]+$/) t[$1] = $2; next }
+        NF && $1 !~ /^#/ && !s[$1]++ { print $1, (($1 in t) ? t[$1] : now) }' \
+        "$ZAPRET_AUTO_SEEN" "$ZAPRET_LIST_AUTO" > "$ZAPRET_AUTO_SEEN.tmp" || return 0
+    n=$(awk -v lim=$((now - ZAPRET_AUTO_DAYS * 86400)) '$2 < lim' "$ZAPRET_AUTO_SEEN.tmp" | grep -c .)
+    if [ "${n:-0}" -gt 0 ]; then
+        awk -v lim=$((now - ZAPRET_AUTO_DAYS * 86400)) 'FILENAME == ARGV[1] { if ($2 < lim) old[$1] = 1; next }
+            !($1 in old)' "$ZAPRET_AUTO_SEEN.tmp" "$ZAPRET_LIST_AUTO" > "$ZAPRET_LIST_AUTO.tmp" && \
+            cat "$ZAPRET_LIST_AUTO.tmp" > "$ZAPRET_LIST_AUTO"
+        awk -v lim=$((now - ZAPRET_AUTO_DAYS * 86400)) '$2 >= lim' "$ZAPRET_AUTO_SEEN.tmp" > "$ZAPRET_AUTO_SEEN.tmp2" && \
+            mv -f "$ZAPRET_AUTO_SEEN.tmp2" "$ZAPRET_AUTO_SEEN.tmp"
+        rm -f "$ZAPRET_LIST_AUTO.tmp"
+        log "zapret: из автосписка убраны записи старше $ZAPRET_AUTO_DAYS дн. ($n) — заблокированные nfqws добавит снова"
+    fi
+    mv -f "$ZAPRET_AUTO_SEEN.tmp" "$ZAPRET_AUTO_SEEN"; chmod 600 "$ZAPRET_AUTO_SEEN"
 }
 
 # журнал причин автосписка — не больше ~256 КБ (nfqws открывает файл на каждую
@@ -381,8 +428,10 @@ zapret_args() {
     grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
     # .ru/.su/.рф: основной профиль их не трогает и в автосписок не берёт;
     # такие сайты из списков — своим профилем перед ним, с той же стратегией
-    if grep -q '^[a-z]' "$ZAPRET_LIST_RUTLD" 2>/dev/null; then
-        rux="--hostlist-exclude=$ZAPRET_LIST_RUTLD"
+    # Google (list-noauto) — так же: в основной профиль и автосписок не берём
+    if grep -q '^[a-z]' "$ZAPRET_LIST_RUTLD" "$ZAPRET_LIST_NOAUTO" 2>/dev/null; then
+        grep -q '^[a-z]' "$ZAPRET_LIST_RUTLD" 2>/dev/null && rux="--hostlist-exclude=$ZAPRET_LIST_RUTLD"
+        grep -q '^[a-z]' "$ZAPRET_LIST_NOAUTO" 2>/dev/null && rux="$rux --hostlist-exclude=$ZAPRET_LIST_NOAUTO"
         zapret_ru_listed
         [ -s "$ZAPRET_RU_RUN" ] && rup="--filter-tcp=443 $ex --hostlist=$ZAPRET_RU_RUN $(zapret_strategy_args "$ZAPRET_DIR" "$ZAPRET_EFF_STRATEGY" "$ZAPRET_EFF_ARGS") --new "
     fi
@@ -776,6 +825,7 @@ zapret_reconcile() {
         ZAPRET_TICK=0
         ZAPRET_NET_DIRTY=0
         zapret_auto_log_trim
+        zapret_auto_age
         zapret_nfqws_log_trim
         ZAPRET_NETS_STAMP="$stamp"
         # dumpsys connectivity тяжёлый (system_server) — раз на каждый tun, а

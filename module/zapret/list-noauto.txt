@@ -1,0 +1,21 @@
+# Домены, которые обход сам не берёт: в автосписок не попадают, своей стратегии
+# сайта не получают (3.20.2). 29.10: в автосписке набралось 69 доменов Google —
+# API Play, dl.google.com, серверы загрузок rr…gvt1.com — после случайных
+# обрывов (метро, YOTA душит адрес, наш же отбой). Без обхода они работают, а с
+# поддельными пакетами обхода Play висел на 43%/99%, YouTube — на «мёртвых»
+# серверах, и всё плавало от перезагрузки к перезагрузке. Нужные сайты Google
+# (YouTube, play.google.com, googleusercontent.com …) — во встроенном списке и
+# list-youtube.txt: обход для них остаётся, отдельным профилем.
+google.com
+googleapis.com
+gstatic.com
+gvt1.com
+gvt2.com
+gvt3.com
+googleusercontent.com
+googlesyndication.com
+googleadservices.com
+google-analytics.com
+doubleclick.net
+withgoogle.com
+app-measurement.com

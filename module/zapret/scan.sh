@@ -138,7 +138,8 @@ if [ "$MODE" = sites ]; then
     if [ -z "$SITES_ARG" ]; then
         # сайты из списков zapret и уже закреплённые; без YouTube (у него
         # свой профиль), исключений и не открывшихся ничем за последние сутки
-        sed 's/#.*//' "$ZDIR/list-youtube.txt" "$ZDIR/list-exclude.txt" 2>/dev/null | tr -d ' \r' | grep . > "$TMP/xl"
+        # и без Google (list-noauto, 3.20.2): ему обход сам не назначает
+        sed 's/#.*//' "$ZDIR/list-youtube.txt" "$ZDIR/list-exclude.txt" "$ZDIR/list-noauto.txt" 2>/dev/null | tr -d ' \r' | grep . > "$TMP/xl"
         cat "$ZSKIP" 2>/dev/null > "$TMP/skip"
         {
             cat "$ZDIR/list-default.txt" /data/adb/vpn_tether_zapret.txt /data/adb/vpn_tether_zapret_auto.txt 2>/dev/null

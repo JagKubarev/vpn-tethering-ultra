@@ -122,16 +122,17 @@ yt_dead_on() {
         "$ZAPRET_DIR/google-ipv4.txt" > "$YT_GRANGES" 2>/dev/null
     YT_DEAD_SIG="-"
     yt_dead_apply
+    # Play Маркет (gvt1.com) — больше не отбиваем (с 3.17 отбивали): без модуля
+    # он сам уходит с медленного сервера, а «молчащие» его серверы 29.10 были
+    # следствием обхода — в автосписке сидели API Play и rr…gvt1.com. Обрыв
+    # (ss -K) загрузки посреди файла Play не переживает: висит на 43%/99% до
+    # перезапуска. Пометки и хуки gvt1 только снимаются (yt_dead_hooks_off)
     $iptables -t mangle -I FORWARD 1 $YT_MARK_FWD 2>/dev/null
-    $iptables -t mangle -I FORWARD 1 $YT_GMARK_FWD 2>/dev/null
-    $iptables -I FORWARD 1 $GVT_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     $iptables -I FORWARD 1 $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     $iptables -I FORWARD 1 $YT_QMATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     if [ "$ZAPRET_PHONE" = "1" ]; then
         $iptables -I OUTPUT 1 $YT_QMATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
         $iptables -t mangle -I OUTPUT 1 $YT_MARK_OUT 2>/dev/null
-        $iptables -t mangle -I OUTPUT 1 $YT_GMARK_OUT 2>/dev/null
-        $iptables -I OUTPUT 1 $GVT_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
         $iptables -I OUTPUT 1 $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     fi
     # хук не встал — не «on»: иначе сторож zapret ставил бы правила по кругу
@@ -150,7 +151,7 @@ yt_dead_on() {
         $iptables -C OUTPUT $YT_QMATCH -j "$CHAIN_YT_DEAD" 2>/dev/null || \
             $iptables -I OUTPUT 1 $YT_QMATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     fi
-    [ "$YT_DEAD_STATE" = "on" ] || log "zapret: отбой мёртвых и молчащих серверов YouTube и Play включён (нет ответа ${YT_DEAD_AFTER}с, на запрос ${YT_SILENT_AFTER}с и проверка не прошла -> RST на $((YT_DEAD_TTL / 60)) мин)"
+    [ "$YT_DEAD_STATE" = "on" ] || log "zapret: отбой мёртвых и молчащих видеосерверов YouTube включён (нет ответа ${YT_DEAD_AFTER}с, на запрос ${YT_SILENT_AFTER}с и проверка не прошла -> RST на $((YT_DEAD_TTL / 60)) мин)"
     YT_DEAD_STATE="on"
 }
 
