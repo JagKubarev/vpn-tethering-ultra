@@ -1053,6 +1053,18 @@
   при `fail` nfqws — сразу закрытие; хук `VPN_QUIC_FAKE` сверяется; RETURN в AdGuard от убитого
   демона снимаются. Сверху: при `ZAPRET_PHONE=0` подделки на телефоне нет. На 13T: подделка через
   2 с после «Применить», выход демона — 0 правил, RETURN первыми в `ADGUARD_OUTPUT`.
+- Google Play (`com.android.vending`) — в `QUIC_YT_PKGS`: качает с тех же серверов Google и так
+  же ждёт QUIC; с `QUIC_YT_FAKE` идёт по QUIC с подделкой мимо AdGuard.
+- `ZAPRET_QUIC_FAKE=1` (новый, переключатель «QUIC раздачи — с подделкой»): QUIC раздачи мимо
+  VPN/WARP не закрывается, а идёт в nfqws (цепочка `VPN_ZAPRET_QF` в mangle FORWARD, connbytes
+  1:9, `--queue-bypass`); главнее `ZAPRET_QUIC_BLOCK`, хук REJECT `VPN_ZAPRET_QUIC` снимается.
+  Только если профиль `--filter-udp=443` уже у запущенного nfqws и есть connbytes, иначе — REJECT.
+  Пакеты раздачи без uid, поэтому подделка всему UDP 443, не только Google. Замер 29.10 (Bluefox
+  NX1 на раздаче 13T, YouTube): QUIC закрыт — TCP 16 МБ; подделка — UDP 18 МБ, 5 серверов
+  Google с ответами. Браузер ноута: h3 у google.com (134 мс) и cloudflare.com, vk — h2.
+- Сторож не знал про подделку: при `ZAPRET_QUIC_BLOCK=1` без хука REJECT каждые ~13 с писал
+  «правила пропали» и ставил всё заново — теперь хук `VPN_ZAPRET_QF` тоже считается. Лог
+  «zapret: включён» пишет «QUIC раздачи: подделка». На 13T: 0 повторов за минуту.
 
 ---
 

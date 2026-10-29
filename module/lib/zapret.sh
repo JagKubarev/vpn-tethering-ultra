@@ -15,8 +15,10 @@ QUIC_LOGGED=0
 QUIC_FAKE_UIDS=""        # клиенты YouTube с подделкой QUIC (QUIC_YT_FAKE)
 QUIC_SIG=""              # «закрытые|с подделкой» — пересборка только при изменении
 CHAIN_QUIC_FAKE="VPN_QUIC_FAKE"   # mangle POSTROUTING: UDP 443 клиентов YouTube -> nfqws
-# QUIC_BLOCK_YT=1: клиенты YouTube — без QUIC, если установлены
-QUIC_YT_PKGS="com.google.android.youtube com.google.android.apps.youtube.music com.google.android.apps.youtube.kids com.google.android.youtube.tv app.revanced.android.youtube app.revanced.android.apps.youtube.music app.rvx.android.youtube app.rvx.android.apps.youtube.music app.morphe.android.youtube app.morphe.android.apps.youtube.music com.vanced.android.youtube com.vanced.android.apps.youtube.music org.schabi.newpipe com.github.libretube"
+# QUIC_BLOCK_YT=1: клиенты YouTube и Google Play (com.android.vending) — без
+# QUIC, если установлены; при QUIC_YT_FAKE — с подделкой (Play качает с тех
+# же серверов Google и так же ждёт QUIC, который ТСПУ режет молча)
+QUIC_YT_PKGS="com.android.vending com.google.android.youtube com.google.android.apps.youtube.music com.google.android.apps.youtube.kids com.google.android.youtube.tv app.revanced.android.youtube app.revanced.android.apps.youtube.music app.rvx.android.youtube app.rvx.android.apps.youtube.music app.morphe.android.youtube app.morphe.android.apps.youtube.music com.vanced.android.youtube com.vanced.android.apps.youtube.music org.schabi.newpipe com.github.libretube"
 quic_yt_pkgs() {   # установленные клиенты YouTube (при QUIC_BLOCK_YT=1), не из ручного списка
     local p
     [ "$QUIC_BLOCK_YT" = "1" ] || return 0
@@ -131,7 +133,7 @@ quic_block_apply() {
         fi
     done
     [ -n "$uids" ] && log "QUIC (UDP 443) закрыт для: ${blk% } (uid: $uids)"
-    [ -n "$fuids" ] && log "QUIC клиентов YouTube — с подделкой (uid: $fuids)$($iptables -L ADGUARD_OUTPUT -n >/dev/null 2>&1 && echo ', мимо AdGuard')"
+    [ -n "$fuids" ] && log "QUIC клиентов YouTube и Play — с подделкой (uid: $fuids)$($iptables -L ADGUARD_OUTPUT -n >/dev/null 2>&1 && echo ', мимо AdGuard')"
     quic_adguard "$fuids"
     QUIC_UIDS="$uids"
     QUIC_FAKE_UIDS="$fuids"
@@ -396,7 +398,7 @@ zapret_args() {
     # QUIC клиентов YouTube (QUIC_YT_FAKE): в очередь попадает только их UDP 443
     # (quic_block_apply), по нему — 6 поддельных QUIC Initial google.com
     q=""
-    [ "$QUIC_BLOCK_YT" = "1" ] && [ "$QUIC_YT_FAKE" = "1" ] && \
+    { [ "$QUIC_BLOCK_YT" = "1" ] && [ "$QUIC_YT_FAKE" = "1" ]; } || [ "$ZAPRET_QUIC_FAKE" = "1" ] && \
         q="--filter-udp=443 --dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$ZAPRET_DIR/quic_initial_www_google_com.bin --new "
     if [ -n "$ZAPRET_EFF_YT" ] && grep -q '[a-z0-9]' "$ZAPRET_LIST_YT" 2>/dev/null; then
         echo "$a $q$alt--filter-tcp=443 $ex --hostlist=$ZAPRET_LIST_YT $(zapret_strategy_args "$ZAPRET_DIR" custom "$ZAPRET_EFF_YT") --new $rup$g"
@@ -494,6 +496,31 @@ zapret_start() {
     return 1
 }
 
+# QUIC раздачи — подделка вместо закрытия (ZAPRET_QUIC_FAKE). Пакеты раздачи
+# без uid, приложение не отличить — весь UDP 443 мимо VPN/WARP: первые 9 пакетов
+# в nfqws (профиль --filter-udp=443). Только если профиль уже у запущенного
+# nfqws и есть connbytes — иначе QUIC ушёл бы голым и умер молча (ТСПУ, 29.10)
+CHAIN_ZAPRET_QF="VPN_ZAPRET_QF"
+zapret_qf_off() {   # таблица
+    local _n=0
+    while [ $_n -lt 8 ] && $1 -t mangle -D FORWARD -p udp --dport 443 -j "$CHAIN_ZAPRET_QF" 2>/dev/null; do _n=$((_n + 1)); done
+    $1 -t mangle -F "$CHAIN_ZAPRET_QF" 2>/dev/null
+    $1 -t mangle -X "$CHAIN_ZAPRET_QF" 2>/dev/null
+}
+
+zapret_qf_on() {   # таблица; 0 — подделка QUIC для раздачи стоит
+    zapret_qf_off "$1"
+    [ "$ZAPRET_QUIC_FAKE" = "1" ] && zapret_cap cb || return 1
+    case "$ZAPRET_ARGS_RUN" in *quic_initial_www_google_com.bin*) ;; *) return 1 ;; esac
+    $1 -t mangle -N "$CHAIN_ZAPRET_QF" 2>/dev/null
+    $1 -t mangle -A "$CHAIN_ZAPRET_QF" -o tun+ -j RETURN 2>/dev/null
+    $1 -t mangle -A "$CHAIN_ZAPRET_QF" -o warp+ -j RETURN 2>/dev/null
+    # shellcheck disable=SC2086
+    $1 -t mangle -A "$CHAIN_ZAPRET_QF" $ZAPRET_CB_OUT -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null || \
+        { zapret_qf_off "$1"; return 1; }
+    $1 -t mangle -A FORWARD -p udp --dport 443 -j "$CHAIN_ZAPRET_QF" 2>/dev/null
+}
+
 zapret_rules_on() {
     local excl="$1" t u lan rj
     for t in "$iptables" "$ip6tables"; do
@@ -544,10 +571,12 @@ zapret_rules_on() {
         $t -t mangle -C PREROUTING -j "$CHAIN_ZAPRET_IN" 2>/dev/null || \
             $t -t mangle -A PREROUTING -j "$CHAIN_ZAPRET_IN" 2>/dev/null
 
-        # QUIC раздачи мимо VPN
+        # QUIC раздачи мимо VPN: подделка (ZAPRET_QUIC_FAKE) главнее закрытия
         $t -N "$CHAIN_ZAPRET_QUIC" 2>/dev/null
         $t -F "$CHAIN_ZAPRET_QUIC" 2>/dev/null
-        if [ "$ZAPRET_QUIC_BLOCK" = "1" ]; then
+        if zapret_qf_on "$t"; then
+            while $t -D FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; do :; done
+        elif [ "$ZAPRET_QUIC_BLOCK" = "1" ]; then
             $t -A "$CHAIN_ZAPRET_QUIC" -o tun+ -j RETURN 2>/dev/null
             $t -A "$CHAIN_ZAPRET_QUIC" -o warp+ -j RETURN 2>/dev/null
             $t -A "$CHAIN_ZAPRET_QUIC" -p udp --dport 443 -j REJECT --reject-with "$rj" 2>/dev/null
@@ -615,6 +644,7 @@ zapret_rules_off() {
         $t -t mangle -F "$CHAIN_ZAPRET" 2>/dev/null;    $t -t mangle -X "$CHAIN_ZAPRET" 2>/dev/null
         $t -t mangle -F "$CHAIN_ZAPRET_IN" 2>/dev/null; $t -t mangle -X "$CHAIN_ZAPRET_IN" 2>/dev/null
         $t -F "$CHAIN_ZAPRET_QUIC" 2>/dev/null;         $t -X "$CHAIN_ZAPRET_QUIC" 2>/dev/null
+        zapret_qf_off "$t"
     done
     zapret_ggc_off
     yt_dead_off
@@ -773,7 +803,8 @@ zapret_reconcile() {
     if [ "$ZAPRET_STATE" = "on" ] && [ "$ZAPRET_HOOK_TICK" -ge 5 ]; then
         ZAPRET_HOOK_TICK=0
         if ! $iptables -t mangle -C POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null || \
-           { [ "$ZAPRET_QUIC_BLOCK" = "1" ] && ! $iptables -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; } || \
+           { [ "$ZAPRET_QUIC_BLOCK" = "1" ] && ! $iptables -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null && \
+             ! $iptables -t mangle -C FORWARD -p udp --dport 443 -j "$CHAIN_ZAPRET_QF" 2>/dev/null; } || \
            { case "$GGC_STATE" in v4*) ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null ;; *) false ;; esac; } || \
            { [ "$YT_DEAD_STATE" = "on" ] && ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null; } || \
            { [ "$YT_GGC_BLOCK" = "1" ] && [ "$GGC_FAILS" -gt 0 ] && [ "$GGC_FAILS" -lt 3 ] && zapret_cap str; } || \
@@ -789,7 +820,7 @@ zapret_reconcile() {
     if [ "$ZAPRET_STATE" != "on" ] || [ "$excl" != "$ZAPRET_EXCL_RUN" ] || [ "$_hooks_bad" = 1 ]; then
         zapret_rules_on "$excl"
         if [ "$ZAPRET_STATE" != "on" ]; then
-            log "zapret: включён (режим $ZAPRET_MODE, телефон: $ZAPRET_PHONE, QUIC раздачи: $([ "$ZAPRET_QUIC_BLOCK" = 1 ] && echo закрыт || echo открыт); VPN-клиенты в исключениях: ${excl:-нет})"
+            log "zapret: включён (режим $ZAPRET_MODE, телефон: $ZAPRET_PHONE, QUIC раздачи: $(if $iptables -t mangle -C FORWARD -p udp --dport 443 -j "$CHAIN_ZAPRET_QF" 2>/dev/null; then echo подделка; elif [ "$ZAPRET_QUIC_BLOCK" = 1 ]; then echo закрыт; else echo открыт; fi); VPN-клиенты в исключениях: ${excl:-нет})"
         elif [ "$excl" != "$ZAPRET_EXCL_RUN" ]; then
             log "zapret: исключения VPN-клиентов: ${excl:-нет}"
         else
