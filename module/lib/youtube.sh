@@ -244,20 +244,24 @@ yt_probe_ip() {
     if [ "$c" = 204 ]; then echo ok; else echo dead; fi
 }
 
-# Отбить адрес мёртвого/молчащего сервера: /32, второй в той же /24 — вся /24.
+# Отбить адрес мёртвого/молчащего сервера: /32, второй в той же /28 — вся /28.
+# /28, а не /24: видеосерверы Google стоят стойками по 4–5 адресов, и YOTA
+# режет стойкой (29.10, 74.125.104.0/24: молчат .166–.169, живы .97–.101,
+# .198–.202, .230–.234 — /24 отбивал 15 живых, каждая стойка в своей /28)
 #   yt_dead_add АДРЕС КТО ЧТО_С_НИМ NOW   (КТО и ЧТО — для журнала)
 # 0 — добавлен (цепочку отбоя надо пересобрать), 1 — нет.
 yt_dead_add() {
-    local dip="$1" who="$2" why="$3" now="$4" kill="${5:-1}" net n24 sib keep t nlist
+    local dip="$1" who="$2" why="$3" now="$4" kill="${5:-1}" net n28 b sib keep t nlist
     case "$dip" in *[!0-9.]*|'') return 1 ;; esac
-    net="$dip/32"; n24="${dip%.*}.0/24"
+    b=${dip##*.}; b=$((b - b % 16))
+    net="$dip/32"; n28="${dip%.*}.$b/28"
     # уже открытые соединения телефона к нему — закрыть сразу: AdGuard и
     # приложение переподключатся (с раздачи соединение доживёт до таймаута).
     # Не для «молчит после запроса» ($5=0): так выглядит и простаивающее
     # соединение с общим фронтендом Google — ss -K рвал поиск и YouTube
     # (25.10 23:00, 173.194.165.4 / 173.194.190.72)
     [ "$kill" = 1 ] && ss -K -tn dst "$dip" dport = :443 >/dev/null 2>&1
-    grep -q -e "^$net " -e "^$n24 " "$YT_DEAD_FILE" 2>/dev/null && return 1
+    grep -q -e "^$net " -e "^$n28 " "$YT_DEAD_FILE" 2>/dev/null && return 1
     [ "$now" -lt "$YT_DEAD_PAUSE" ] && return 1
     # лавина (>=6 подсетей за минуту) — не мёртвые серверы, а сломанный
     # обход или связь: отбив всё подряд, оставим плеер без серверов
@@ -271,13 +275,13 @@ yt_dead_add() {
     fi
     nlist=$(awk 'END {print NR}' "$YT_DEAD_FILE" 2>/dev/null)
     [ "${nlist:-0}" -ge "$YT_DEAD_MAX" ] && return 1
-    # второй мёртвый в той же /24 — отбиваем подсеть целиком (в записи —
+    # второй мёртвый в той же /28 — отбиваем её целиком (в записи —
     # все замеченные адреса: по ним перепроверка поймёт, ожила ли она)
-    sib=$(awk -v p="${dip%.*}." 'index($1, p) == 1 && $1 ~ /\/32$/ { sub(/\/32$/, "", $1); printf "%s,", $1 }' "$YT_DEAD_FILE" 2>/dev/null)
+    sib=$(awk -v p="${dip%.*}." -v b="$b" 'index($1, p) == 1 && $1 ~ /\/32$/ { a = $1; sub(/\/32$/, "", a); l = substr(a, length(p) + 1); if (l - l % 16 == b) printf "%s,", a }' "$YT_DEAD_FILE" 2>/dev/null)
     if [ -n "$sib" ]; then
-        awk -v p="${dip%.*}." '!(index($1, p) == 1 && $1 ~ /\/32$/)' "$YT_DEAD_FILE" > "$YT_DEAD_FILE.tmp" && mv -f "$YT_DEAD_FILE.tmp" "$YT_DEAD_FILE"
-        echo "$n24 $((now + YT_DEAD_TTL)) $sib$dip" >> "$YT_DEAD_FILE"
-        log "$who $dip $why — в $n24 это уже второй (${sib%,}), отбиваю подсеть на $((YT_DEAD_TTL / 60)) мин"
+        awk -v p="${dip%.*}." -v b="$b" '{ a = $1; if (index(a, p) == 1 && a ~ /\/32$/) { sub(/\/32$/, "", a); l = substr(a, length(p) + 1); if (l - l % 16 == b) next } print }' "$YT_DEAD_FILE" > "$YT_DEAD_FILE.tmp" && mv -f "$YT_DEAD_FILE.tmp" "$YT_DEAD_FILE"
+        echo "$n28 $((now + YT_DEAD_TTL)) $sib$dip" >> "$YT_DEAD_FILE"
+        log "$who $dip $why — в $n28 это уже второй (${sib%,}), отбиваю подсеть на $((YT_DEAD_TTL / 60)) мин"
     else
         echo "$net $((now + YT_DEAD_TTL)) $dip" >> "$YT_DEAD_FILE"
         log "$who $dip $why — отбиваю его на $((YT_DEAD_TTL / 60)) мин"
@@ -303,7 +307,7 @@ yt_dead_who() {
 # проверка не прошла; прошедшие 5 мин не проверяем снова.
 yt_dead_scan() {
     [ "$YT_DEAD_STATE" = "on" ] || return 0
-    local now out dip hit n t keep="" changed=0 sil res tag cnt
+    local now out dip hit n t keep="" changed=0 sil res tag cnt b
     # не ip: локальная ip затирала бы $ip (/system/bin/ip) — адрес WAN ниже не узнавался
     now=$(date +%s)
     if [ -s "$YT_DEAD_FILE" ]; then
@@ -415,7 +419,8 @@ yt_dead_scan() {
             dip="${hit%_*}"
             case "$dip" in *[!0-9.]*|'') continue ;; esac
             # уже в отбое или недавно прошёл проверку — не трогаем
-            grep -q -e "^$dip/32 " -e "^${dip%.*}.0/24 " "$YT_DEAD_FILE" 2>/dev/null && continue
+            b=${dip##*.}; b=$((b - b % 16))
+            grep -q -e "^$dip/32 " -e "^${dip%.*}.$b/28 " "$YT_DEAD_FILE" 2>/dev/null && continue
             grep -q "^$dip " "$YT_SPROBE_FILE.ok" 2>/dev/null && continue
             echo "$hit" | tr '_' ' ' >> "$YT_SPROBE_FILE.in"
             cnt=$((cnt + 1)); [ "$cnt" -ge 4 ] && break
