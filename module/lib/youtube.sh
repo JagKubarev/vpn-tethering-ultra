@@ -109,6 +109,7 @@ yt_dead_hooks_off() {
 }
 
 yt_dead_on() {
+    local now
     yt_dead_hooks_off
     # без string (zapret_caps) мёртвые серверы не узнать — выключено
     if [ "$YT_DEAD_FAILFAST" != "1" ] || [ -z "$CONNTRACK_BIN" ] || ! zapret_cap str; then
@@ -120,6 +121,13 @@ yt_dead_on() {
     # tether_unblock (CONNMARK 0x40/0xffffffff на каждом пакете с TTL≠63)
     awk -F'[./]' '/^[0-9]/ && NF == 5 { s = (($1 * 256 + $2) * 256 + $3) * 256 + $4; printf "%.0f %.0f\n", s, s + 2 ^ (32 - $5) - 1 }' \
         "$ZAPRET_DIR/google-ipv4.txt" > "$YT_GRANGES" 2>/dev/null
+    # отбитые прошлым запуском: просроченные — вон (часы ещё не выставлены —
+    # оставляем все, перепроверка разберётся)
+    if [ -s "$YT_DEAD_FILE" ] && [ "$YT_DEAD_STATE" != "on" ]; then
+        now=$(date +%s)
+        [ "$now" -gt 1767225600 ] && awk -v now="$now" '$2 > now' "$YT_DEAD_FILE" > "$YT_DEAD_FILE.tmp" 2>/dev/null && mv -f "$YT_DEAD_FILE.tmp" "$YT_DEAD_FILE"
+        [ -s "$YT_DEAD_FILE" ] && log "YouTube: из прошлого запуска — мёртвых видеосерверов в отбое: $(awk 'END {print NR}' "$YT_DEAD_FILE")"
+    fi
     YT_DEAD_SIG="-"
     yt_dead_apply
     # Play Маркет (gvt1.com) — больше не отбиваем (с 3.17 отбивали): без модуля
@@ -178,18 +186,39 @@ yt_dead_off() {
     yt_bg_alive "$YT_RECHECK_PID" && kill -9 "$YT_RECHECK_PID" 2>/dev/null; YT_RECHECK_PID=""
     yt_bg_alive "$YT_SPROBE_PID" && kill -9 "$YT_SPROBE_PID" 2>/dev/null; YT_SPROBE_PID=""
     yt_slow_stop
-    rm -f "$YT_DEAD_FILE" "$YT_SEEN_FILE" "$YT_SEEN_FILE.new" "$YT_GRANGES" "$YT_RECHECK_FILE".* "$YT_SPROBE_FILE".*
+    # YT_DEAD_FILE — не стираем: узлы, мёртвые по адресу, живут часами и после
+    # перезагрузки с новым адресом абонента (29.10: 16 из 17). Следующий запуск
+    # возьмёт их сразу, ожившие снимет перепроверка, просроченные — срок
+    rm -f "$YT_SEEN_FILE" "$YT_SEEN_FILE.new" "$YT_GRANGES" "$YT_RECHECK_FILE".* "$YT_SPROBE_FILE".*
     YT_DEAD_STATE=""; YT_DEAD_SIG=""; YT_STUCK=""
 }
 
 # цепочка отбоя = содержимое YT_DEAD_FILE (пересобираем только при изменении)
 yt_dead_apply() {
-    local sig="" net
+    local sig="" net f="$YT_DEAD_FILE.rules"
     for net in $(awk '{print $1}' "$YT_DEAD_FILE" 2>/dev/null | sort -u); do
         case "$net" in *[!0-9./]*|'') continue ;; esac
         sig="$sig $net"
     done
     [ "$sig" = "$YT_DEAD_SIG" ] && return 0
+    # одним iptables-restore (объявленная цепочка при --noflush очищается):
+    # до YT_DEAD_MAX записей по 2 правила — поштучно это до сотни вызовов
+    # iptables на каждое изменение. Не встало — поштучно, как раньше
+    {
+        echo "*filter"
+        echo ":$CHAIN_YT_DEAD - [0:0]"
+        echo "-A $CHAIN_YT_DEAD -o tun+ -j RETURN"
+        echo "-A $CHAIN_YT_DEAD -o warp+ -j RETURN"
+        for net in $sig; do
+            echo "-A $CHAIN_YT_DEAD -p tcp -d $net -j REJECT --reject-with tcp-reset"
+            echo "-A $CHAIN_YT_DEAD -p udp -d $net -j REJECT --reject-with icmp-port-unreachable"
+        done
+        echo "COMMIT"
+    } > "$f"
+    if ${iptables%% *}-restore -w 2 --noflush < "$f" 2>/dev/null || ${iptables%% *}-restore --noflush < "$f" 2>/dev/null; then
+        rm -f "$f"; YT_DEAD_SIG="$sig"; return 0
+    fi
+    rm -f "$f"
     $iptables -F "$CHAIN_YT_DEAD" 2>/dev/null
     $iptables -A "$CHAIN_YT_DEAD" -o tun+ -j RETURN 2>/dev/null
     # WARP (группа Google: 74.125/16, 173.194/16 …) тоже мимо: узлы, которые
@@ -244,10 +273,14 @@ yt_probe_ip() {
     if [ "$c" = 204 ]; then echo ok; else echo dead; fi
 }
 
-# Отбить адрес мёртвого/молчащего сервера: /32, второй в той же /28 — вся /28.
+# Отбить адрес мёртвого/молчащего сервера. Молчит на ClientHello — сразу его
+# /28; молчит на запрос (признак слабее) — /32, второй в той же /28 — вся /28.
 # /28, а не /24: видеосерверы Google стоят стойками по 4–5 адресов, и YOTA
 # режет стойкой (29.10, 74.125.104.0/24: молчат .166–.169, живы .97–.101,
-# .198–.202, .230–.234 — /24 отбивал 15 живых, каждая стойка в своей /28)
+# .198–.202, .230–.234 — /24 отбивал 15 живых, каждая стойка в своей /28).
+# Сразу /28 — стойки, молчавшие на ClientHello, 29.10 умирали целиком
+# (.166/.169/.170 в 74.125.8): со вторым адресом плеер ждал ещё раз; а
+# «молчит на запрос» в 74.125.104.192/28 через 5 мин ожил
 #   yt_dead_add АДРЕС КТО ЧТО_С_НИМ NOW   (КТО и ЧТО — для журнала)
 # 0 — добавлен (цепочку отбоя надо пересобрать), 1 — нет.
 yt_dead_add() {
@@ -284,6 +317,9 @@ yt_dead_add() {
         awk -v p="${dip%.*}." -v b="$b" '{ a = $1; if (index(a, p) == 1 && a ~ /\/32$/) { sub(/\/32$/, "", a); l = substr(a, length(p) + 1); if (l - l % 16 == b) next } print }' "$YT_DEAD_FILE" > "$YT_DEAD_FILE.tmp" && mv -f "$YT_DEAD_FILE.tmp" "$YT_DEAD_FILE"
         echo "$n28 $((now + YT_DEAD_TTL)) $sib$dip" >> "$YT_DEAD_FILE"
         log "$who $dip $why — в $n28 это уже второй (${sib%,}), отбиваю подсеть на $((YT_DEAD_TTL / 60)) мин"
+    elif [ "$kill" = 1 ]; then
+        echo "$n28 $((now + YT_DEAD_TTL)) $dip" >> "$YT_DEAD_FILE"
+        log "$who $dip $why — отбиваю его стойку $n28 на $((YT_DEAD_TTL / 60)) мин"
     else
         echo "$net $((now + YT_DEAD_TTL)) $dip" >> "$YT_DEAD_FILE"
         log "$who $dip $why — отбиваю его на $((YT_DEAD_TTL / 60)) мин"
@@ -296,7 +332,7 @@ yt_dead_who() {
     case "$1" in play) echo "Play Маркет: сервер загрузок" ;; *) echo "YouTube: видеосервер" ;; esac
 }
 
-# Раз в ~4с: соединения с googlevideo.com и gvt1.com (помечены; у раздачи
+# Раз в ~2с: соединения с googlevideo.com и gvt1.com (помечены; у раздачи
 # пометку может стереть tether_unblock — тогда любые к сетям Google) из
 # conntrack. ClientHello ушёл (>=600 байт), а от сервера дольше
 # YT_DEAD_AFTER — ни байта данных:

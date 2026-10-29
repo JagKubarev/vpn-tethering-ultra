@@ -371,7 +371,9 @@ monitor_loop() {
         block_reconcile
         zapret_whitelist_check
         zapret_reconcile
-        [ $((_loop_count % 2)) -eq 1 ] && yt_dead_scan
+        # каждый круг (~2 с): раз в 2 круга к порогу YT_DEAD_AFTER добавлялось
+        # до ~4 с ожидания плеера на каждом мёртвом узле
+        yt_dead_scan
         [ $((_loop_count % 30)) -eq 17 ] && yt_dead_recheck
         [ $((_loop_count % 5)) -eq 4 ] && yt_slow_reconcile
         zapret_watchdog
