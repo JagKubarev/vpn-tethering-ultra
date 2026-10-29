@@ -55,6 +55,7 @@
   dnsproxy по DoH — без подмены ответов оператором и с доступом к сервисам с гео-блокировкой
   (ChatGPT, Gemini, Claude и т. п.).
   Проверка здоровья, цепочка запасных серверов, адреса Instagram и Facebook «как из Европы» (ECS).
+  Когда пропадает вся сеть, DNS не уходит на оператора — ждёт её возврата.
 - **Обход блокировок (zapret/nfqws)** для трафика мимо VPN — раздачи напрямую и приложений
   телефона. Своя стратегия для каждой сети, подбор в WebUI (~2 или ~7 мин), сторож, который
   сам чинит сломавшуюся стратегию, отдельные стратегии для отдельных сайтов. Банки и Госуслуги
@@ -63,10 +64,13 @@
   по IP или по стране), — свой туннель WARP на AmneziaWG в режиме «напрямую». Через него идут
   только выбранные группы: Telegram (клиенты на телефоне — целиком), по желанию Google, свои
   домены и приложения телефона. Конфиги создаются прямо с телефона или импортируются из
-  AmneziaVPN; перестал отвечать — модуль переходит на следующий.
+  AmneziaVPN; перестал отвечать — модуль переходит на следующий (пропавшая сеть, например в
+  метро, сбоем конфига не считается).
 - **YouTube на мобильном интернете.** Отбой «молчащих» видеосерверов, обрыв медленных
   видеосоединений, чтобы плеер ушёл на быстрый сервер, отдельная стратегия для YouTube,
-  по желанию — отбой кэшей оператора (GGC), замер «Скорость YouTube».
+  по желанию — отбой кэшей оператора (GGC), замер «Скорость YouTube». QUIC, который оператор
+  режет молча, пробивается подделкой: у устройств раздачи — по умолчанию, у YouTube и Google Play
+  на телефоне — по переключателю.
 - **Скрытие раздачи и удобство.** `noprovisioning` и TTL 63, закрытие QUIC клиентам YouTube и выбранным
   приложениям, состояние модуля прямо в списке модулей, WebUI с проверками и журналами,
   обновление через менеджер модулей.
@@ -179,7 +183,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 Нумерация `X.Y.Z`: **X** — этап, **Y** — заметная функция, **Z** — исправления.
 `versionCode` = X·10000 + Y·100 + Z (3.8.1 → 30801). До 23.10.2026 у модуля было две
 нумерации (внешняя 2.x и внутренняя 3.x-hybrid) — таблица соответствия в [`CHANGELOG.md`](CHANGELOG.md).
-Теги `v1.0` … `v3.19.1`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
+Теги `v1.0` … `v3.20.0`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
 
 <details>
 <summary>Кратко по версиям</summary>
@@ -233,6 +237,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 | 3.18 | Устройства в раздаче с блокировкой по MAC, пауза обхода в белых списках, тип блокировки в «Проверить сайт» (отдельно не выпускалась — вошла в 3.19.0). |
 | 3.19.0 | WARP (AmneziaWG) в режиме «напрямую»: группы Telegram/Google/домены/приложения, клиенты Telegram целиком, конфиги с телефона и из AmneziaVPN, переход на следующий конфиг; проверка ядра для zapret и упрощённый режим без `connbytes`; bbr3; вкладка «Сервис». |
 | 3.19.1 | WARP: подбор адреса Cloudflare по сети (порты и подсети), площадка выхода в WebUI и обход российских, перезапуск при смене Wi-Fi; bootstrap DoH по IP; клиенты YouTube без QUIC; системные приложения в выборе. |
+| 3.20.0 | Подделка QUIC вместо закрытия: YouTube и Google Play на телефоне (мимо AdGuard), весь QUIC раздачи по умолчанию; WARP и DNS не считают пропавшую сеть (метро) сбоем; импорт `.conf` на Android, накопленный трафик устройств в раздаче. |
 
 </details>
 
@@ -289,8 +294,8 @@ per-network strategies, a quick/full strategy scanner, a self-repairing watchdog
 strategies and an exclusion list for banks and government services; a built-in **WARP tunnel**
 (AmneziaWG, no VPN app needed) for selected groups — Telegram, Google, custom domains, whole apps —
 with configs generated on the phone or imported from AmneziaVPN; **YouTube helpers** for mobile
-networks (fail-fast on silent video servers, dropping slow video connections); tethering stealth
-(TTL 63) and per-app QUIC blocking.
+networks (fail-fast on silent video servers, dropping slow video connections, QUIC with fake Initials
+instead of blocking); tethering stealth (TTL 63) and per-app QUIC blocking.
 
 Download the zip from [Releases](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest),
 install it in your root manager and reboot; later updates arrive through the manager. Everything is

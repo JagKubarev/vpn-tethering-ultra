@@ -553,6 +553,17 @@
 #     наружу; проверки сети Android/OnePlus — в list-exclude;
 #   - QUIC_BLOCK_YT=1: клиенты YouTube без QUIC; WebUI — системные приложения
 #     с иконкой в выборе, список в фоне (ctlBg).
+# v3.20.0 — по замерам 29.10 (YOTA, метро, смартфон на раздаче):
+#   - QUIC_YT_FAKE: клиентам YouTube и Play (com.android.vending) — подделка
+#     QUIC (nfqws fake x6, VPN_QUIC_FAKE) вместо REJECT, RETURN в ADGUARD_OUTPUT;
+#   - ZAPRET_QUIC_FAKE=1: QUIC раздачи мимо VPN — подделка (VPN_ZAPRET_QF в
+#     mangle POSTROUTING, после kill-switch), главнее ZAPRET_QUIC_BLOCK; банки —
+#     --hostlist-exclude и в профиле UDP 443;
+#   - нет сети вовсе (метро): WARP не бракует конфиг (warp_uplink мимо туннеля),
+#     DNS не откатывается (dns_operator_dead — DNS оператора напрямую, не через
+#     dnsmasq), после возврата и 5 мин после — сначала свежий dnsproxy;
+#   - WebUI: импорт WARP без accept (.conf на Android был серым), zip по
+#     сигнатуре; трафик устройств накопленный (iw station dump / USB).
 # ============================================================================
 # ============================================================================
 
@@ -1372,7 +1383,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.19.1 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.20.0 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
