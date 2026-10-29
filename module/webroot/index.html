@@ -292,7 +292,7 @@ details.more > summary { color: var(--muted); }
 <div class="card">
   <div id="clients"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
 </div>
-<div class="hint">Заблокированное устройство остаётся подключённым к точке, но без интернета, и потом может отключиться само. После разблокировки иногда нужно переподключиться. Новый «случайный» MAC блокировку обходит. ↓ ↑ — трафик с подключения устройства (Wi-Fi) или с подключения USB; если телефон этого не даёт — по открытым сейчас соединениям («в открытых»).</div>
+<div class="hint">Заблокированное устройство остаётся подключённым к точке, но без интернета, и потом может отключиться само. После разблокировки иногда нужно переподключиться. Новый «случайный» MAC блокировку обходит. ↓ ↑ — трафик с подключения устройства (Wi-Fi) или с подключения USB; если телефон этого не даёт — по открытым сейчас соединениям («в открытых соединениях»).</div>
 <div class="hint">Остальные настройки — во вкладках «Обход», «Сеть» и «WARP», проверки и журналы — в «Сервисе».</div>
 
 </section>
@@ -1019,18 +1019,23 @@ $$('.row input, .row select, .row textarea').forEach((el) => {
 // ---------------------------------------------------------------- устройства в раздаче (3.18)
 // "ip|mac|состояние|имя|соединений|байт|1=заблокировано|↓|↑" (webctl clients);
 // ↓/↑ — накопленные с подключения (Wi-Fi) или с подъёма USB, пусто — не знаем
-const fmtBytes = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' ГБ' : b >= 1048576 ? (b / 1048576).toFixed(1) + ' МБ' : b >= 1024 ? Math.round(b / 1024) + ' КБ' : b + ' Б';
+// неразрывный пробел: «64.6 МБ» на узком экране не рвётся
+const fmtBytes = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' ГБ' : b >= 1048576 ? (b / 1048576).toFixed(1) + ' МБ' : b >= 1024 ? Math.round(b / 1024) + ' КБ' : b + ' Б';
 function clientRow(f) {
   const [ip, mac, st, name, c, by, bl, dn, up] = f, blocked = bl === '1';
   const nm = name && name !== 'null' ? name : 'Без имени';
   const on = st === 'REACHABLE' || st === 'DELAY' || st === 'PROBE';
-  let info = (ip ? ip + ' · ' : '') + mac;
-  if (blocked) info += ' · заблокировано';
-  else if (st === '-') info += ' · не подключено';
-  else info += ' · ' + (on ? 'в сети' : 'был недавно') + (+c ? ' · соединений: ' + c : '') +
-    (dn ? ' · ↓ ' + fmtBytes(+dn) + ' ↑ ' + fmtBytes(+up || 0) : +c && +by ? ' · ' + fmtBytes(+by) + ' в открытых' : '');
+  // строки: адрес · состояние · трафик (одной строкой переносилось посреди чисел)
+  const ln = [(ip ? ip + ' · ' : '') + mac];
+  if (blocked) ln.push('заблокировано');
+  else if (st === '-') ln.push('не подключено');
+  else {
+    ln.push((on ? 'в сети' : 'был недавно') + (+c ? ' · соединений: ' + c : ''));
+    if (dn) ln.push('↓ ' + fmtBytes(+dn) + ' · ↑ ' + fmtBytes(+up || 0));
+    else if (+c && +by) ln.push(fmtBytes(+by) + ' в открытых соединениях');
+  }
   return '<div class="row wrap" style="gap:8px"><span class="dot ' + (blocked ? 'red' : on ? 'green' : '') + '"></span>' +
-    '<div class="txt"><div class="t">' + esc(nm) + '</div><div class="s">' + esc(info) + '</div></div>' +
+    '<div class="txt"><div class="t">' + esc(nm) + '</div><div class="s">' + ln.map(esc).join('<br>') + '</div></div>' +
     '<button class="btn small" data-cmac="' + esc(mac) + '" data-cname="' + esc(nm) + '" data-cbl="' + (blocked ? '1' : '0') + '">' +
     (blocked ? 'Разблокировать' : 'Блок') + '</button></div>';
 }
