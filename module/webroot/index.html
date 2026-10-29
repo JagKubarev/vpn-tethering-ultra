@@ -1415,7 +1415,9 @@ $('#warpFile').addEventListener('change', async (e) => {
   try {
     for (const f of Array.from(e.target.files || [])) {
       if (f.size > 1 << 20) { toast(f.name + ': больше 1 МБ — это не конфиг'); continue; }
-      if (/\.zip$/i.test(f.name)) list.push(...await unzipConfs(await f.arrayBuffer()));
+      // без accept выбрать можно что угодно: zip и без расширения (из облака) — по сигнатуре PK\3\4
+      const sig = new Uint8Array(await f.slice(0, 4).arrayBuffer());
+      if (/\.zip$/i.test(f.name) || (sig[0] === 0x50 && sig[1] === 0x4b && sig[2] === 3 && sig[3] === 4)) list.push(...await unzipConfs(await f.arrayBuffer()));
       else list.push({ name: f.name, text: await f.text() });
     }
   } catch (err) { toast('Не прочитался файл: ' + (err instanceof RangeError ? 'zip повреждён' : err.message)); }
