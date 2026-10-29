@@ -85,6 +85,12 @@ yt_match_build() {   # zapret_caps зовёт снова, если ядро бе
     # Play Маркет (gvt1.com) — свой бит: обрыв медленных его не трогает
     YT_GMARK_OUT="! -o tun+ -m owner ! --uid-owner 0 $GVT_MATCH -j CONNMARK --set-xmark $YT_GCTMARK/$YT_GCTMARK"
     YT_GMARK_FWD="! -o tun+ $GVT_MATCH -j CONNMARK --set-xmark $YT_GCTMARK/$YT_GCTMARK"
+    # QUIC к отбитым сетям — тоже отказ: имени в QUIC не видно (string), но в
+    # цепочке только сети видеосерверов. 29.10: после перерегистрации на YOTA
+    # часть узлов молчала на любой TLS и QUIC (UNREPLIED), а с подделкой QUIC
+    # YouTube ждал их по QUIC — «каждый третий ролик висит»; RST был только TCP
+    YT_QMATCH="-p udp --dport 443"
+    case "$GGC_MATCH" in *connbytes*) YT_QMATCH="$YT_QMATCH -m connbytes --connbytes-dir original --connbytes-mode packets --connbytes 1:9" ;; esac
 }
 yt_match_build
 
@@ -96,7 +102,7 @@ yt_dead_hooks_off() {
     _n=0; while [ $_n -lt 8 ] && $iptables -t mangle -D OUTPUT $YT_GMARK_OUT 2>/dev/null; do _n=$((_n + 1)); done
     _n=0; while [ $_n -lt 8 ] && $iptables -t mangle -D FORWARD $YT_GMARK_FWD 2>/dev/null; do _n=$((_n + 1)); done
     for c in OUTPUT FORWARD; do
-        for m in "$GGC_MATCH" "$GVT_MATCH"; do
+        for m in "$GGC_MATCH" "$GVT_MATCH" "$YT_QMATCH"; do
             _n=0; while [ $_n -lt 8 ] && $iptables -D "$c" $m -j "$CHAIN_YT_DEAD" 2>/dev/null; do _n=$((_n + 1)); done
         done
     done
@@ -120,7 +126,9 @@ yt_dead_on() {
     $iptables -t mangle -I FORWARD 1 $YT_GMARK_FWD 2>/dev/null
     $iptables -I FORWARD 1 $GVT_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     $iptables -I FORWARD 1 $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
+    $iptables -I FORWARD 1 $YT_QMATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     if [ "$ZAPRET_PHONE" = "1" ]; then
+        $iptables -I OUTPUT 1 $YT_QMATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
         $iptables -t mangle -I OUTPUT 1 $YT_MARK_OUT 2>/dev/null
         $iptables -t mangle -I OUTPUT 1 $YT_GMARK_OUT 2>/dev/null
         $iptables -I OUTPUT 1 $GVT_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
@@ -180,6 +188,8 @@ yt_dead_apply() {
     for net in $sig; do
         $iptables -A "$CHAIN_YT_DEAD" -p tcp -d "$net" -j REJECT --reject-with tcp-reset 2>/dev/null || \
             log "WARNING: YouTube: не удалось поставить отбой для $net"
+        # QUIC: «порт закрыт» — Cronet сразу уходит на TCP, а там RST выше
+        $iptables -A "$CHAIN_YT_DEAD" -p udp -d "$net" -j REJECT --reject-with icmp-port-unreachable 2>/dev/null
     done
     YT_DEAD_SIG="$sig"
 }
