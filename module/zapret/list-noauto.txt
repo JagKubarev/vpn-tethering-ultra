@@ -19,3 +19,16 @@ google-analytics.com
 doubleclick.net
 withgoogle.com
 app-measurement.com
+# Яндекс и VK вне зоны .ru (list-rutld их не видит): в России не блокируются, а
+# 29.10 в автосписке 13T были yastatic.net и static.yandex.net. VK — и в списке
+# «не трогать» у zapretdiscordyoutube (netrogat: vk.com, userapi.com, api.mycdn.me).
+yandex.net
+yastatic.net
+yandex.com
+vk.com
+vk.me
+userapi.com
+mycdn.me
+vkuser.net
+vk-cdn.net
+vkuservideo.net

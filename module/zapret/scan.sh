@@ -556,7 +556,7 @@ fi
 
 if [ "$MODE" = "quick" ]; then
     # проверенные шаблоны (autottl убран: ломал обычные сайты во всех 6 проверенных сетях)
-    S_total=22
+    S_total=23
     st stage="быстрый подбор"
     while IFS= read -r a; do
         [ -n "$a" ] && run_strat "$a" "быстрый"
@@ -576,6 +576,7 @@ if [ "$MODE" = "quick" ]; then
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=badsum --dpi-desync-split-pos=midsld $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=ts --dpi-desync-split-pos=midsld $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=datanoack --dpi-desync-split-pos=midsld $FAKE
+--dpi-desync=fake,multidisorder --dpi-desync-fooling=datanoack --dpi-desync-split-pos=midsld --dpi-desync-fake-tls-mod=rnd,rndsni,padencap
 --dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=@G $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
 --dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld
@@ -585,7 +586,7 @@ if [ "$MODE" = "quick" ]; then
 --dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=www.google.com --dpi-desync-fooling=md5sig --wssize=1:6
 EOF
 else
-    S_total=$(( 14 + 8 + 36 + 3 + 4 + 9 + 10 ))
+    S_total=$(( 14 + 8 + 36 + 4 + 5 + 12 + 10 ))
     # A: только разрез, без подделок
     st stage="1/4 разрез без подделок"
     for m in multisplit multidisorder; do
@@ -615,6 +616,9 @@ else
     run_strat "--dpi-desync=fake,hostfakesplit --dpi-desync-split-pos=host+1 --dpi-desync-hostfakesplit-midhost=midsld --dpi-desync-hostfakesplit-mod=host=www.google.com --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=sberbank.ru --dpi-desync-fooling=datanoack --dpi-desync-repeats=6 --dpi-desync-cutoff=n6" "3"
     run_strat "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,sld+1 --dpi-desync-split-seqovl=2 --dpi-desync-split-seqovl-pattern=@G --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=max.ru --dpi-desync-fooling=datanoack --dpi-desync-repeats=6 --dpi-desync-cutoff=n5" "3"
     run_strat "--dpi-desync=fake,multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1 --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=gosuslugi.ru --dpi-desync-fooling=datanoack --dpi-desync-cutoff=n5" "3"
+    # подставное имя в hostfakesplit — VK (есть во всех белых списках; фейки
+    # с ним — у magisk-zapret2)
+    run_strat "--dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=vk.com --dpi-desync-fooling=md5sig" "3"
     # C2: разрез с наложением 1 байта (seqovl) — 21.10 YOTA: только он и
     # multidisorder с позиции 1 проходили с ClientHello Chrome/AdGuard
     st stage="3/4 разрез с наложением"
@@ -629,6 +633,9 @@ else
         b=$(echo "$a" | sed 's# --dpi-desync-fake-tls=@G##')
         run_strat "$b --dpi-desync-fake-tls-mod=rnd,dupsid" "4"
         run_strat "$b --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com" "4"
+        # случайное имя + padding-расширение (самый частый вариант в наборах
+        # zapretdiscordyoutube/src)
+        run_strat "$b --dpi-desync-fake-tls-mod=rnd,rndsni,padencap" "4"
         run_strat "$a --dpi-desync-repeats=6" "4"
     done < "$TMP/top3"
     # E (3.6): новые приёмы nfqws к двум лучшим — дубли пакетов с порчей,

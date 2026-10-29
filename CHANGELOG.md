@@ -1186,6 +1186,19 @@
   такой не берётся. На 13T (копия, без записи стратегии): узел 74.125.154.177 заблокирован без
   обхода, из 22 быстрых стратегий его открыли 14; не открывшие его не открыли и youtube.com, так
   что в этом прогоне выбор не изменился. Сторож (`check`) и сайты (`sites`) без изменений.
+- Подбор: новые кандидаты (идеи zapretdiscordyoutube). `fake-tls-mod=rnd,rndsni,padencap` —
+  самый частый вариант в их наборах для nfqws1 (10 стратегий), у нас его не было: в быстром —
+  `fake,multidisorder datanoack midsld` с ним (23 вместо 22), в полном — к трём лучшим на этапе 4.
+  Подставное имя `vk.com` в hostfakesplit (полный, к приманкам google/sberbank; фейки с SNI max.ru
+  и gosuslugi.ru уже были). Счётчик полного подбора: этап «разрез с наложением» — 5 прогонов, а
+  считалось 4.
+- `list-noauto.txt`: + Яндекс и VK вне зоны .ru (`yandex.net`, `yastatic.net`, `yandex.com`,
+  `vk.com`, `vk.me`, `userapi.com`, `mycdn.me`, `vkuser.net`, `vk-cdn.net`, `vkuservideo.net`) —
+  29.10 в автосписке 13T были `yastatic.net` и `static.yandex.net` (из 123 записей); VK — и в
+  списке «не трогать» (`netrogat.txt`) у zapretdiscordyoutube. Из автосписка вычистятся при
+  старте nfqws. На 13T (копия): с padencap nfqws стартует, на YOTA он открыл 6 из 11 (YouTube —
+  да, Discord, Facebook, rutracker, LinkedIn — нет), выбор не изменился; vk.com и noauto — только
+  `sh -n` и проверка регулярки (yastatic.net, static.yandex.net, m.vk.com — да; notyastatic.net — нет).
 
 ---
 
