@@ -386,11 +386,14 @@ zapret_auto_age() {
     local now n
     [ -f "$ZAPRET_LIST_AUTO" ] || return 0
     now=$(date +%s)
+    # часы ещё не выставлены (загрузка без сети и RTC): новые записи получили
+    # бы дату ~1970 и все разом ушли бы, когда время придёт — ждём (ревью 3.20.2)
+    [ "${now:-0}" -gt 1767225600 ] || return 0
     # новые записи — с текущим временем; ушедшие из автосписка — из учёта
     touch "$ZAPRET_AUTO_SEEN"; chmod 600 "$ZAPRET_AUTO_SEEN"
     awk -v now="$now" 'FILENAME == ARGV[1] { if ($2 ~ /^[0-9]+$/) t[$1] = $2; next }
         NF && $1 !~ /^#/ && !s[$1]++ { print $1, (($1 in t) ? t[$1] : now) }' \
-        "$ZAPRET_AUTO_SEEN" "$ZAPRET_LIST_AUTO" > "$ZAPRET_AUTO_SEEN.tmp" || return 0
+        "$ZAPRET_AUTO_SEEN" "$ZAPRET_LIST_AUTO" > "$ZAPRET_AUTO_SEEN.tmp" || { rm -f "$ZAPRET_AUTO_SEEN.tmp"; return 0; }
     n=$(awk -v lim=$((now - ZAPRET_AUTO_DAYS * 86400)) '$2 < lim' "$ZAPRET_AUTO_SEEN.tmp" | grep -c .)
     if [ "${n:-0}" -gt 0 ]; then
         awk -v lim=$((now - ZAPRET_AUTO_DAYS * 86400)) 'FILENAME == ARGV[1] { if ($2 < lim) old[$1] = 1; next }
@@ -401,7 +404,10 @@ zapret_auto_age() {
         rm -f "$ZAPRET_LIST_AUTO.tmp"
         log "zapret: из автосписка убраны записи старше $ZAPRET_AUTO_DAYS дн. ($n) — заблокированные nfqws добавит снова"
     fi
-    mv -f "$ZAPRET_AUTO_SEEN.tmp" "$ZAPRET_AUTO_SEEN"; chmod 600 "$ZAPRET_AUTO_SEEN"
+    # 600 до mv — файл ни на миг не 644 (umask 022); без изменений не пишем:
+    # зовётся раз в ~30 с, а записи меняются раз в часы
+    chmod 600 "$ZAPRET_AUTO_SEEN.tmp"
+    if cmp -s "$ZAPRET_AUTO_SEEN.tmp" "$ZAPRET_AUTO_SEEN"; then rm -f "$ZAPRET_AUTO_SEEN.tmp"; else mv -f "$ZAPRET_AUTO_SEEN.tmp" "$ZAPRET_AUTO_SEEN"; fi
 }
 
 # журнал причин автосписка — не больше ~256 КБ (nfqws открывает файл на каждую
