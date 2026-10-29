@@ -183,7 +183,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 Нумерация `X.Y.Z`: **X** — этап, **Y** — заметная функция, **Z** — исправления.
 `versionCode` = X·10000 + Y·100 + Z (3.8.1 → 30801). До 23.10.2026 у модуля было две
 нумерации (внешняя 2.x и внутренняя 3.x-hybrid) — таблица соответствия в [`CHANGELOG.md`](CHANGELOG.md).
-Теги `v1.0` … `v3.20.0`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
+Теги `v1.0` … `v3.20.1`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
 
 <details>
 <summary>Кратко по версиям</summary>
@@ -238,6 +238,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 | 3.19.0 | WARP (AmneziaWG) в режиме «напрямую»: группы Telegram/Google/домены/приложения, клиенты Telegram целиком, конфиги с телефона и из AmneziaVPN, переход на следующий конфиг; проверка ядра для zapret и упрощённый режим без `connbytes`; bbr3; вкладка «Сервис». |
 | 3.19.1 | WARP: подбор адреса Cloudflare по сети (порты и подсети), площадка выхода в WebUI и обход российских, перезапуск при смене Wi-Fi; bootstrap DoH по IP; клиенты YouTube без QUIC; системные приложения в выборе. |
 | 3.20.0 | Подделка QUIC вместо закрытия: YouTube и Google Play на телефоне (мимо AdGuard), весь QUIC раздачи по умолчанию; WARP и DNS не считают пропавшую сеть (метро) сбоем; импорт `.conf` на Android, накопленный трафик устройств в раздаче. |
+| 3.20.1 | Отбой задушенных видеосерверов и для QUIC (с подделкой QUIC YouTube ждал узлы, которые оператор режет по адресу); через WARP — не отбиваются. |
 
 </details>
 

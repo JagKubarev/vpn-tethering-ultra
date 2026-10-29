@@ -564,6 +564,10 @@
 #     dnsmasq), после возврата и 5 мин после — сначала свежий dnsproxy;
 #   - WebUI: импорт WARP без accept (.conf на Android был серым), zip по
 #     сигнатуре; трафик устройств накопленный (iw station dump / USB).
+# v3.20.1 — YOTA режет часть узлов Google по адресу (TLS и QUIC молчат, через
+#   WARP отвечают): VPN_YT_DEAD отбивает и QUIC (udp REJECT icmp-port-
+#   unreachable, хук YT_QMATCH в OUTPUT/FORWARD) — с подделкой QUIC YouTube
+#   ждал такие узлы; мимо tun+ и warp+.
 # ============================================================================
 # ============================================================================
 
@@ -1383,7 +1387,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.20.0 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.20.1 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
