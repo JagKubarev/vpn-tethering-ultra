@@ -18,6 +18,7 @@ WARP_RUN=/data/local/tmp/vpn_tether_warp  # .log, .ensure (файл с ключ�
 WARP_CHECK_SECS=60       # проверка трафиком, пока всё хорошо
 WARP_BAD_SECS=600        # конфиг, на котором не поднялось, — не брать 10 мин
 WARP_RETRY_SECS=300      # все конфиги не поднялись / их нет — повтор через 5 мин
+WARP_NONET_RETRY=30      # не поднялся, и напрямую сети нет — тот же конфиг через 30 с
 WARP_STATE=off           # off | starting | up | fail
 WARP_CUR=""              # конфиг в работе
 WARP_PID=""
@@ -282,6 +283,12 @@ warp_probe() {
 # (только «дошёл ли ответ» — -k, сертификат не важен)
 warp_uplink() {
     local u
+    # при подъёме без хендшейка warp_probe ещё не звали — флаг пуст, и curl
+    # шёл бы от root через прокси AdGuard
+    if [ -z "$WARP_SU_G" ]; then
+        WARP_SU_G=0
+        su -g "$DNSPROXY_GID" -c true >/dev/null 2>&1 && WARP_SU_G=1
+    fi
     for u in https://1.1.1.1/cdn-cgi/trace https://8.8.8.8/; do
         if [ "$WARP_SU_G" = "1" ]; then
             su -g "$DNSPROXY_GID" -c "curl -s -k -m 3 -o /dev/null $u" >/dev/null 2>&1 && return 0
@@ -393,8 +400,10 @@ warp_reconcile() {
                     fi
                     if ! warp_uplink; then
                         # и напрямую сети нет (метро) — конфиг не виноват: тот же заново
-                        log "WARP: $WARP_CUR — нет хендшейка, но и напрямую сети нет — конфиг не бракую"
-                        warp_down; warp_set_state off ""
+                        # пауза: из off тот же конфиг поднимался бы сразу, и без сети
+                        # (белые списки — часами) перебор адресов и перезапуски шли по кругу
+                        log "WARP: $WARP_CUR — нет хендшейка, но и напрямую сети нет — конфиг не бракую, повтор через ${WARP_NONET_RETRY} с"
+                        warp_down; WARP_RETRY_TS=$((now + WARP_NONET_RETRY)); warp_set_state fail "нет сети"
                         return 0
                     fi
                     if [ "$WARP_RU_TRY" = 1 ]; then
@@ -435,8 +444,8 @@ warp_reconcile() {
                     log "WARP: $WARP_CUR — через $WARP_EP_CUR нет трафика, беру $WARP_EP_Q (российская)"
                     warp_ep_next
                 elif [ $WARP_FAILS -ge 3 ] && ! warp_uplink; then
-                    log "WARP: $WARP_CUR — нет трафика, но и напрямую сети нет — конфиг не бракую"
-                    warp_down; warp_set_state off ""
+                    log "WARP: $WARP_CUR — нет трафика, но и напрямую сети нет — конфиг не бракую, повтор через ${WARP_NONET_RETRY} с"
+                    warp_down; WARP_RETRY_TS=$((now + WARP_NONET_RETRY)); warp_set_state fail "нет сети"
                 elif [ $WARP_FAILS -ge 3 ]; then
                     log "WARP: $WARP_CUR — нет трафика через туннель, беру следующий"
                     warp_mark_bad "$WARP_CUR"; warp_down; warp_set_state off ""
@@ -480,8 +489,10 @@ warp_reconcile() {
             elif ! warp_uplink; then
                 # мимо туннеля тоже тишина — конфиг не виноват: держим его,
                 # проверяем чаще; оживёт сеть — «снова отвечает». Промахи — с нуля:
-                # туннелю после возврата сети нужен новый хендшейк (тест: 1 промах)
-                WARP_CHECK_TS=$((now - WARP_CHECK_SECS + 10))
+                # туннелю после возврата сети нужен новый хендшейк (тест: 1 промах).
+                # 10 с — от конца проверок: они сами до 11 с (5 + 2×3), от now
+                # следующая шла бы сразу, и цикл демона почти не выходил из curl
+                WARP_CHECK_TS=$(( $(date +%s) - WARP_CHECK_SECS + 10 ))
                 [ "$WARP_NONET" = 1 ] || log "WARP: $WARP_CUR не отвечает, но и напрямую сети нет — конфиг не меняю"
                 WARP_NONET=1; WARP_FAILS=0
             else
