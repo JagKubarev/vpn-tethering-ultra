@@ -1313,6 +1313,12 @@
   Порядок: wlrus → geohide → not-a-dns → comss. На 13T: `DNS_FALLBACKS` в конфиге, dnsproxy с
   `-f https://geohide.ru/…` первым; переключение при отказе основного вживую не проверялось.
   Вживую 30.10 12:14: wlrus медленный (3,25 с) — модуль ушёл на geohide.
+  Ещё запасной — `dns.geohide.ru:444` (тот же GeoHide, другие серверы) после geohide.ru: 30.10 13:57 и
+  14:15 geohide.ru не ответил на проверку. Каталог dns.quic.best («Обход геоблока») и статьи, тест
+  14:20 с 13T через временный dnsproxy: dns.geohide.ru:444 — прокси для всех трёх, Gemini через
+  159.194.200.33 открывается (`com`, 2 из 2); xbox-dns.ru — 0.0.0.0 на все три; mafioznik, shecan,
+  semqka — SERVFAIL; router.comss.one — как comss (Gemini настоящий); malw через Cloudflare Gateway —
+  прокси 62.133.62.97 с YOTA молчит. Порядок: wlrus → geohide → dns.geohide.ru:444 → not-a-dns → comss.
 - Play снова в отбое мёртвых серверов (3.20.2 убирал), строже YouTube. 30.10 07:16: Play висел на
   42% на 74.125.11.102 (gvt1) — волны не было, адрес молчит напрямую с любым именем, через WARP
   жив; стойка .97–.104 мертва. Теперь: «молчит на ClientHello» у Play — не сразу, а в проверку

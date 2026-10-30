@@ -626,14 +626,16 @@ DNS_UPSTREAMS="https://dns.wlrus.cfd/dns-query"
 # прокси для ChatGPT/Gemini/Claude, с YOTA 0.1-0.4с, Gemini через него
 # открывается (страна com). Был dagami (23.10 — 0.26-0.40с), 30.10 мёртв:
 # «Couldn't connect» напрямую, тишина через WARP, у dnsproxy SERVFAIL — после
-# него DNS уходил к оператору. comss — последним: Gemini через него уже нет. Google/Cloudflare убраны (3.17):
+# него DNS уходил к оператору. comss — последним: Gemini через него уже нет.
+# dns.geohide.ru:444 — тот же GeoHide на других серверах (30.10: прокси для всех
+# трёх, Gemini открывается): geohide.ru не ответил при проверке — запасной рядом. Google/Cloudflare убраны (3.17):
 # гео-блок не обходят, а dnsproxy при задержке основного (> --timeout)
 # опрашивает запасные разом и берёт самый быстрый ответ — им мог оказаться
 # Google с настоящими адресами ChatGPT/Claude/Gemini, и тот сидел в кэше
 # (25.10: «регион недоступен» на ноуте, переподключение Wi-Fi не помогало;
 # причина вероятная, в логе не поймана). Молчат
 # все — модуль и так уводит DNS к оператору (проверка dns_health).
-DNS_FALLBACKS="https://geohide.ru/dns-query https://not-a-dns.quic.best/dns-query https://dns.comss.one/dns-query"
+DNS_FALLBACKS="https://geohide.ru/dns-query https://dns.geohide.ru:444/dns-query https://not-a-dns.quic.best/dns-query https://dns.comss.one/dns-query"
 # Апстримы для DNS_VPN=doh (идут через туннель)
 DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Чем резолвить имена самих апстримов (dns.wlrus.cfd и т.д.). Подмена тут не
