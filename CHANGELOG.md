@@ -1374,6 +1374,15 @@
   172.121.110.75, 142.252.58.8, 142.252.58.18 — те же, что 27.10. «Нет связи» Telegram берёт у
   Android (`ConnectivityManager`), своей проверки нет. На 13T: 13 сетей v4, с ноутбука все 4
   ретранслятора — TCP через WARP.
+- WebUI: подписи стратегий (`stratLabel`). hostfakesplit с www.google.com, sberbank.ru и vk.com
+  выглядели одинаково («hostfakesplit · md5sig») — теперь «имя …»; у фейка с `sni=` писалось
+  «sni google» при любом имени (sberbank.ru, max.ru, gosuslugi.ru) — теперь настоящее; padencap —
+  «случайный ClientHello + padencap». Проверено на 10 стратегиях из `scan.sh`.
+- WARP: импорт не принимает конфиг с Endpoint-заглушкой `example.com/.net/.org` («Endpoint — заглушка
+  …»). 27.10 такой (`server.example.com:51820`) импортировался вместе с остальными, шёл первым по
+  алфавиту, и каждый подъём WARP начинался с «не запустился» (−2–3 с; 30.10 — 4 раза). На 13T удалён
+  (`warp-del`), повторный импорт — отказ. `normalize` под busybox awk не работает вовсе («секция
+  [[Interface]]», и до правки) — импорт идёт только из WebUI под mksh, не трогал.
 
 ---
 

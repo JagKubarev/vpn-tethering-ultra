@@ -74,6 +74,9 @@ normalize() {
             t = v; gsub(/[][]/, "", t)   # скобки — отдельно: в классе с ними busybox awk ошибается
             if (v == "" || t ~ /[^A-Za-z0-9+\/=.:,<> _-]/) { err = "недопустимое значение " k; exit }
             if (k ~ /Key$/ && (length(v) != 44 || v !~ /^[A-Za-z0-9+\/]+=$/)) { err = "неверный " k; exit }
+            # шаблон с заглушкой (server.example.com:51820): такой конфиг не поднимется
+            # никогда, а WARP пробовал его первым при каждом подъёме (27.10 импорт, −2–3 с)
+            if (k == "Endpoint" && tolower(v) ~ /(^|\.)example\.(com|net|org)(:|$)/) { err = "Endpoint — заглушка " v ", а не адрес сервера"; exit }
             seen[sec k] = 1; out = out k " = " v "\n"
         }
         END {

@@ -1656,8 +1656,12 @@ function stratLabel(a) {
   const pos = g(/--dpi-desync-split-pos=(\S+)/);
   const ex = [];
   if (/seqovl=/.test(a)) ex.push('seqovl');
-  if (/sni=/.test(a)) ex.push('sni google');
-  else if (/fake-tls-mod=rnd/.test(a)) ex.push('случайный ClientHello');
+  // подставное имя hostfakesplit и sni фейка — разные стратегии (google / sberbank / vk)
+  const fhost = g(/--dpi-desync-hostfakesplit-mod=\S*?host=([^,\s]+)/);
+  if (fhost) ex.push('имя ' + fhost.replace(/^www\./, ''));
+  const sni = g(/--dpi-desync-fake-tls-mod=\S*?sni=([^,\s]+)/);
+  if (sni) ex.push('sni ' + sni.replace(/^www\./, ''));
+  else if (/fake-tls-mod=rnd/.test(a)) ex.push('случайный ClientHello' + (/fake-tls-mod=\S*padencap/.test(a) ? ' + padencap' : ''));
   const rep = g(/--dpi-desync-repeats=(\d+)/); if (rep) ex.push('×' + rep);
   if (/--dup=/.test(a)) ex.push('дубли ' + (g(/--dup-fooling=(\S+)/) || (/--dup-autottl/.test(a) ? 'autottl' : '')));
   if (/--orig-autottl/.test(a)) ex.push('TTL пакетов');
