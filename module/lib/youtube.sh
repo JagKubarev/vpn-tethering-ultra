@@ -122,17 +122,21 @@ yt_dead_on() {
         "$ZAPRET_DIR/google-ipv4.txt" > "$YT_GRANGES" 2>/dev/null
     YT_DEAD_SIG="-"
     yt_dead_apply
-    # Play Маркет (gvt1.com) — больше не отбиваем (с 3.17 отбивали): без модуля
-    # он сам уходит с медленного сервера, а «молчащие» его серверы 29.10 были
-    # следствием обхода — в автосписке сидели API Play и rr…gvt1.com. Обрыв
-    # (ss -K) загрузки посреди файла Play не переживает: висит на 43%/99% до
-    # перезапуска. Пометки и хуки gvt1 только снимаются (yt_dead_hooks_off)
+    # Play Маркет (gvt1.com) — снова в отбое (3.20.2 убирал), но строже, чем
+    # YouTube: молчит на ClientHello — только после проверки адреса (www.google.com
+    # мимо обхода); молчит на запрос — новые соединения отбиваются, текущие не
+    # рвутся (обрыв посреди файла Play не переживает). 30.10 07:16: Play висел на
+    # 42% на 74.125.11.102 — напрямую молчит с любым именем, через WARP жив
     $iptables -t mangle -I FORWARD 1 $YT_MARK_FWD 2>/dev/null
+    $iptables -t mangle -I FORWARD 1 $YT_GMARK_FWD 2>/dev/null
+    $iptables -I FORWARD 1 $GVT_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     $iptables -I FORWARD 1 $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     $iptables -I FORWARD 1 $YT_QMATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     if [ "$ZAPRET_PHONE" = "1" ]; then
         $iptables -I OUTPUT 1 $YT_QMATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
         $iptables -t mangle -I OUTPUT 1 $YT_MARK_OUT 2>/dev/null
+        $iptables -t mangle -I OUTPUT 1 $YT_GMARK_OUT 2>/dev/null
+        $iptables -I OUTPUT 1 $GVT_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
         $iptables -I OUTPUT 1 $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     fi
     # хук не встал — не «on»: иначе сторож zapret ставил бы правила по кругу
@@ -151,7 +155,7 @@ yt_dead_on() {
         $iptables -C OUTPUT $YT_QMATCH -j "$CHAIN_YT_DEAD" 2>/dev/null || \
             $iptables -I OUTPUT 1 $YT_QMATCH -j "$CHAIN_YT_DEAD" 2>/dev/null
     fi
-    [ "$YT_DEAD_STATE" = "on" ] || log "zapret: отбой мёртвых и молчащих видеосерверов YouTube включён (нет ответа ${YT_DEAD_AFTER}с, на запрос ${YT_SILENT_AFTER}с и проверка не прошла -> RST на $((YT_DEAD_TTL / 60)) мин)"
+    [ "$YT_DEAD_STATE" = "on" ] || log "zapret: отбой мёртвых и молчащих видеосерверов YouTube и Play включён (нет ответа ${YT_DEAD_AFTER}с, на запрос ${YT_SILENT_AFTER}с и проверка не прошла -> RST на $((YT_DEAD_TTL / 60)) мин; Play — только после проверки)"
     YT_DEAD_STATE="on"
 }
 
@@ -392,8 +396,15 @@ yt_dead_scan() {
     if [ -f "$YT_SEEN_FILE.new" ]; then mv -f "$YT_SEEN_FILE.new" "$YT_SEEN_FILE"; else : > "$YT_SEEN_FILE"; fi
 
     # адрес_кто (не через "while read" из трубы: тот идёт в подоболочке)
+    # Play — не сразу: в проверку адреса (ниже, тег playch; HIT по соединению
+    # приходит один раз — ждёт в YT_PLAY_PEND, пока проверка занята); YouTube — сразу
     for hit in $(printf '%s\n' "$out" | awk '$1 == "HIT" && $2 == "dead" && !s[$3]++ {print $3 "_" $4}'); do
         dip="${hit%_*}"; tag="${hit#*_}"
+        if [ "$tag" = play ]; then
+            case "$YT_PLAY_PEND" in *"$dip playch"*) ;; *) YT_PLAY_PEND="$YT_PLAY_PEND$dip playch
+" ;; esac
+            continue
+        fi
         yt_dead_add "$dip" "$(yt_dead_who "$tag")" "принял ClientHello и молчит ${YT_DEAD_AFTER}с" "$now" && changed=1
     done
 
@@ -404,6 +415,10 @@ yt_dead_scan() {
             case "$dip" in *[!0-9.]*|'') continue ;; esac
             if [ "$res" = ok ]; then
                 echo "$dip $((now + 300))" >> "$YT_SPROBE_FILE.ok"
+            elif [ "$tag" = playch ]; then
+                # не отвечает и с чужим именем — живых загрузок с него нет:
+                # застрявшие соединения рвём (ss -K), новые получат RST
+                yt_dead_add "$dip" "$(yt_dead_who play)" "принял ClientHello и молчит ${YT_DEAD_AFTER}с, проверка не прошла" "$now" && changed=1
             else
                 yt_dead_add "$dip" "$(yt_dead_who "$tag")" "ответил на рукопожатие, а на запрос молчит ${YT_SILENT_AFTER}с, проверка не прошла" "$now" 0 && changed=1
             fi
@@ -414,6 +429,10 @@ yt_dead_scan() {
         awk -v now="$now" '$2 > now' "$YT_SPROBE_FILE.ok" > "$YT_SPROBE_FILE.ok.tmp" 2>/dev/null && mv -f "$YT_SPROBE_FILE.ok.tmp" "$YT_SPROBE_FILE.ok"
     fi
     sil=$(printf '%s\n' "$out" | awk '$1 == "SIL" && !s[$2]++ {print $2, $3}')
+    # Play первым: он ждёт молча бесконечно, YouTube сам переподключится
+    if [ -n "$YT_PLAY_PEND" ] && [ -n "$LAST_WAN_IFACE" ] && ! yt_bg_alive "$YT_SPROBE_PID"; then
+        sil=$(printf '%s%s' "$YT_PLAY_PEND" "$sil"); YT_PLAY_PEND=""
+    fi
     if [ -n "$sil" ] && [ -n "$LAST_WAN_IFACE" ] && ! yt_bg_alive "$YT_SPROBE_PID"; then
         : > "$YT_SPROBE_FILE.in"
         cnt=0

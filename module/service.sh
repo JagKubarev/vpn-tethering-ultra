@@ -1249,6 +1249,7 @@ YT_DEAD_FILE="/data/local/tmp/vpn_tether_ytdead"   # "адрес/32|сеть/28 
 YT_SEEN_FILE="/data/local/tmp/vpn_tether_ytseen"   # кандидаты: "кортеж впервые вид учтён байт_ответа когда_менялись"
 YT_SPROBE_FILE="/data/local/tmp/vpn_tether_ytsprobe"  # проверка молчащих: .in .done .ok
 YT_SPROBE_PID=""
+YT_PLAY_PEND=""         # Play «молчит на ClientHello»: «адрес playch» строками — ждут проверки адреса
 YT_GRANGES="/data/local/tmp/vpn_tether_ytgr"       # сети Google числами: "начало конец"
 YT_RECHECK_FILE="/data/local/tmp/vpn_tether_ytrecheck"  # фоновая перепроверка отбитых
 YT_RECHECK_PID=""
