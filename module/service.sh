@@ -625,8 +625,10 @@ DNS_UPSTREAMS="https://dns.wlrus.cfd/dns-query"
 # geohide и comss, как и Wlrus, обходят гео-блок. Первым — not-a-dns (30.10):
 # другой владелец, чем у Wlrus, все три ИИ, Gemini — co.uk, 0.4-0.5с, за день
 # ни одного сбоя, а geohide.ru дважды не прошёл проверку (13:57, 14:15). Затем
-# geohide.ru и dns.geohide.ru:444 (GeoHide, другие серверы, те же прокси;
-# Gemini — com). Был dagami (23.10 первым — not-a-dns тогда отвечал 1-2.6с),
+# dns.geohide.ru:444 и geohide.ru (GeoHide, другие серверы, те же прокси;
+# Gemini — com): :444 — выше, 30.10 17:20 оба 30 из 30 через dnsproxy, но
+# geohide.ru по HTTP/1.1 весь день отдавал 503, и при сбоях 13:57/14:15 — он).
+# Был dagami (23.10 первым — not-a-dns тогда отвечал 1-2.6с),
 # 30.10 мёртв: «Couldn't connect» напрямую, тишина через WARP, у dnsproxy
 # SERVFAIL — после него DNS уходил к оператору. comss — последним: Gemini через
 # него уже нет; commonnet — самым последним (30.10: прокси ChatGPT/Claude,
@@ -637,7 +639,7 @@ DNS_UPSTREAMS="https://dns.wlrus.cfd/dns-query"
 # (25.10: «регион недоступен» на ноуте, переподключение Wi-Fi не помогало;
 # причина вероятная, в логе не поймана). Молчат
 # все — модуль и так уводит DNS к оператору (проверка dns_health).
-DNS_FALLBACKS="https://not-a-dns.quic.best/dns-query https://geohide.ru/dns-query https://dns.geohide.ru:444/dns-query https://dns.comss.one/dns-query https://dns.commonnet.work/dns-query"
+DNS_FALLBACKS="https://not-a-dns.quic.best/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.commonnet.work/dns-query"
 # Апстримы для DNS_VPN=doh (идут через туннель)
 DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Чем резолвить имена самих апстримов (dns.wlrus.cfd и т.д.). Подмена тут не
