@@ -1830,11 +1830,13 @@ async function loadZnet() {
   znetLoading = true;
   try {
     const r = await ctl('znet');
-    const z = { cur: '', curLabel: '', list: [] };
+    const z = { cur: '', curLabel: '', list: [], hist: [] };
     r.out.split('\n').forEach((l) => {
       const f = l.slice(2).split('|');
       if (l.indexOf('C ') === 0) { z.cur = f[0] || ''; z.curLabel = z.cur ? (f[1] || z.cur) : ''; }
-      else if (l.indexOf('N ') === 0 && f[0]) z.list.push({ key: f[0], st: f[1] || '', args: f[2] || '', label: f[3] || f[0], note: f[4] || '', date: f[5] || '' });
+      else if (l.indexOf('N ') === 0 && f[0]) z.list.push({ key: f[0], st: f[1] || '', args: f[2] || '', label: f[3] || f[0], note: f[4] || '', date: f[5] || '', yt: f[6] || '' });
+      // история сети: ключ|стратегия|аргументы|дата|заметка|YouTube — новые в конце
+      else if (l.indexOf('H ') === 0 && f[1]) z.hist.unshift({ st: f[1], args: f[2] || '', date: f[3] || '', note: f[4] || '', yt: f[5] || '' });
     });
     ZN = z;
     renderZnet();
@@ -1854,6 +1856,10 @@ function renderZnet() {
   sel.innerHTML = '<option value="">По умолчанию — ' + esc(def) + '</option>' +
     presets.map((o) => '<option value="' + esc(o.value) + '">' + esc(o.textContent) + '</option>').join('') +
     (e && e.st === 'custom' ? '<option value="custom">Из подбора: ' + esc(stratLabel(e.args)) + '</option>' : '');
+  // прежние рабочие этой сети (кроме той, что сейчас): одним выбором — вместе с её YouTube
+  const hist = ZN.hist.map((h, i) => ({ h, i })).filter(({ h }) => !(e && h.st === e.st && h.args === (e.args || '') && h.yt === (e.yt || '')));
+  if (hist.length) sel.innerHTML += '<optgroup label="Прежние рабочие для этой сети">' + hist.map(({ h, i }) =>
+    '<option value="h:' + i + '">' + esc(stratName(h.st, h.args) + (h.yt ? ' · YouTube своя' : '') + ' · ' + h.date.slice(5, 10).split('-').reverse().join('.')) + '</option>').join('') + '</optgroup>';
   sel.value = e ? e.st : '';
   sel.disabled = !ZN.cur;
   $('#znetListHead').textContent = ZN.list.length ? 'Запомненные сети: ' + ZN.list.length : 'Запомненных сетей пока нет.';
@@ -1868,7 +1874,9 @@ function renderZnet() {
 $('#znetSel').addEventListener('change', async () => {
   const v = $('#znetSel').value;
   if (v === 'custom') return;
-  const r = v ? await ctl('znet-set ' + q(v) + " '' " + q('выбрана вручную')) : await ctl('znet-del ' + q(ZN.cur));
+  const h = v.indexOf('h:') === 0 ? ZN.hist[+v.slice(2)] : null;
+  const r = h ? await ctl('znet-set ' + q(h.st) + ' ' + q(h.args) + ' ' + q('прежняя рабочая, выбрана вручную') + ' ' + q(h.yt))
+    : v ? await ctl('znet-set ' + q(v) + " '' " + q('выбрана вручную')) : await ctl('znet-del ' + q(ZN.cur));
   if (!isOk(r)) toast(errText(r, 'Не получилось'));
   else toast(v ? 'Запомнено для сети «' + ZN.curLabel + '»' : 'Сеть «' + ZN.curLabel + '» — по умолчанию');
   await loadZnet();
@@ -1940,7 +1948,10 @@ function mockExec(cmd) {
     Object.keys(M.usr).map((k) => 'U ' + k + '=' + M.usr[k] + '\n').join('') };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +
-    'mobile:25002|md5sig||MegaFon|выбрана вручную|2026-10-19 18:40\n')).split('\n').filter(Boolean).map((l) => 'N ' + l).join('\n') };
+    'mobile:25002|md5sig||MegaFon|выбрана вручную|2026-10-19 18:40\n')).split('\n').filter(Boolean).map((l) => 'N ' + l).join('\n') +
+    '\nH wifi:Дом_5G|custom|--dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=www.google.com --dpi-desync-fooling=md5sig|2026-10-18 20:44|подбор: открыла 6 из 6|--dpi-desync=multisplit --dpi-desync-split-pos=1\n' +
+    'H wifi:Дом_5G|seqovl||2026-10-19 09:10|выбрана вручную|\n' +
+    'H wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|2026-10-20 13:05|подбор: открыла 8 из 8|' };
   if (/^znet-(set|del) /.test(a)) return { errno: 0, out: 'OK Дом_5G' };
   if (a === 'metatest') return { errno: 0, out: 'ecs 185.15.56.0\nhost www.instagram.com 57.144.244.34 31.13.72.174\nhost scontent.cdninstagram.com 57.144.244.192 157.240.205.63\nhost www.facebook.com 57.144.244.1 31.13.72.36\nhost static.xx.fbcdn.net 57.144.244.13 31.13.72.12\n' };
   if (a === 'toggle') { M.target = M.target === 'vpn' ? 'direct' : 'vpn'; M.ack = 't' + Date.now(); return { errno: 0, out: 'OK ' + M.ack }; }
