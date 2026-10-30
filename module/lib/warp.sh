@@ -55,6 +55,12 @@ WARP_PUB=""              # «состояние|заметка», уже зап�
 WARP_ENSURE_PID=""
 WARP_ENSURE_DONE=0
 WARP_ENSURE_AT=0         # не вышло (нет сети при загрузке) — повтор после этого времени
+WARP_TG_SECS=300         # Telegram DC2/DC4 через туннель — проверка раз в 5 мин (warp_tg_dead)
+WARP_TG_TS=0             # последняя такая проверка (0 — на первой проверке сессии)
+WARP_TG_TRIES=0          # переподключений подряд из-за DC2/DC4
+WARP_TG_MAX=5
+WARP_TG_PAUSE=1800       # не помогли WARP_TG_MAX подряд — 30 мин не переподключать
+WARP_TG_HOLD=0           # до этого времени (epoch) не переподключать
 WARP_SU_G=""             # su -g работает (проверка — мимо прокси AdGuard)
 WARP_CA=/apex/com.android.conscrypt/cacerts
 [ -d "$WARP_CA" ] || WARP_CA=/system/etc/security/cacerts
@@ -244,7 +250,7 @@ warp_start() {   # имя конфига
     $ip -6 route replace default dev $WARP_IF table $WARP_TABLE 2>/dev/null
     $ip rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     $ip -6 rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
-    WARP_CUR="$n"; WARP_STATE=starting; WARP_TS=$(date +%s); WARP_CHECK_TS=0; WARP_FAILS=0; WARP_NETCHG=0
+    WARP_CUR="$n"; WARP_STATE=starting; WARP_TS=$(date +%s); WARP_CHECK_TS=0; WARP_FAILS=0; WARP_NETCHG=0; WARP_TG_TS=0
     log "WARP: запускаю $n ($(sed -n 's/^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*//p' "$f" | head -1))"
     WARP_HS=0; WARP_EP_TRIED=""; WARP_EP_SILENT=""; WARP_EP_Q=""; WARP_RU_EP=""; WARP_RU_TRY=0
     if [ "$WARP_CF" = 1 ]; then
@@ -273,6 +279,26 @@ warp_probe() {
     else
         case "$out" in *ip=*) return 0 ;; esac
     fi
+    return 1
+}
+
+# Telegram DC2/DC4 (Амстердам, 149.154.166–167.x) через туннель. 30.10: в части
+# сессий WARP (выход один — 104.28.244.74, FRA) TCP до них есть, а ответа нет;
+# DC1/3/5 и IPv6 тех же ДЦ живы. Аккаунты из России — в DC2/DC4: фото шли через
+# запасные узлы Telegram (142.252.58.x) по 30 КБ, веб — висел. Новая сессия —
+# лотерея (живы были 2 из 7). 0 — мертвы при живом DC1, 1 — живы или не понять
+warp_tg_dead() {
+    local a c
+    for a in 149.154.167.51 149.154.167.91 149.154.175.50; do
+        if [ "$WARP_SU_G" = "1" ]; then
+            c=$(su -g "$DNSPROXY_GID" -c "curl -s -o /dev/null -m 3 --interface $WARP_IF -w %{http_code} http://$a/api" 2>/dev/null)
+        else
+            c=$(curl -s -o /dev/null -m 3 --interface $WARP_IF -w %{http_code} "http://$a/api" 2>/dev/null)
+        fi
+        # DC2 или DC4 ответил — живы; дошли до DC1 — значит, оба молчали
+        [ "$a" = 149.154.175.50 ] && { [ "${c:-000}" != 000 ]; return $?; }
+        [ "${c:-000}" != 000 ] && return 1
+    done
     return 1
 }
 
@@ -432,6 +458,8 @@ warp_reconcile() {
                 fi
                 WARP_COLO_UP="$WARP_COLO"
                 WARP_TS=$(date +%s); WARP_CHECK_TS=$WARP_TS; WARP_FAILS=0
+                # переподняли из-за Telegram — проверить новую сессию через ~10 с, не через минуту
+                [ "$WARP_TG_TRIES" -gt 0 ] && WARP_CHECK_TS=$((WARP_TS - WARP_CHECK_SECS + 10))
                 warp_set_state up ""
                 warp_routes_reconcile
             else
@@ -479,6 +507,26 @@ warp_reconcile() {
                     [ "$WARP_CF" = 1 ] && warp_colo_ru && \
                         log "WARNING: WARP: российская площадка Cloudflare ($WARP_COLO) — Telegram и часть сайтов через WARP могут не открываться"
                     WARP_COLO_UP="$WARP_COLO"; phone_status_refresh
+                fi
+                # Telegram DC2/DC4 через эту сессию — раз в WARP_TG_SECS; мертвы при
+                # живом DC1 — переподнять (новая сессия), не больше WARP_TG_MAX подряд
+                if [ "$WARP_TELEGRAM" = 1 ] && [ "$WARP_CF" = 1 ] && [ "$now" -ge "$WARP_TG_HOLD" ] && \
+                   [ $((now - WARP_TG_TS)) -ge $WARP_TG_SECS ]; then
+                    WARP_TG_TS=$now
+                    if warp_tg_dead; then
+                        WARP_TG_TRIES=$((WARP_TG_TRIES + 1))
+                        if [ $WARP_TG_TRIES -gt $WARP_TG_MAX ]; then
+                            log "WARP: Telegram DC2/DC4 через туннель молчат — $WARP_TG_MAX переподключений подряд не помогли, жду $((WARP_TG_PAUSE / 60)) мин"
+                            WARP_TG_TRIES=0; WARP_TG_HOLD=$((now + WARP_TG_PAUSE))
+                        else
+                            log "WARP: $WARP_CUR — Telegram DC2/DC4 (Амстердам) через туннель молчат, DC1 отвечает — переподключаю ($WARP_TG_TRIES/$WARP_TG_MAX)"
+                            warp_down "Telegram DC2/DC4 недоступны"; warp_set_state off ""
+                            return 0
+                        fi
+                    else
+                        [ $WARP_TG_TRIES -gt 0 ] && log "WARP: Telegram DC2/DC4 через туннель отвечают (переподключений: $WARP_TG_TRIES)"
+                        WARP_TG_TRIES=0
+                    fi
                 fi
             elif [ "$WARP_NETCHG" = 1 ]; then
                 # сменилась сеть, а туннель молчит — сразу заново (хендшейк и
