@@ -1156,6 +1156,7 @@ REQ_FILE="$MODULE_DIR/toggle_req"
 ACK_FILE="$MODULE_DIR/toggle_ack"
 RELOAD_FILE="$MODULE_DIR/reload_req"   # есть вместе с USR1 = перечитать настройки (WebUI)
 DNS_FLUSH_FILE="$MODULE_DIR/dnsflush_req"   # WebUI: сбросить кэш dnsproxy (цикл забирает за ~2с)
+WARP_RECONN_FILE="$MODULE_DIR/warp_reconn_req"   # WebUI: WARP заново тем же конфигом (так же)
 USR1_PENDING=0
 DISCOVERY_SRC=""
 LOG_FILE="/data/local/tmp/vpn_tether.log"

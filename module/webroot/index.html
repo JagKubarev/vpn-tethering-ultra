@@ -576,7 +576,7 @@ details.more > summary { color: var(--muted); }
     <label class="sw"><input type="checkbox" data-key="WARP_ENABLE"><span></span></label>
   </div>
   <div class="row" data-dep="WARP_ENABLE" style="gap:10px"><span class="dot" id="warpDot"></span>
-    <div class="txt"><div class="t" id="warpTitle">—</div><div class="s" id="warpSub"></div></div></div>
+    <div class="txt"><div class="t" id="warpTitle">—</div><div class="s" id="warpSub"></div><div class="s" id="warpStats" hidden></div></div></div>
 </div>
 
 <h2>Что идёт через WARP</h2>
@@ -1332,6 +1332,20 @@ function warpState(s) {
 function renderWarpState(w) {
   $('#warpDot').className = 'dot ' + w.d; $('#warpTitle').textContent = w.t; $('#warpSub').textContent = w.s;
 }
+// как в WG Tunnel: трафик туннеля и давность рукопожатия. В конфигах
+// PersistentKeepalive 25 — рукопожатие само раз в ~2 мин; старше 210 с
+// (порог WG Tunnel: 180 + 30) — сессия, похоже, мертва
+async function loadWarpStats() {
+  const el = $('#warpStats');
+  if (ST.warp !== 'up') { el.hidden = true; return; }
+  const s = parseKV((await ctl('warp-stats')).out || '');
+  if (s.rx === undefined) { el.hidden = true; return; }
+  const a = +s.hs_age;
+  const hs = a < 0 ? 'рукопожатия не было' : 'рукопожатие ' + (a < 120 ? a + ' с' : Math.round(a / 60) + ' мин') + ' назад';
+  el.textContent = '↓ ' + fmtBytes(+s.rx) + ' · ↑ ' + fmtBytes(+s.tx) + ' · ' + hs +
+    (a < 0 || a > 210 ? ' — сессия, похоже, не работает: «Переподключить» в конфигах ниже' : '');
+  el.hidden = false;
+}
 
 // "имя|endpoint|gen/import|дата" (webctl warp-list)
 let WARP_N = 0, WARP_HTML = '';
@@ -1345,7 +1359,10 @@ async function loadWarp() {
     '<div class="row col"><div class="head" style="gap:8px"><span class="dot ' + (n === run ? 'green' : '') + '"></span>' +
     '<div class="txt"><div class="t">' + esc(n) + (n === main ? '<span class="badge">основной</span>' : '') + '</div>' +
     '<div class="s">' + esc(ep) + ' · ' + (src === 'gen' ? 'создан' : 'импорт') + ' ' + esc(dt) + (n === run ? ' · в работе' : '') + '</div></div></div>' +
-    '<div class="btn-row fill mt8">' + (n === main ? '' : '<button class="btn small" data-wmain="' + esc(n) + '" aria-label="Сделать основным ' + esc(n) + '">Основной</button>') +
+    // как в WG Tunnel: переключение нажатием, в работе — тот же заново (новая сессия)
+    '<div class="btn-row fill mt8">' + (n === run
+      ? '<button class="btn small" data-wre="' + esc(n) + '" aria-label="Переподключить ' + esc(n) + '">Переподключить</button>'
+      : '<button class="btn small" data-wmain="' + esc(n) + '" aria-label="Подключить ' + esc(n) + '">Подключить</button>') +
     '<button class="btn small" data-wsave="' + esc(n) + '" aria-label="Сохранить ' + esc(n) + ' в Загрузки">Сохранить</button>' +
     '<button class="btn small" data-wdel="' + esc(n) + '" aria-label="Удалить ' + esc(n) + '">Удалить</button></div></div>').join('')
     : '<div class="row"><div class="txt"><div class="s">Конфигов нет. Нажмите «Создать» или импортируйте свой.</div></div></div>';
@@ -1354,7 +1371,27 @@ async function loadWarp() {
 }
 $('#warpList').addEventListener('click', async (e) => {
   const b = e.target.closest && e.target.closest('button'); if (!b) return;
-  if (b.dataset.wmain) { setCur('WARP_CONF', b.dataset.wmain); loadWarp(); toast('Нажмите «Применить», чтобы переключиться'); return; }
+  if (b.dataset.wmain) {
+    // сразу, без «Применить»: в файл и демону (как удаление основного ниже)
+    const n = b.dataset.wmain;
+    if (busy) { toast('Подождите — применяются настройки'); return; }
+    const r = await ctl('set WARP_CONF ' + q(n));
+    if (!isOk(r)) { toast(errText(r, 'Не получилось')); return; }
+    USR.WARP_CONF = n; setCur('WARP_CONF', n);
+    await ctl('apply');
+    toast('Подключаю ' + n + ' — несколько секунд');
+    loadWarp();
+    return;
+  }
+  if (b.dataset.wre) {
+    b.disabled = true;
+    try {
+      const r = await ctlBg('warp-reconnect');
+      toast(isOk(r) ? 'Переподключаю ' + b.dataset.wre + ' — несколько секунд' : errText(r, 'Не получилось'));
+    } finally { b.disabled = false; }
+    loadStatus();
+    return;
+  }
   if (b.dataset.wsave) {
     const r = await ctl('warp-save ' + q(b.dataset.wsave));
     toast(isOk(r) ? 'Сохранено: Загрузки/' + b.dataset.wsave + '.conf' : errText(r, 'Не получилось'));
@@ -1862,6 +1899,7 @@ $('#metaBtn').addEventListener('click', async () => {
   setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="home"]').classList.contains('on')) loadClients(); }, 15000);
   loadWarp();
   setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="warp"]').classList.contains('on')) loadWarp(); }, 10000);
+  setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="warp"]').classList.contains('on')) loadWarpStats(); }, 2000);
   // вернулись на страницу — сразу свежий статус, не ждать тика
   document.addEventListener('visibilitychange', () => { if (!document.hidden && !busy) { loadStatus(); scRefresh(); } });
 })();
@@ -1905,6 +1943,8 @@ function mockExec(cmd) {
   if (a === 'clients') return { errno: 0, out: '192.168.43.77|e0:2b:e9:75:60:84|REACHABLE|DESKTOP-LAPTOP|31|21545980|0|1243512870|67710170\n192.168.43.67|42:96:f4:ac:3a:91|STALE|realme-9-Pro-5G|2|7553|0||\n|00:27:15:ec:84:bd|-|android-tv|0|0|1||\n' };
   if (/^client-(un)?block /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'dnsflush') return { errno: 0, out: 'OK кэш сброшен (dnsproxy перезапущен). На ноутбуке — ещё ipconfig /flushdns' };
+  if (a === 'warp-stats') { M.wrx = (M.wrx || 5e6) + 2e5; return { errno: 0, out: 'hs_age=' + (Math.floor(Date.now() / 1000) % 130) + '\nrx=' + M.wrx + '\ntx=' + Math.round(M.wrx / 9) + '\nendpoint=188.114.96.1:2408\n' }; }
+  if (a === 'warp-reconnect') return { errno: 0, out: 'OK переподключаю' };
   if (a === 'zlist') return { errno: 0, out: M.zlist };
   if (a === 'zdefault') return { errno: 0, out: 'youtube.com\ngooglevideo.com\ndiscord.com\nx.com\n' };
   if (a === 'zauto') return { errno: 0, out: 'example.org\nfoo.net\n' };

@@ -384,6 +384,8 @@ monitor_loop() {
         [ $((_loop_count % 5)) -eq 4 ] && yt_slow_reconcile
         zapret_watchdog
         zapret_sites_check
+        # WebUI «Переподключить» (webctl warp-reconnect ждёт, пока файл исчезнет)
+        [ -f "$WARP_RECONN_FILE" ] && { rm -f "$WARP_RECONN_FILE"; warp_reconnect; }
         warp_reconcile
         _loop_count=$(( _loop_count + 1 ))
     done

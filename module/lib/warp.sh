@@ -362,6 +362,20 @@ warp_set_state() {   # состояние [заметка] — со статус
     phone_status_refresh
 }
 
+# WebUI «Переподключить»: тот же конфиг заново — новая сессия Cloudflare. 30.10:
+# от сессии зависят DC2/DC4 Telegram и скорость (2,5 Мбит/с против 21,8 напрямую);
+# вручную в WG Tunnel помогало переподключить тот же конфиг
+warp_reconnect() {
+    local n="$WARP_CUR"
+    case "$WARP_STATE" in up|starting) ;; *) return 0 ;; esac
+    [ -n "$n" ] || return 0
+    log "WARP: $n — переподключаю (кнопка в WebUI)"
+    warp_down "переподключение"
+    warp_set_state off ""
+    net_identity_reconcile
+    warp_start "$n" && warp_set_state starting ""
+}
+
 # Сторож: каждый проход цикла; дорогое (curl) — редко
 warp_reconcile() {
     local now n why=""

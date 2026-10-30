@@ -33,6 +33,8 @@
 #   webctl.sh zalt-clear              забыть их (и «не открылись ничем»)
 #   webctl.sh zscan-start sites ['сайты']  подобрать своё сайтам (без списка — из списков zapret)
 #   webctl.sh warp-list|warp-gen [N]|warp-import ИМЯ BASE64|warp-del ИМЯ|warp-export ИМЯ|warp-save ИМЯ|warp-saveall
+#   webctl.sh warp-stats              туннель: последнее рукопожатие и трафик (awg show)
+#   webctl.sh warp-reconnect          тот же конфиг заново (новая сессия Cloudflare)
 #                                     конфиги WARP (AmneziaWG) — см. warp/warp.sh
 # ============================================================================
 
@@ -768,6 +770,25 @@ case "$1" in
             ru=$(a1 "$n" "")
             echo "host $n ${eu:--} ${ru:--}"
         done
+        ;;
+
+    warp-stats)
+        # как в WG Tunnel: рукопожатие и трафик пира (awg show dump, строка пира)
+        case "$(uname -m 2>/dev/null)" in armv*|arm) c=arm ;; *) c=arm64 ;; esac
+        [ -x "$MODDIR/bin/awg-$c" ] || { echo "ERR нет awg"; exit 0; }
+        "$MODDIR/bin/awg-$c" show warp0 dump 2>/dev/null | awk -v now="$(date +%s)" \
+            'NR == 2 { printf "hs_age=%s\nrx=%s\ntx=%s\nendpoint=%s\n", ($5 > 0 ? now - $5 : -1), $6, $7, $3 }'
+        ;;
+
+    warp-reconnect)
+        # переподключение делает демон (у него состояние туннеля); ждём, пока заберёт
+        [ -n "$(daemon_pid)" ] || { echo "ERR демон не запущен"; exit 0; }
+        grep -qE '^warp=(up|starting)$' "$STATUS_FILE" 2>/dev/null || { echo "ERR WARP сейчас не поднят — переподключать нечего"; exit 0; }
+        f="$MODDIR/warp_reconn_req"; : > "$f"
+        i=0
+        while [ -f "$f" ] && [ $i -lt 80 ]; do sleep 0.25; i=$((i + 1)); done
+        if [ -f "$f" ]; then rm -f "$f"; echo "ERR демон не ответил за 20 с"; exit 0; fi
+        echo "OK переподключаю"
         ;;
 
     warp-list|warp-gen|warp-import|warp-del|warp-export|warp-save|warp-saveall)
