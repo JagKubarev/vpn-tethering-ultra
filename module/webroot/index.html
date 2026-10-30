@@ -1372,7 +1372,8 @@ async function loadWarp() {
     '<div class="row col"><div class="head" style="gap:8px"><span class="dot ' + (n === run ? 'green' : '') + '"></span>' +
     '<div class="txt"><div class="t">' + esc(n) + (n === main ? '<span class="badge">основной</span>' : '') + '</div>' +
     '<div class="s">' + esc(ep) + ' · ' + (src === 'gen' ? 'создан' : 'импорт') + ' ' + esc(dt) + (n === run ? ' · в работе' : '') + '</div>' +
-    (n === run ? '<div class="s" id="warpRunStats" style="white-space:pre-line;margin-top:6px">' + esc(WARP_RUN_TXT) + '</div>' : '') + '</div></div>' +
+    // блок статистики — пустым, текст ниже: счётчики меняются каждый раз, и сравнение html перерисовывало бы список
+    (n === run ? '<div class="s" id="warpRunStats" style="white-space:pre-line;margin-top:6px"></div>' : '') + '</div></div>' +
     // как в WG Tunnel: переключение нажатием, в работе — тот же заново (новая сессия)
     '<div class="btn-row fill mt8">' + (n === run
       ? '<button class="btn small" data-wre="' + esc(n) + '" aria-label="Переподключить ' + esc(n) + '">Переподключить</button>'
@@ -1382,6 +1383,7 @@ async function loadWarp() {
     : '<div class="row"><div class="txt"><div class="s">Конфигов нет. Нажмите «Создать» или импортируйте свой.</div></div></div>';
   // перерисовка без изменений сбивала фокус и съедала нажатие в момент обновления
   if (html !== WARP_HTML) { WARP_HTML = html; $('#warpList').innerHTML = html; }
+  const rs = $('#warpRunStats'); if (rs) rs.textContent = WARP_RUN_TXT;
 }
 $('#warpList').addEventListener('click', async (e) => {
   const b = e.target.closest && e.target.closest('button'); if (!b) return;
@@ -1817,7 +1819,7 @@ $('#scRes').addEventListener('click', async (e) => {
 });
 
 // ---------------------------------------------------------------- стратегия для каждой сети
-let ZN = { cur: '', curLabel: '', list: [] };
+let ZN = { cur: '', curLabel: '', list: [], hist: [] };
 let znetLoading = false;
 const netKind = (k) => /^wifi:/.test(k) ? 'Wi-Fi' : /^mobile:/.test(k) ? 'мобильная' : '';
 function presetName(v) {
