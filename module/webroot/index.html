@@ -1913,7 +1913,8 @@ $('#metaBtn').addEventListener('click', async () => {
   setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="home"]').classList.contains('on')) loadClients(); }, 15000);
   loadWarp();
   setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="warp"]').classList.contains('on')) loadWarp(); }, 10000);
-  setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="warp"]').classList.contains('on')) loadWarpStats(); }, 2000);
+  // 3 с, а не 1 с, как в WG Tunnel: ksu.exec синхронный, каждый вызов (~80 мс) — пауза страницы
+  setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="warp"]').classList.contains('on')) loadWarpStats(); }, 3000);
   // вернулись на страницу — сразу свежий статус, не ждать тика
   document.addEventListener('visibilitychange', () => { if (!document.hidden && !busy) { loadStatus(); scRefresh(); } });
 })();

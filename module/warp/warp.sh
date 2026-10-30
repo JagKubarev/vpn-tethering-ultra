@@ -195,13 +195,19 @@ gen() {
 
 case "$1" in
     list)
-        for f in "$WARP_DIR"/*.conf; do
-            [ -f "$f" ] || continue
-            n=${f##*/}; n=${n%.conf}
-            ep=$(sed -n 's/^Endpoint[[:space:]]*=[[:space:]]*//p' "$f" | head -1)
-            src=$(sed -n '1s/^# vpn_tether: \([a-z]*\).*/\1/p' "$f")
-            echo "$n|$ep|${src:-import}|$(date -r "$f" '+%Y-%m-%d %H:%M' 2>/dev/null)"
-        done ;;
+        # одним stat и одним awk: по sed/sed/date на файл — ~0,6 с на 19 конфигов,
+        # а WebUI (ksu.exec синхронный) всё это время не отвечал
+        ls "$WARP_DIR"/*.conf >/dev/null 2>&1 || exit 0
+        stat -c '%n|%y' "$WARP_DIR"/*.conf 2>/dev/null | awk '
+            FILENAME == "-" { i = index($0, "|"); d[substr($0, 1, i - 1)] = substr($0, i + 1, 16); next }
+            function put() { n = f; sub(/.*\//, "", n); sub(/\.conf$/, "", n); print n "|" ep "|" src "|" d[f] }
+            FNR == 1 {
+                if (f != "") put()
+                f = FILENAME; ep = ""; src = "import"
+                if ($0 ~ /^# vpn_tether: [a-z]/) { src = substr($0, 15); sub(/[^a-z].*/, "", src) }
+            }
+            ep == "" && /^Endpoint[ \t]*=/ { ep = $0; sub(/^Endpoint[ \t]*=[ \t]*/, "", ep) }
+            END { if (f != "") put() }' - "$WARP_DIR"/*.conf ;;
     import)
         n="$2"; valid_name "$n" || { echo "ERR имя: латиница, цифры, _ . - (до 40)"; exit 1; }
         [ ${#3} -le 32000 ] || { echo "ERR конфиг больше 24 КБ"; exit 1; }
