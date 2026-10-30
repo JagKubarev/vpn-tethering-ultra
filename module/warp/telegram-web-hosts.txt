@@ -1,0 +1,8 @@
+# Веб-Telegram (браузер на раздаче) — на фронтенд 149.154.167.220 (как «решение Flowseal»).
+# Подставляет dnsproxy (--hosts-files) только при WARP_ENABLE=1 и WARP_TELEGRAM=1, без VPN.
+# 30.10.2026, 13T, YOTA, через warp0: 149.154.167.99 (его отдаёт DNS для этих имён) — 0 из 20,
+# 149.154.167.220 — 13 из 20, отдаёт и /k/, и WebSocket kws*, venus/vesta, telegram.org, t.me.
+# Напрямую YOTA режет оба. Остальные ДЦ (174.100, 175.209, 170.x) этих имён не отдают.
+149.154.167.220 web.telegram.org telegram.org t.me
+149.154.167.220 kws2.web.telegram.org kws2-1.web.telegram.org kws4.web.telegram.org kws4-1.web.telegram.org
+149.154.167.220 venus.web.telegram.org vesta.web.telegram.org

@@ -406,6 +406,14 @@ dnsproxy_start() {
         fi
     fi
 
+    # веб-Telegram через WARP: имена с 149.154.167.99 (через WARP молчит) — на
+    # живой фронтенд 149.154.167.220 (warp/telegram-web-hosts.txt, 30.10)
+    local tgw="$MODULE_DIR/warp/telegram-web-hosts.txt"
+    if [ "$tag" = "direct-doh" ] && [ "$WARP_ENABLE" = "1" ] && [ "$WARP_TELEGRAM" = "1" ] && [ -f "$tgw" ]; then
+        args="$args --hosts-file-enabled --hosts-files=$tgw"
+        meta="$meta + веб-Telegram на 149.154.167.220"
+    fi
+
     dnsproxy_spawn "$args" "$DNSPROXY_LOG"
 
     # $! тут — su/env, а не сам dnsproxy: ищем по argv[0]
