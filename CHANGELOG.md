@@ -1299,6 +1299,19 @@
   `YT_DEAD_MAX` 48, цепочка одним `iptables-restore`; перепроверка `/28` по соседям (живая стойка
   рядом — только `/32`) и сразу после смены сети. Проверены функциями на 13T (busybox и mksh);
   в main на тест — только порог 3 с и проверка каждые ~2 с.
+- DNS: первый запасной DoH — `geohide.ru` вместо `dns.dagami.ru` (умолчания, список в WebUI). 30.10
+  08:45–08:58, 13T, YOTA, мимо модуля: dagami мёртв — «Couldn't connect» за 80 мс напрямую, тишина
+  через WARP, у dnsproxy SERVFAIL; модуль переключался на него в 07:38 и 08:35, и DNS уходил к
+  оператору. Кандидаты (DoH RFC 8484; HTTP/2-only — через временный dnsproxy на 127.0.0.1:15399)
+  на chatgpt.com / gemini.google.com / claude.ai: прокси для всех трёх — wlrus, not-a-dns,
+  **geohide.ru** (0,1–0,4 с), eu.geohide.ru, zapret.moe, malw.link, dns-ai.ru (сборщик: адреса
+  wlrus и geohide); comss и geodema.love — Gemini настоящий (не обходит); dnsdoh.art — всё
+  настоящее; us.geohide.ru и bezmezhau — только через WARP, astracat — мёртв везде. Gemini через
+  адрес прокси: wlrus (`nl`), not-a-dns (`co.uk`), geohide (`com`, 3 из 3 — 200 за 1,6 с) работают;
+  zapret.moe, eu.geohide, comss — Google `/sorry`; прокси malw с YOTA молчит. ChatGPT/Claude через
+  любые прокси curl-ом — 403 (похоже на проверку Cloudflare, не гео; не проверено браузером).
+  Порядок: wlrus → geohide → not-a-dns → comss. На 13T: `DNS_FALLBACKS` в конфиге, dnsproxy с
+  `-f https://geohide.ru/…` первым; переключение при отказе основного вживую не проверялось.
 
 ---
 
