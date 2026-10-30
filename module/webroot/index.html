@@ -455,13 +455,14 @@ details.more > summary { color: var(--muted); }
   <div class="offnote" data-offnote="DNSPROXY_ENABLE" role="button">Зашифрованный DNS выключен — включается на Главной.</div>
   <div class="row col" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Сервер DNS (DoH)</div>
-      <div class="s">wlrus, not-a-dns, geohide и comss открывают и сервисы с блокировкой по стране (ChatGPT, Gemini, Claude; Gemini через comss — уже нет). Если сервер не отвечает — по порядку «Запасные DoH-серверы» из «Дополнительно».</div></div>
+      <div class="s">wlrus, not-a-dns, geohide, comss и commonnet открывают и сервисы с блокировкой по стране (ChatGPT, Gemini, Claude; Gemini через comss и commonnet — нет). Если сервер не отвечает — по порядку «Запасные DoH-серверы» из «Дополнительно».</div></div>
     <select id="upSelect">
       <option value="https://dns.wlrus.cfd/dns-query">wlrus.cfd</option>
       <option value="https://not-a-dns.quic.best/dns-query">not-a-dns.quic.best</option>
       <option value="https://dns.geohide.ru:444/dns-query">dns.geohide.ru:444</option>
       <option value="https://geohide.ru/dns-query">geohide.ru</option>
       <option value="https://dns.comss.one/dns-query">comss.one</option>
+      <option value="https://dns.commonnet.work/dns-query">commonnet.work</option>
       <option value="https://dns.google/dns-query">Google</option>
       <option value="https://cloudflare-dns.com/dns-query">Cloudflare</option>
       <option value="https://dns.adguard-dns.com/dns-query">AdGuard</option>
@@ -625,7 +626,7 @@ details.more > summary { color: var(--muted); }
   <!-- без accept: у .conf на Android нет MIME, выбор файлов делал их серыми (только txt/zip); содержимое проверяет warpImport -->
   <input type="file" id="warpFile" multiple style="display:none">
 </div>
-<div class="hint">«Создать» регистрирует новый конфиг в Cloudflare прямо с телефона. Импорт — файлы .conf из AmneziaVPN или WireGuard и zip-экспорт AmneziaVPN. «Основной» пробуется первым; если конфиг перестал отвечать, модуль сам переходит на следующий.</div>
+<div class="hint">«Создать» регистрирует новый конфиг в Cloudflare прямо с телефона. Импорт — файлы .conf из AmneziaVPN или WireGuard и zip-экспорт AmneziaVPN. «Подключить» — сразу на этот конфиг, он становится основным и пробуется первым; если перестал отвечать, модуль сам переходит на следующий. «Переподключить» — тот же конфиг заново: новая сессия Cloudflare, иногда быстрее и с живыми серверами Telegram.</div>
 <div class="hint">«Сохранить» кладёт конфиг в «Загрузки», «Сохранить все в zip» — все сразу, как экспорт AmneziaVPN. В файле закрытый ключ: его видят приложения с доступом к памяти — не публикуйте и удалите после переноса.</div>
 </section>
 
@@ -1335,16 +1336,28 @@ function renderWarpState(w) {
 // как в WG Tunnel: трафик туннеля и давность рукопожатия. В конфигах
 // PersistentKeepalive 25 — рукопожатие само раз в ~2 мин; старше 210 с
 // (порог WG Tunnel: 180 + 30) — сессия, похоже, мертва
+// числа и подписи — как в WG Tunnel: «7,05 ГБ», «253 кБ», «42 мин 14 с»
+const fmtWg = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2).replace('.', ',') + ' ГБ'
+  : b >= 1048576 ? (b / 1048576).toFixed(2).replace('.', ',') + ' МБ' : b >= 1024 ? Math.round(b / 1024) + ' кБ' : b + ' Б';
+const fmtDur = (t) => t < 60 ? t + ' с' : t < 3600 ? Math.floor(t / 60) + ' мин ' + (t % 60) + ' с' : Math.floor(t / 3600) + ' ч ' + Math.floor(t % 3600 / 60) + ' мин';
+let WARP_RUN_TXT = '';   // блок у конфига в работе: loadWarp перерисовывает список реже
 async function loadWarpStats() {
   const el = $('#warpStats');
-  if (ST.warp !== 'up') { el.hidden = true; return; }
+  if (ST.warp !== 'up') { el.hidden = true; WARP_RUN_TXT = ''; return; }
   const s = parseKV((await ctl('warp-stats')).out || '');
-  if (s.rx === undefined) { el.hidden = true; return; }
-  const a = +s.hs_age;
-  const hs = a < 0 ? 'рукопожатия не было' : 'рукопожатие ' + (a < 120 ? a + ' с' : Math.round(a / 60) + ' мин') + ' назад';
-  el.textContent = '↓ ' + fmtBytes(+s.rx) + ' · ↑ ' + fmtBytes(+s.tx) + ' · ' + hs +
-    (a < 0 || a > 210 ? ' — сессия, похоже, не работает: «Переподключить» в конфигах ниже' : '');
+  if (s.rx === undefined) { el.hidden = true; WARP_RUN_TXT = ''; return; }
+  const a = +s.hs_age, up = +s.up, dead = a < 0 || a > 210;
+  const hs = a < 0 ? 'не было' : fmtDur(a);
+  el.textContent = '↓ ' + fmtWg(+s.rx) + '  ↑ ' + fmtWg(+s.tx) + ' · последнее подключение: ' + hs +
+    (dead ? ' — сессия, похоже, не работает: «Переподключить» в конфигах ниже' : '');
   el.hidden = false;
+  const p = s.peer || '';
+  WARP_RUN_TXT = (up >= 0 ? 'в работе: ' + fmtDur(up) + '\n' : '') +
+    (p ? 'пир: ' + p.slice(0, 6) + '…' + p.slice(-6) + '\n' : '') +
+    '↓ ' + fmtWg(+s.rx) + '   ↑ ' + fmtWg(+s.tx) + '\n' +
+    'последнее подключение: ' + hs + (dead ? ' — похоже, не работает' : '') + '\n' +
+    'конечная точка: ' + (s.endpoint || '—');
+  const r = $('#warpRunStats'); if (r) r.textContent = WARP_RUN_TXT;
 }
 
 // "имя|endpoint|gen/import|дата" (webctl warp-list)
@@ -1358,7 +1371,8 @@ async function loadWarp() {
     // кнопки — под текстом: на телефоне три в ряд с текстом не помещаются
     '<div class="row col"><div class="head" style="gap:8px"><span class="dot ' + (n === run ? 'green' : '') + '"></span>' +
     '<div class="txt"><div class="t">' + esc(n) + (n === main ? '<span class="badge">основной</span>' : '') + '</div>' +
-    '<div class="s">' + esc(ep) + ' · ' + (src === 'gen' ? 'создан' : 'импорт') + ' ' + esc(dt) + (n === run ? ' · в работе' : '') + '</div></div></div>' +
+    '<div class="s">' + esc(ep) + ' · ' + (src === 'gen' ? 'создан' : 'импорт') + ' ' + esc(dt) + (n === run ? ' · в работе' : '') + '</div>' +
+    (n === run ? '<div class="s" id="warpRunStats" style="white-space:pre-line;margin-top:6px">' + esc(WARP_RUN_TXT) + '</div>' : '') + '</div></div>' +
     // как в WG Tunnel: переключение нажатием, в работе — тот же заново (новая сессия)
     '<div class="btn-row fill mt8">' + (n === run
       ? '<button class="btn small" data-wre="' + esc(n) + '" aria-label="Переподключить ' + esc(n) + '">Переподключить</button>'
@@ -1943,7 +1957,7 @@ function mockExec(cmd) {
   if (a === 'clients') return { errno: 0, out: '192.168.43.77|e0:2b:e9:75:60:84|REACHABLE|DESKTOP-LAPTOP|31|21545980|0|1243512870|67710170\n192.168.43.67|42:96:f4:ac:3a:91|STALE|realme-9-Pro-5G|2|7553|0||\n|00:27:15:ec:84:bd|-|android-tv|0|0|1||\n' };
   if (/^client-(un)?block /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'dnsflush') return { errno: 0, out: 'OK кэш сброшен (dnsproxy перезапущен). На ноутбуке — ещё ipconfig /flushdns' };
-  if (a === 'warp-stats') { M.wrx = (M.wrx || 5e6) + 2e5; return { errno: 0, out: 'hs_age=' + (Math.floor(Date.now() / 1000) % 130) + '\nrx=' + M.wrx + '\ntx=' + Math.round(M.wrx / 9) + '\nendpoint=188.114.96.1:2408\n' }; }
+  if (a === 'warp-stats') { M.wrx = (M.wrx || 5e6) + 2e5; M.wup = M.wup || Date.now(); return { errno: 0, out: 'hs_age=' + (Math.floor(Date.now() / 1000) % 130) + '\nrx=' + M.wrx + '\ntx=' + Math.round(M.wrx / 9) + '\nendpoint=188.114.96.1:2408\npeer=bmXOC+hWy3/DnZ3VUUTE7y0yOZfVvcRK0Xf4cPfgyo=\nup=' + Math.round((Date.now() - M.wup) / 1000 + 2534) + '\n' }; }
   if (a === 'warp-reconnect') return { errno: 0, out: 'OK переподключаю' };
   if (a === 'zlist') return { errno: 0, out: M.zlist };
   if (a === 'zdefault') return { errno: 0, out: 'youtube.com\ngooglevideo.com\ndiscord.com\nx.com\n' };

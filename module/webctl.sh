@@ -776,8 +776,11 @@ case "$1" in
         # как в WG Tunnel: рукопожатие и трафик пира (awg show dump, строка пира)
         case "$(uname -m 2>/dev/null)" in armv*|arm) c=arm ;; *) c=arm64 ;; esac
         [ -x "$MODDIR/bin/awg-$c" ] || { echo "ERR нет awg"; exit 0; }
-        "$MODDIR/bin/awg-$c" show warp0 dump 2>/dev/null | awk -v now="$(date +%s)" \
-            'NR == 2 { printf "hs_age=%s\nrx=%s\ntx=%s\nendpoint=%s\n", ($5 > 0 ? now - $5 : -1), $6, $7, $3 }'
+        # время работы — от запуска amneziawg-go (каталог /proc/PID создаётся с процессом)
+        p=$(pidof "amneziawg-go-$c" 2>/dev/null | cut -d' ' -f1)
+        st=$([ -n "$p" ] && stat -c %Y "/proc/$p" 2>/dev/null)
+        "$MODDIR/bin/awg-$c" show warp0 dump 2>/dev/null | awk -v now="$(date +%s)" -v st="${st:-0}" \
+            'NR == 2 { printf "hs_age=%s\nrx=%s\ntx=%s\nendpoint=%s\npeer=%s\nup=%s\n", ($5 > 0 ? now - $5 : -1), $6, $7, $3, $1, (st > 0 ? now - st : -1) }'
         ;;
 
     warp-reconnect)
