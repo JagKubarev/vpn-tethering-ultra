@@ -427,7 +427,7 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE" data-depoff="ZAPRET_QUIC_FAKE">
     <div class="txt"><div class="t">Без QUIC на раздаче</div>
-      <div class="s">Раздаче закрывается QUIC (HTTP/3): браузеры сразу идут по HTTPS, где работает обход. Только для трафика мимо VPN. Не действует, пока включено «QUIC раздачи — с подделкой».</div></div>
+      <div class="s">Раздаче закрывается QUIC (HTTP/3): браузеры сразу идут по HTTPS, где работает обход. Только для трафика мимо VPN. Не действует, пока включено «QUIC раздачи — с подделкой» (если подделка не встала — в ядре нет connbytes — действует она).</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_BLOCK"><span></span></label>
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
