@@ -1343,9 +1343,11 @@ const fmtDur = (t) => t < 60 ? t + ' с' : t < 3600 ? Math.floor(t / 60) + ' м�
 let WARP_RUN_TXT = '';   // блок у конфига в работе: loadWarp перерисовывает список реже
 async function loadWarpStats() {
   const el = $('#warpStats');
-  if (ST.warp !== 'up') { el.hidden = true; WARP_RUN_TXT = ''; return; }
+  // без статистики — и блок у конфига пустой, а не прежние цифры до перерисовки списка
+  const off = () => { el.hidden = true; WARP_RUN_TXT = ''; const r = $('#warpRunStats'); if (r) r.textContent = ''; };
+  if (ST.warp !== 'up') { off(); return; }
   const s = parseKV((await ctl('warp-stats')).out || '');
-  if (s.rx === undefined) { el.hidden = true; WARP_RUN_TXT = ''; return; }
+  if (s.rx === undefined) { off(); return; }
   const a = +s.hs_age, up = +s.up, dead = a < 0 || a > 210;
   const hs = a < 0 ? 'не было' : fmtDur(a);
   el.textContent = '↓ ' + fmtWg(+s.rx) + '  ↑ ' + fmtWg(+s.tx) + ' · последнее подключение: ' + hs +
@@ -1394,8 +1396,8 @@ $('#warpList').addEventListener('click', async (e) => {
     const r = await ctl('set WARP_CONF ' + q(n));
     if (!isOk(r)) { toast(errText(r, 'Не получилось')); return; }
     USR.WARP_CONF = n; setCur('WARP_CONF', n);
-    await ctl('apply');
-    toast('Подключаю ' + n + ' — несколько секунд');
+    const a = await ctl('apply');
+    toast(isOk(a) ? 'Подключаю ' + n + ' — несколько секунд' : 'Сохранено, применится после перезагрузки (' + errText(a, 'модуль не ответил') + ')');
     loadWarp();
     return;
   }

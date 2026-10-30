@@ -384,9 +384,11 @@ monitor_loop() {
         [ $((_loop_count % 5)) -eq 4 ] && yt_slow_reconcile
         zapret_watchdog
         zapret_sites_check
-        # WebUI «Переподключить» (webctl warp-reconnect ждёт, пока файл исчезнет)
-        [ -f "$WARP_RECONN_FILE" ] && { rm -f "$WARP_RECONN_FILE"; warp_reconnect; }
         warp_reconcile
+        # WebUI «Переподключить» (webctl warp-reconnect ждёт, пока файл исчезнет).
+        # После warp_reconcile: если VPN поднялся в этом круге, туннель уже снят и
+        # переподключать нечего (до — поднимали бы его на секунды через tun)
+        [ -f "$WARP_RECONN_FILE" ] && { rm -f "$WARP_RECONN_FILE"; warp_reconnect; }
         _loop_count=$(( _loop_count + 1 ))
     done
 }
