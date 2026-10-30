@@ -779,11 +779,13 @@ case "$1" in
         # как в WG Tunnel: рукопожатие и трафик пира (awg show dump, строка пира)
         case "$(uname -m 2>/dev/null)" in armv*|arm) c=arm ;; *) c=arm64 ;; esac
         [ -x "$MODDIR/bin/awg-$c" ] || { echo "ERR нет awg"; exit 0; }
-        # время работы — от запуска amneziawg-go (каталог /proc/PID создаётся с процессом)
+        # время работы — от запуска amneziawg-go: starttime из /proc/PID/stat (поле 22,
+        # такты 100 Гц от загрузки). Не mtime /proc/PID: это время первого обращения
+        # к каталогу, после чистки кэша ядром оно новое, и «в работе» сбрасывалось
         p=$(pidof "amneziawg-go-$c" 2>/dev/null | cut -d' ' -f1)
-        st=$([ -n "$p" ] && stat -c %Y "/proc/$p" 2>/dev/null)
-        "$MODDIR/bin/awg-$c" show warp0 dump 2>/dev/null | awk -v now="$(date +%s)" -v st="${st:-0}" \
-            'NR == 2 { printf "hs_age=%s\nrx=%s\ntx=%s\nendpoint=%s\npeer=%s\nup=%s\n", ($5 > 0 ? now - $5 : -1), $6, $7, $3, $1, (st > 0 ? now - st : -1) }'
+        st=$([ -n "$p" ] && sed 's/.*) //' "/proc/$p/stat" 2>/dev/null | cut -d' ' -f20)
+        "$MODDIR/bin/awg-$c" show warp0 dump 2>/dev/null | awk -v now="$(date +%s)" -v st="${st:-0}" -v ut="$(cut -d' ' -f1 /proc/uptime)" \
+            'NR == 2 { printf "hs_age=%s\nrx=%s\ntx=%s\nendpoint=%s\npeer=%s\nup=%s\n", ($5 > 0 ? now - $5 : -1), $6, $7, $3, $1, (st > 0 ? int(ut - st / 100) : -1) }'
         ;;
 
     warp-reconnect)

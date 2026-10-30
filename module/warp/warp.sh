@@ -198,16 +198,18 @@ case "$1" in
         # одним stat и одним awk: по sed/sed/date на файл — ~0,6 с на 19 конфигов,
         # а WebUI (ksu.exec синхронный) всё это время не отвечал
         ls "$WARP_DIR"/*.conf >/dev/null 2>&1 || exit 0
+        # печать — в END по списку stat: у пустого файла нет строки FNR == 1, и
+        # он пропадал из списка (а с ним из WebUI — ни увидеть, ни удалить)
         stat -c '%n|%y' "$WARP_DIR"/*.conf 2>/dev/null | awk '
-            FILENAME == "-" { i = index($0, "|"); d[substr($0, 1, i - 1)] = substr($0, i + 1, 16); next }
-            function put() { n = f; sub(/.*\//, "", n); sub(/\.conf$/, "", n); print n "|" ep "|" src "|" d[f] }
-            FNR == 1 {
-                if (f != "") put()
-                f = FILENAME; ep = ""; src = "import"
-                if ($0 ~ /^# vpn_tether: [a-z]/) { src = substr($0, 15); sub(/[^a-z].*/, "", src) }
-            }
-            ep == "" && /^Endpoint[ \t]*=/ { ep = $0; sub(/^Endpoint[ \t]*=[ \t]*/, "", ep) }
-            END { if (f != "") put() }' - "$WARP_DIR"/*.conf ;;
+            FILENAME == "-" { i = index($0, "|"); f = substr($0, 1, i - 1); o[++no] = f; d[f] = substr($0, i + 1, 16); next }
+            FNR == 1 && /^# vpn_tether: [a-z]/ { v = substr($0, 15); sub(/[^a-z].*/, "", v); src[FILENAME] = v }
+            !(FILENAME in ep) && /^Endpoint[ \t]*=/ { v = $0; sub(/^Endpoint[ \t]*=[ \t]*/, "", v); ep[FILENAME] = v }
+            END {
+                for (j = 1; j <= no; j++) {
+                    f = o[j]; n = f; sub(/.*\//, "", n); sub(/\.conf$/, "", n)
+                    print n "|" ep[f] "|" (src[f] != "" ? src[f] : "import") "|" d[f]
+                }
+            }' - "$WARP_DIR"/*.conf ;;
     import)
         n="$2"; valid_name "$n" || { echo "ERR имя: латиница, цифры, _ . - (до 40)"; exit 1; }
         [ ${#3} -le 32000 ] || { echo "ERR конфиг больше 24 КБ"; exit 1; }
