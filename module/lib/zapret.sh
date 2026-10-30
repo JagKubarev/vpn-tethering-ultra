@@ -278,10 +278,11 @@ zapret_kill_all() {
     rm -f "$ZAPRET_PID_FILE"
 }
 
-# uid VPN-клиентов: известные пакеты + владельцы VPN, замеченные раньше
+# uid мимо обхода: VPN-клиенты (известные пакеты + владельцы VPN, замеченные
+# раньше) и приложения из ZAPRET_EXCL_APPS
 zapret_vpn_uids() {
     local p u out=""
-    for p in $VPN_CLIENT_PKGS; do
+    for p in $VPN_CLIENT_PKGS $ZAPRET_EXCL_APPS; do
         u=$(stat -c %u "/data/data/$p" 2>/dev/null)
         case "$u" in ''|*[!0-9]*) continue ;; esac
         out="$out $u"
@@ -895,9 +896,9 @@ zapret_reconcile() {
     if [ "$ZAPRET_STATE" != "on" ] || [ "$excl" != "$ZAPRET_EXCL_RUN" ] || [ "$_hooks_bad" = 1 ]; then
         zapret_rules_on "$excl"
         if [ "$ZAPRET_STATE" != "on" ]; then
-            log "zapret: включён (режим $ZAPRET_MODE, телефон: $ZAPRET_PHONE, QUIC раздачи: $(if [ "$ZAPRET_QF_ON" = 1 ]; then echo подделка; elif [ "$ZAPRET_QUIC_BLOCK" = 1 ]; then echo закрыт; else echo открыт; fi); VPN-клиенты в исключениях: ${excl:-нет})"
+            log "zapret: включён (режим $ZAPRET_MODE, телефон: $ZAPRET_PHONE, QUIC раздачи: $(if [ "$ZAPRET_QF_ON" = 1 ]; then echo подделка; elif [ "$ZAPRET_QUIC_BLOCK" = 1 ]; then echo закрыт; else echo открыт; fi); в исключениях (VPN-клиенты и «мимо обхода»): ${excl:-нет})"
         elif [ "$excl" != "$ZAPRET_EXCL_RUN" ]; then
-            log "zapret: исключения VPN-клиентов: ${excl:-нет}"
+            log "zapret: исключения (VPN-клиенты и «мимо обхода»): ${excl:-нет}"
         else
             [ "$ZAPRET_RETRY_LOGGED" = 1 ] || log "WATCHDOG: zapret: правила пропали, ставлю заново"
             ZAPRET_RETRY_LOGGED=0

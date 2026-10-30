@@ -713,6 +713,10 @@ NET_PROFILE_ADAPTIVE=0
 ZAPRET_ENABLE=1         # по умолчанию с 3.3
 ZAPRET_MODE=list        # list = встроенный + свой + автосписок, all = все HTTPS
 ZAPRET_PHONE=1          # 1 = и приложения телефона (кроме VPN-клиентов)
+# Приложения телефона мимо обхода (пакеты через пробел) — как VPN-клиенты.
+# 30.10, 4PDA: OnePlus 6 (ядро 4.9, без connbytes) — ВТБ и ОТП не ходили в сеть
+# с обходом для телефона; на 13T тот же режим их не ломал, причина не найдена
+ZAPRET_EXCL_APPS=""
 ZAPRET_STRATEGY=fakeddisorder  # fakeddisorder | md5sig | md5sig2 | badseq | disorder | seqovl | custom (ZAPRET_ARGS)
 ZAPRET_ARGS=""          # для custom: аргументы --dpi-desync*, файлы подделок только @G/@Q (подбирает сканер в WebUI)
 ZAPRET_QUIC_BLOCK=1     # закрыть QUIC раздаче, пока zapret включён: браузер сразу идёт по TCP
@@ -880,7 +884,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
             # домены через пробел; пусто — выключить
             case "$val" in *[!a-z0-9.\ -]*) ok=0 ;; esac
             [ ${#val} -le 2000 ] || ok=0 ;;
-        QUIC_BLOCK_APPS|WARP_APPS)
+        QUIC_BLOCK_APPS|WARP_APPS|ZAPRET_EXCL_APPS)
             # имена пакетов; пусто — допустимо (выключить)
             case "$val" in *[!A-Za-z0-9._\ ]*) ok=0 ;; esac ;;
         *) ok=0 ;;
@@ -911,7 +915,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done

@@ -425,6 +425,12 @@ details.more > summary { color: var(--muted); }
       <div class="s">Обход и для приложений телефона, чей трафик идёт мимо VPN. VPN-клиенты не затрагиваются.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_PHONE"><span></span></label>
   </div>
+  <div class="row col" data-dep="ZAPRET_PHONE">
+    <div class="txt"><div class="t">Приложения мимо обхода</div>
+      <div class="s">Их трафик обход не трогает — например, банки, если с обходом они не открываются. Если приложение фильтрует AdGuard, его HTTPS открывает AdGuard от своего имени: тогда исключите приложение и в AdGuard.</div></div>
+    <div class="chips" id="zexChips"></div>
+    <div class="mt8"><button class="btn small" id="zexAdd">Добавить приложение</button></div>
+  </div>
   <div class="row" data-dep="ZAPRET_ENABLE" data-depoff="ZAPRET_QUIC_FAKE">
     <div class="txt"><div class="t">Без QUIC на раздаче</div>
       <div class="s">Раздаче закрывается QUIC (HTTP/3): браузеры сразу идут по HTTPS, где работает обход. Только для трафика мимо VPN. Не действует, пока включено «QUIC раздачи — с подделкой» (если подделка не встала — в ядре нет connbytes — действует она).</div></div>
@@ -925,7 +931,7 @@ async function loadStatus() {
 let DEF = {}, USR = {}, CUR = {};   // умолчания, из файла, текущие в форме
 const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAMS','DNS_FALLBACKS','DNS_VPN_UPSTREAMS',
   'DNS_BOOTSTRAP','DNS_HEALTH_INTERVAL','DNS_HEALTH_RECOVER','KILL_SWITCH','KILL_SWITCH_STRICT','NET_PROFILE_ADAPTIVE',
-  'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE',
+  'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE','ZAPRET_EXCL_APPS',
   'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK','YT_DEAD_FAILFAST','ZAPRET_WATCHDOG','ZAPRET_WATCHDOG_MIN',
   'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','YT_SLOW_RETRY','ZAPRET_AUTO_FAIL',
   'WARP_ENABLE','WARP_CONF','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE'];   // = CONF_KEYS в service.sh
@@ -1091,12 +1097,13 @@ $('#upCustom').addEventListener('input', () => setCur('DNS_UPSTREAMS', upValue()
 // ---------------------------------------------------------------- QUIC: приложения
 let APPS = null;   // [{pkg, label}]
 const label = (pkg) => { const a = (APPS || []).find((x) => x.pkg === pkg); return a ? a.label : pkg; };
-// один выбор приложений на две настройки: QUIC_BLOCK_APPS и WARP_APPS
+// один выбор приложений на три настройки: QUIC_BLOCK_APPS, WARP_APPS и ZAPRET_EXCL_APPS
 let SHEET_KEY = 'QUIC_BLOCK_APPS';
 const appKeyList = (k) => (CUR[k] || '').split(/\s+/).filter(Boolean);
 const quicList = () => appKeyList(SHEET_KEY);
 const CHIPS = { QUIC_BLOCK_APPS: ['#quicChips', 'Нет приложений — QUIC ни у кого не закрыт.'],
-  WARP_APPS: ['#warpChips', 'Нет — только Telegram, Google и сайты выше.'] };
+  WARP_APPS: ['#warpChips', 'Нет — только Telegram, Google и сайты выше.'],
+  ZAPRET_EXCL_APPS: ['#zexChips', 'Нет — обход для всех приложений телефона.'] };
 
 function renderChips() {
   Object.keys(CHIPS).forEach((k) => {
@@ -1106,7 +1113,7 @@ function renderChips() {
       : '<div class="empty">' + CHIPS[k][1] + '</div>';
   });
 }
-['#quicChips', '#warpChips'].forEach((id) => $(id).addEventListener('click', (e) => {
+['#quicChips', '#warpChips', '#zexChips'].forEach((id) => $(id).addEventListener('click', (e) => {
   const p = e.target.dataset && e.target.dataset.rm, k = e.target.dataset && e.target.dataset.rk;
   if (!p || !k) return;
   setCur(k, appKeyList(k).filter((x) => x !== p).join(' '));
@@ -1166,9 +1173,10 @@ function openSheet(on) {
   $('#sheet').classList.toggle('show', on); $('#sheetBg').classList.toggle('show', on);
 }
 $('#warpAdd').addEventListener('click', () => { SHEET_KEY = 'WARP_APPS'; $('#quicAdd').click(); });
+$('#zexAdd').addEventListener('click', () => { SHEET_KEY = 'ZAPRET_EXCL_APPS'; $('#quicAdd').click(); });
 $('#quicAdd').addEventListener('click', async (e) => {
   if (e.isTrusted) SHEET_KEY = 'QUIC_BLOCK_APPS';
-  $('#sheetTitle').textContent = SHEET_KEY === 'WARP_APPS' ? 'Приложения через WARP' : 'Приложения без QUIC';
+  $('#sheetTitle').textContent = { WARP_APPS: 'Приложения через WARP', ZAPRET_EXCL_APPS: 'Приложения мимо обхода' }[SHEET_KEY] || 'Приложения без QUIC';
   $('#appSearch').value = ''; $('#appList').innerHTML = '<div class="empty" style="padding:0 16px">Загружаю список…</div>';
   openSheet(true);
   await loadApps(); renderAppList(); renderChips();
