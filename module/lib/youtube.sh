@@ -401,7 +401,10 @@ yt_dead_scan() {
     for hit in $(printf '%s\n' "$out" | awk '$1 == "HIT" && $2 == "dead" && !s[$3]++ {print $3 "_" $4}'); do
         dip="${hit%_*}"; tag="${hit#*_}"
         if [ "$tag" = play ]; then
-            case "$YT_PLAY_PEND" in *"$dip playch"*) ;; *) YT_PLAY_PEND="$YT_PLAY_PEND$dip playch
+            # с переводом строки впереди: иначе 1.2.3.4 «уже есть» при 11.2.3.4
+            case "
+$YT_PLAY_PEND" in *"
+$dip playch"*) ;; *) YT_PLAY_PEND="$YT_PLAY_PEND$dip playch
 " ;; esac
             continue
         fi
@@ -429,11 +432,14 @@ yt_dead_scan() {
         awk -v now="$now" '$2 > now' "$YT_SPROBE_FILE.ok" > "$YT_SPROBE_FILE.ok.tmp" 2>/dev/null && mv -f "$YT_SPROBE_FILE.ok.tmp" "$YT_SPROBE_FILE.ok"
     fi
     sil=$(printf '%s\n' "$out" | awk '$1 == "SIL" && !s[$2]++ {print $2, $3}')
-    # Play первым: он ждёт молча бесконечно, YouTube сам переподключится
-    if [ -n "$YT_PLAY_PEND" ] && [ -n "$LAST_WAN_IFACE" ] && ! yt_bg_alive "$YT_SPROBE_PID"; then
+    # Play первым: он ждёт молча бесконечно, YouTube сам переподключится.
+    # .done есть — проверка закончилась уже после его чтения выше: новая
+    # затёрла бы итог (HIT Play второй раз не придёт) — заберём через круг.
+    # Порядок: сначала «не жива» (тогда её mv уже был), потом .done
+    if [ -n "$YT_PLAY_PEND" ] && [ -n "$LAST_WAN_IFACE" ] && ! yt_bg_alive "$YT_SPROBE_PID" && [ ! -f "$YT_SPROBE_FILE.done" ]; then
         sil=$(printf '%s%s' "$YT_PLAY_PEND" "$sil"); YT_PLAY_PEND=""
     fi
-    if [ -n "$sil" ] && [ -n "$LAST_WAN_IFACE" ] && ! yt_bg_alive "$YT_SPROBE_PID"; then
+    if [ -n "$sil" ] && [ -n "$LAST_WAN_IFACE" ] && ! yt_bg_alive "$YT_SPROBE_PID" && [ ! -f "$YT_SPROBE_FILE.done" ]; then
         : > "$YT_SPROBE_FILE.in"
         cnt=0
         for hit in $(printf '%s\n' "$sil" | tr ' ' '_'); do

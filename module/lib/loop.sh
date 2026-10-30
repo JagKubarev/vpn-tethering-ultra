@@ -222,6 +222,7 @@ reload_config() {
     _conf_grp_sig s_st0 $CONF_GRP_STEALTH
     _conf_grp_sig s_wp0 $CONF_GRP_WARP
     _conf_grp_sig s_wr0 $CONF_GRP_WARPR
+    local s_tgw0="$WARP_ENABLE$WARP_TELEGRAM"
     conf_restore_defaults
     USER_CONF_NOTE=""
     load_user_conf
@@ -266,6 +267,11 @@ reload_config() {
         DNS_HEALTH_LAST=0
         DNS_ROUTE_CHANGED_TS=$(date +%s)
     fi
+    # hosts веб-Telegram (dnsproxy_start) зависит от WARP_ENABLE/WARP_TELEGRAM,
+    # а их нет в сигнатуре dnsproxy: без перезапуска подмена встала бы (или
+    # снялась) только при следующем (ревью 30.10). DNS сброшен выше — SIG пуст, no-op
+    [ "$s_tgw0" != "$WARP_ENABLE$WARP_TELEGRAM" ] && \
+        case "$DNSPROXY_SIG" in "direct-doh|"*) dnsproxy_restart "веб-Telegram через WARP" ;; esac
 
     # guard_apply при KILL_SWITCH=0 ничего не делает — старый guard остался бы
     [ "$old_ks" = "1" ] && [ "$KILL_SWITCH" != "1" ] && guard_down
