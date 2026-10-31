@@ -573,6 +573,18 @@
 #   rr…gvt1.com) — им шёл ненужный обход. zapret/list-noauto.txt (Google) — как
 #   list-rutld: вне основного профиля и автосписка, сайты из списков — профилем
 #   ZAPRET_RU_RUN; автосписок стареет (ZAPRET_AUTO_SEEN, 30 дн.); Play вне отбоя.
+# v3.21.0 — ZAPRET_EXCL_APPS: приложения мимо обхода (uid в RETURN, как у
+#   VPN-клиентов; банки у юзера 4PDA). WARP как в WG Tunnel: webctl warp-stats
+#   (рукопожатие, ↓↑, время работы по starttime), «Подключить»/«Переподключить»
+#   (WARP_RECONN_FILE -> warp_reconnect); проверка Telegram DC2/DC4 через туннель
+#   с переподключением; ретрансляторы Telegram в warp/telegram.txt; веб-Telegram
+#   на живой 149.154.167.220. Отбой мёртвых видеосерверов: 3 с, скан каждый
+#   круг, /28 со второго; Play снова в отбое (после проверки адреса). scan.sh
+#   sites чистит автосписок: открылось без обхода на двух плановых проверках
+#   подряд — вон (.ok), повторно 7 дней не убирает (.rm). WebUI: прежние рабочие
+#   стратегии сети, подписи стратегий, warp.sh list одним stat+awk. DoH: без
+#   мёртвого dagami (not-a-dns, оба GeoHide, comss, commonnet); импорт WARP
+#   отклоняет Endpoint-заглушки; кэш DNS оператора и zone_re — под mksh.
 # ============================================================================
 # ============================================================================
 
@@ -1409,7 +1421,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.20.2 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.21.0 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
