@@ -5,7 +5,7 @@
 #   scan.sh quick|full "сайт1 сайт2 ..."
 #   scan.sh sites ["сайт ..."]  сайтам, которых основная стратегия не
 #                            открывает, — своя (ZALT); без списка — сайты из
-#                            списков zapret (демон, раз в ~3 ч)
+#                            списков zapret (демон, раз в ~6 ч)
 #   scan.sh check            сторож (демон, раз в ~15 мин): работает ли
 #                            стратегия сети; нет — прежние рабочие из истории,
 #                            потом быстрый подбор. Журнал: $EVENTS.
@@ -102,7 +102,7 @@ on_exit() {
     [ "$S_state" = "running" ] && st state=stopped msg="остановлено"
     [ "$MODE0" = check ] && [ "$S_state" != done ] && wd_last "не проверил: ${S_msg:-$S_state}"
     # проверка сайтов сорвалась (смена сети, VPN, нет адреса) — в журнал, и
-    # метка демону: повторить через ~15 мин, а не через ZAPRET_ALT_MIN
+    # метка демону: повторить через ~час, а не через ZAPRET_ALT_MIN
     if [ "$MODE0" = sites ] && [ "$S_state" != done ]; then
         event "сайты: не проверил — ${S_msg:-$S_state}"
         : > "$OUT.sitesfail"
@@ -210,6 +210,9 @@ st stage="узнаю адреса"
 SYSDNS=0
 [ "$MODE" = sites ] && grep -q '^phone_dns=1' "$MODDIR/status" 2>/dev/null && \
     grep -q '^dns_degraded=0' "$MODDIR/status" 2>/dev/null && SYSDNS=1
+# su -g не работает (DNSPROXY_SU_G=0): хук DNS телефона пропускает uid 0 мимо
+# dnsproxy — у ping (root) был бы DNS оператора, а не как у браузера
+[ "$SYSDNS" = 1 ] && $IPT -t nat -S VPN_PHONE_DNS 2>/dev/null | grep -q 'uid-owner 0 ' && SYSDNS=0
 resolve() { # resolve ПАРАЛЛЕЛЬНО ТАЙМАУТ
     local n=0 pids="" h
     for h in $SITES; do
@@ -298,7 +301,7 @@ done < "$TMP/ips"
 st blocked="$(echo $BLOCKED)"
 # Плановая проверка сайтов: адресов узнали < 60% или «заблокировано» > 90% —
 # телефон/сеть не успевали (22.10 19:57: 56 из ~210, из них 54 «закрыты»),
-# итог был бы мусором. Ничего не пишем, демон повторит через ~15 мин.
+# итог был бы мусором. Ничего не пишем, демон повторит через ~час.
 if [ "$MODE" = sites ] && [ -z "$SITES_ARG" ]; then
     _req=$(echo $SITES | wc -w); _got=$(wc -l < "$TMP/ips"); _nb=$(echo $BLOCKED | wc -w)
     if [ $((_got * 10)) -lt $((_req * 6)) ] || { [ "$_got" -ge 20 ] && [ $((_nb * 10)) -gt $((_got * 9)) ]; }; then
