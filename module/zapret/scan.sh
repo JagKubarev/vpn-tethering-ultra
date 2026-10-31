@@ -489,8 +489,10 @@ EOF
             event "автосписок: убрал $(echo $AOK | wc -w) — открываются и без обхода на двух проверках подряд: $(echo $AOK | tr ' ' '\n' | head -n 8 | tr '\n' ' ')"
         fi
         cat "$TMP/aok" > "$ZAUTOOK"; chmod 600 "$ZAUTOOK"
-        { awk -v l=$RL '$2 >= l' "$ZAUTORM" 2>/dev/null; for h in $AOK; do echo "$h $NOW"; done; } > "$TMP/arm"
-        cat "$TMP/arm" > "$ZAUTORM"; chmod 600 "$ZAUTORM"
+        # tmp + mv, как ZSKIP: не записалось — прежний .rm цел (cat > обнулял его
+        # до записи), и ни на миг не 644; nfqws этот файл не читает — inode не важен
+        { awk -v l=$RL '$2 >= l' "$ZAUTORM" 2>/dev/null; for h in $AOK; do echo "$h $NOW"; done; } > "$ZAUTORM.tmp" && \
+            chmod 600 "$ZAUTORM.tmp" && mv -f "$ZAUTORM.tmp" "$ZAUTORM"
     fi
     NA=$(wc -l < "$TMP/assign")
     NT=$(awk 'END {print NR}' "$TMP/ips.all")
