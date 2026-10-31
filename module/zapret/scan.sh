@@ -44,6 +44,7 @@ ZALT=/data/adb/vpn_tether_zapret_alt        # своя стратегия сай
 ZSKIP=/data/adb/vpn_tether_zapret_altskip   # не открылись ничем: ключ|сайт|epoch (сутки не проверяем)
 ZAUTO=/data/adb/vpn_tether_zapret_auto.txt  # автосписок nfqws
 ZAUTOOK=/data/adb/vpn_tether_zapret_auto.ok # из него открылись без обхода на прошлой плановой проверке
+ZAUTORM=/data/adb/vpn_tether_zapret_auto.rm # убраны из него проверкой: домен epoch (7 дней второй раз не убираем)
 case "$MODE" in quick|full|check|sites) ;; *) echo "scan.sh: режим quick|full|check|sites" >&2; exit 2 ;; esac
 
 st() { # обновить файл состояния: st key=val ...
@@ -473,9 +474,14 @@ EOF
     # nfqws снова, с первой проверки (ревью 31.10)
     if [ -z "$SITES_ARG" ]; then
         P=" $(cat "$ZAUTOOK" 2>/dev/null | tr '\n' ' ') "
+        # убранные за 7 дней и возвращённые nfqws — у браузера всё же не открывались
+        # (другая сеть, другой узел CDN из DNS): второй раз не убираем, без качелей
+        RL=$((NOW - 7 * 86400))
+        R=" $(awk -v l=$RL '$2 >= l { print $1 }' "$ZAUTORM" 2>/dev/null | tr '\n' ' ') "
         : > "$TMP/aok"
         for h in $BASE_OK; do
             grep -qxF "$h" "$ZAUTO" 2>/dev/null || continue
+            case "$R" in *" $h "*) continue ;; esac
             case "$P" in *" $h "*) AOK="$AOK $h" ;; *) echo "$h" >> "$TMP/aok" ;; esac
         done
         if [ -n "$AOK" ]; then
@@ -483,6 +489,8 @@ EOF
             event "автосписок: убрал $(echo $AOK | wc -w) — открываются и без обхода на двух проверках подряд: $(echo $AOK | tr ' ' '\n' | head -n 8 | tr '\n' ' ')"
         fi
         cat "$TMP/aok" > "$ZAUTOOK"; chmod 600 "$ZAUTOOK"
+        { awk -v l=$RL '$2 >= l' "$ZAUTORM" 2>/dev/null; for h in $AOK; do echo "$h $NOW"; done; } > "$TMP/arm"
+        cat "$TMP/arm" > "$ZAUTORM"; chmod 600 "$ZAUTORM"
     fi
     NA=$(wc -l < "$TMP/assign")
     NT=$(awk 'END {print NR}' "$TMP/ips.all")
