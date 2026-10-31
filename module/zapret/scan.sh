@@ -468,11 +468,14 @@ EOF
     # и большим ClientHello) на двух плановых проверках подряд — вон; понадобится —
     # nfqws добавит снова. Тот же файл (cat, не mv): nfqws его перечитает
     AOK=""
-    if [ -z "$SITES_ARG" ] && [ -s "$ZAUTO" ]; then
+    # Пустой/нет автосписка — .ok тоже обнуляем: иначе прошлое «открылся» от
+    # записи, убранной из WebUI или по возрасту, удаляло её же, добавленную
+    # nfqws снова, с первой проверки (ревью 31.10)
+    if [ -z "$SITES_ARG" ]; then
         P=" $(cat "$ZAUTOOK" 2>/dev/null | tr '\n' ' ') "
         : > "$TMP/aok"
         for h in $BASE_OK; do
-            grep -qxF "$h" "$ZAUTO" || continue
+            grep -qxF "$h" "$ZAUTO" 2>/dev/null || continue
             case "$P" in *" $h "*) AOK="$AOK $h" ;; *) echo "$h" >> "$TMP/aok" ;; esac
         done
         if [ -n "$AOK" ]; then
