@@ -200,12 +200,25 @@ st stage="узнаю адреса"
 # по 16 сразу: в режиме sites сайтов сотни
 # не узнали с первого раза (телефон под нагрузкой, 22.10 после загрузки
 # узнались 56 из ~210) — второй заход по оставшимся, по 8 и с запасом времени
+# Проверка сайтов — адрес как у браузера (31.10): DNS телефона завёрнут в
+# dnsproxy модуля (DoH, Meta через ECS), а 1.1.1.1 отдаёт другое: Instagram —
+# 157.240.205.174, закрытый по IP (TCP молчит), браузеру — 57.144.74.34 (301),
+# и Meta раз в сутки «не открывалась ничем». Только пока DNS телефона через DoH
+# модуля (не оператор, не VPN). Адрес — из строки PING (getaddrinfo; формат у
+# iputils и busybox один); пусто или 0.x/127.x/частный (AdGuard глушит
+# телеметрию) — как раньше, через 1.1.1.1. Подбор и сторож — по-прежнему 1.1.1.1
+SYSDNS=0
+[ "$MODE" = sites ] && grep -q '^phone_dns=1' "$MODDIR/status" 2>/dev/null && \
+    grep -q '^dns_degraded=0' "$MODDIR/status" 2>/dev/null && SYSDNS=1
 resolve() { # resolve ПАРАЛЛЕЛЬНО ТАЙМАУТ
     local n=0 pids="" h
     for h in $SITES; do
         [ -s "$TMP/a.$h" ] && continue
         (
-            ip=$(curl -s -m "$2" --capath "$CA" -H 'accept: application/dns-json' \
+            ip=""
+            [ "$SYSDNS" = 1 ] && ip=$(ping -c 1 -W 1 "$h" 2>/dev/null | sed -n '1s/^PING [^(]*(\([0-9.]*\)).*/\1/p')
+            case "$ip" in 0.*|127.*|10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|169.254.*|100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*) ip="" ;; esac
+            [ -n "$ip" ] || ip=$(curl -s -m "$2" --capath "$CA" -H 'accept: application/dns-json' \
                 "https://1.1.1.1/dns-query?name=$h&type=A" 2>/dev/null | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')
             [ -n "$ip" ] && echo "$h $ip" > "$TMP/a.$h"
         ) &
