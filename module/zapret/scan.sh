@@ -244,6 +244,7 @@ if curl -s -o /dev/null -m 6 --curves X25519Kyber768Draft00:X25519 --interface "
 fi
 
 # test_sites -> "ok_count avg_ms" и $TMP/res (h ok|rc)
+TPAR=16; [ "$MODE" = sites ] && TPAR=4
 test_sites() {
     local pids="" n=0
     rm -f "$TMP"/r.* "$TMP"/b.*
@@ -268,9 +269,11 @@ test_sites() {
             ) &
             pids="$pids $!"
         fi
-        # по 16 сайтов сразу (в режиме sites их сотни)
+        # по 16 сайтов сразу; проверка сайтов (сотни) — по 4: залп ~400
+        # ClientHello к закрытым именам за минуту, похоже, провоцирует ТСПУ
+        # резать абоненту всё на минуты (31.10 14:21: «закрыто 198 из 202»)
         n=$((n + 1))
-        [ $((n % 16)) -eq 0 ] && { wait $pids; pids=""; }
+        [ $((n % TPAR)) -eq 0 ] && { wait $pids; pids=""; }
     done < "$TMP/ips"
     # ждём только свои curl: голый wait ждал бы и nfqws (он тоже наш потомок)
     [ -n "$pids" ] && wait $pids

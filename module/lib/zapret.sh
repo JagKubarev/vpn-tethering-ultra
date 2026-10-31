@@ -526,8 +526,9 @@ net_identity_reconcile() {
     ZAPRET_NET_DIRTY=1
     # новая сеть — сторож проверит её стратегию через ~1.5 мин, а не через 15
     [ -n "$NET_KEY" ] && ZWD_LAST=$(( $(date +%s) - ZAPRET_WATCHDOG_MIN * 60 + 90 ))
-    # и сайты со своей стратегией — через ~10 мин (сеть успеет устояться)
-    [ -n "$NET_KEY" ] && ZSITES_LAST=$(( $(date +%s) - ZAPRET_ALT_MIN * 60 + 600 ))
+    # и сайты со своей стратегией — через ~час (31.10: было ~10 мин — залп
+    # проверки после каждой смены Wi-Fi/мобильной, а он, похоже, провоцирует ТСПУ)
+    [ -n "$NET_KEY" ] && ZSITES_LAST=$(( $(date +%s) - ZAPRET_ALT_MIN * 60 + 3600 ))
     phone_status_refresh
 }
 
@@ -691,14 +692,15 @@ zapret_sites_check() {
     local now pid
     [ "$ZAPRET_ALT" = "1" ] && [ "$ZAPRET_STATE" = "on" ] && [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] || return 0
     now=$(date +%s)
-    # прошлая сорвалась (scan.sh оставил метку) — повтор через ~15 мин
+    # прошлая сорвалась (scan.sh оставил метку) — повтор через ~час: сорвалась
+    # часто как раз потому, что ТСПУ резал всё (31.10 14:23), через 15 мин — снова залп
     if [ -f "${ZSCAN_PID_FILE%.pid}.sitesfail" ]; then
         rm -f "${ZSCAN_PID_FILE%.pid}.sitesfail"
-        ZSITES_LAST=$((now - ZAPRET_ALT_MIN * 60 + 900))
-        log "zapret: проверка сайтов сорвалась — повторю через ~15 мин"
+        ZSITES_LAST=$((now - ZAPRET_ALT_MIN * 60 + 3600))
+        log "zapret: проверка сайтов сорвалась — повторю через ~час"
     fi
-    # первая — через ~10 мин после старта
-    [ "$ZSITES_LAST" -eq 0 ] && { ZSITES_LAST=$((now - ZAPRET_ALT_MIN * 60 + 600)); return 0; }
+    # первая — через ~час после старта
+    [ "$ZSITES_LAST" -eq 0 ] && { ZSITES_LAST=$((now - ZAPRET_ALT_MIN * 60 + 3600)); return 0; }
     [ "$now" -ge $((ZSITES_LAST + ZAPRET_ALT_MIN * 60)) ] || return 0
     vpn_up_now && return 0
     zscan_running && return 0   # идёт подбор/сторож
