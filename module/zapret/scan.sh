@@ -42,6 +42,8 @@ HIST=/data/adb/vpn_tether_zapret_hist
 ZNETS=/data/adb/vpn_tether_zapret_nets
 ZALT=/data/adb/vpn_tether_zapret_alt        # своя стратегия сайтов: ключ|название|сайт|аргументы|дата
 ZSKIP=/data/adb/vpn_tether_zapret_altskip   # не открылись ничем: ключ|сайт|epoch (сутки не проверяем)
+ZAUTO=/data/adb/vpn_tether_zapret_auto.txt  # автосписок nfqws
+ZAUTOOK=/data/adb/vpn_tether_zapret_auto.ok # из него открылись без обхода на прошлой плановой проверке
 case "$MODE" in quick|full|check|sites) ;; *) echo "scan.sh: режим quick|full|check|sites" >&2; exit 2 ;; esac
 
 st() { # обновить файл состояния: st key=val ...
@@ -460,6 +462,25 @@ EOF
         [ -f "$ZSKIP" ] && K="$KEY" T="$T" N="$NOW" awk -F'|' '$3 + 86400 > ENVIRON["N"] && !($1 == ENVIRON["K"] && index(ENVIRON["T"], " " $2 " "))' "$ZSKIP"
         for h in $F; do printf '%s|%s|%s\n' "$KEY" "$h" "$NOW"; done
     } > "$ZSKIP.tmp" && chmod 600 "$ZSKIP.tmp" && mv -f "$ZSKIP.tmp" "$ZSKIP"
+    # Автосписок без лишнего (31.10): nfqws добавляет сайт после 3 неотвеченных
+    # ClientHello по любой причине — обрыв при переключении VPN, мёртвый узел
+    # (www.kimi.ai в 10:21 при включении WG Tunnel). Открылся без обхода (обычным
+    # и большим ClientHello) на двух плановых проверках подряд — вон; понадобится —
+    # nfqws добавит снова. Тот же файл (cat, не mv): nfqws его перечитает
+    AOK=""
+    if [ -z "$SITES_ARG" ] && [ -s "$ZAUTO" ]; then
+        P=" $(cat "$ZAUTOOK" 2>/dev/null | tr '\n' ' ') "
+        : > "$TMP/aok"
+        for h in $BASE_OK; do
+            grep -qxF "$h" "$ZAUTO" || continue
+            case "$P" in *" $h "*) AOK="$AOK $h" ;; *) echo "$h" >> "$TMP/aok" ;; esac
+        done
+        if [ -n "$AOK" ]; then
+            L=" $AOK " awk '!index(ENVIRON["L"], " " $1 " ")' "$ZAUTO" > "$TMP/auto" && cat "$TMP/auto" > "$ZAUTO"
+            event "автосписок: убрал $(echo $AOK | wc -w) — открываются и без обхода на двух проверках подряд: $(echo $AOK | tr ' ' '\n' | head -n 8 | tr '\n' ' ')"
+        fi
+        cat "$TMP/aok" > "$ZAUTOOK"; chmod 600 "$ZAUTOOK"
+    fi
     NA=$(wc -l < "$TMP/assign")
     NT=$(awk 'END {print NR}' "$TMP/ips.all")
     if [ -n "$SITES_ARG" ]; then
