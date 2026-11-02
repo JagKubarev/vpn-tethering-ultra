@@ -499,6 +499,11 @@ apply_dns_mode() {
         case "$DNS_VPN" in
             cache) want="cache"; ups="$dns4:53" ;;
             doh)   want="doh";   ups="$DNS_VPN_UPSTREAMS" ;;
+            # гео-DoH как без VPN, через туннель: клиенты получают те же
+            # адреса (прокси), что и без VPN, — после выключения VPN в их кэше
+            # нет настоящих адресов ChatGPT/Gemini («недоступно в регионе»).
+            # Маршрутизация VPN-клиента по доменам для раздачи — не работает
+            geo)   want="geo";   ups="$DNS_UPSTREAMS" ;;
         esac
         if [ -n "$want" ] && ! root_routed_via_tun; then
             log "WARNING: трафик root идёт мимо $TUN_NAME (per-app VPN?) — DNS_VPN=$DNS_VPN выключен, DNAT в DNS VPN"

@@ -514,11 +514,12 @@ details.more > summary { color: var(--muted); }
   <summary>Дополнительно</summary>
   <div class="row col" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">DNS раздачи при VPN</div>
-      <div class="s">Источник DNS для устройств раздачи при включённом VPN.</div></div>
+      <div class="s">Источник DNS для устройств раздачи при включённом VPN. «Как без VPN» — тот же сервер DNS, что без VPN (обходит блокировку по стране), через туннель: после выключения VPN ИИ-сервисы сразу открываются, без сброса кэша DNS. Но VPN-клиент, который выбирает путь по доменам (AmneziaVPN по сайтам, fake-ip в sing-box и NekoBox), для раздачи так работать перестанет.</div></div>
     <select data-key="DNS_VPN">
       <option value="dnat">DNS VPN-клиента</option>
       <option value="cache">DNS VPN-клиента + кэш</option>
       <option value="doh">DoH через туннель (Google, Cloudflare)</option>
+      <option value="geo">Как без VPN (гео-DoH через туннель)</option>
     </select>
   </div>
   <div class="row col">
@@ -876,6 +877,7 @@ function renderStatus(s) {
     else if (ds === 'dnsproxy doh' && s.dns_alt === '1' && s.mode !== 'vpn') { t = up + ' (запасной), зашифрован. Основной не отвечает'; d = 'amber'; }
     else if (ds === 'dnsproxy doh') t = s.mode === 'vpn' ? 'DoH через VPN' : up + ', зашифрован';
     else if (ds === 'dnsproxy cache') t = 'DNS VPN + кэш';
+    else if (ds === 'dnsproxy geo') t = up + ' через VPN, зашифрован';
     else if (ds === 'DNAT (dnsproxy упал)') { t = 'обычный (dnsproxy не запустился)'; d = 'red'; }
     else if (ds.indexOf('DNAT') === 0) { t = (s.mode === 'vpn' ? 'через VPN ' : 'обычный ') + '(' + esc(ds.slice(5)) + ')'; d = s.mode === 'vpn' ? 'green' : ''; }
     if (t) h += kvRow('DNS раздачи', t, d);

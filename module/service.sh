@@ -628,6 +628,10 @@ DNS_VPN="dnat"         # VPN-режим:    dnat  = DNAT в DNS из VPN (как
                        #               cache = DNS из VPN через dnsproxy + кэш
                        #               doh   = DNS_VPN_UPSTREAMS через туннель + кэш
                        #                       (замер: ~200мс вместо ~550мс, кэш ~5мс)
+                       #               geo   = как без VPN: DNS_UPSTREAMS (+ запасные)
+                       #                       через туннель — те же адреса в обоих
+                       #                       режимах, после выключения VPN в кэше
+                       #                       клиентов нет «настоящих» (гео-ошибки)
 # Основные апстримы (DoH https://, DoT tls://, DoQ quic://, обычный ip:53)
 DNS_UPSTREAMS="https://dns.wlrus.cfd/dns-query"
 # Если основные недоступны. Только шифрованные — иначе запросы ушли бы
@@ -882,7 +886,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
         ZAPRET_ARGS)     zapret_args_valid "$val" || ok=0 ;;
         DNS_META_ECS)    _ip4_valid "$val" || ok=0 ;;
         DNS_DIRECT) case "$val" in doh|plain) ;; *) ok=0 ;; esac ;;
-        DNS_VPN)    case "$val" in dnat|cache|doh) ;; *) ok=0 ;; esac ;;
+        DNS_VPN)    case "$val" in dnat|cache|doh|geo) ;; *) ok=0 ;; esac ;;
         DNS_HEALTH_INTERVAL|DNS_HEALTH_RECOVER)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 2 ] && [ "$val" -le 600 ] || ok=0 ;; esac ;;
         DNS_UPSTREAMS|DNS_FALLBACKS|DNS_VPN_UPSTREAMS|DNS_BOOTSTRAP|DNS_META_UPSTREAMS)
