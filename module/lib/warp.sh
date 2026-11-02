@@ -842,6 +842,9 @@ warp_routes_reconcile() {
     [ $((now - WARP_DOM_TS)) -ge $WARP_DOM_SECS ] && warp_domains_refresh
     if [ $((now - WARP_APP_TS)) -ge 30 ]; then WARP_APP_UIDS=$(warp_app_uids); WARP_APP_TS=$now; fi
     tif="$LAST_TETHER_IFACES"
+    # WARP_TETHER=0 — раздаче без WARP: нет ифейсов — нет правил клиентов
+    # (PREROUTING, FORWARD, v6); телефон — по WARP_PHONE, как раньше
+    [ "$WARP_TETHER" = "1" ] || tif=""
     sig="$WARP_GOOGLE$WARP_TELEGRAM$WARP_PHONE|$tif|$WARP_APP_UIDS|$WARP_DOM_IPS"
     # netd мог перетряхнуть цепочки — проверяем, что хук на месте
     [ "$WARP_RT_ON" = "1" ] && [ "$sig" = "$WARP_RT_SIG" ] && \
