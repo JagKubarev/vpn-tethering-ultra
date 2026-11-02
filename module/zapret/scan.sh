@@ -478,16 +478,23 @@ EOF
     # не проверенные (адрес не узнали) остаются как были. Не открывшиеся
     # ничем — тоже: чаще это провал сети во время проверки (02.11: bbc, linkedin,
     # viber «ничем», а основной обход их открывает), а без записи сайт сутки
-    # (ZSKIP) сидел бы на основной стратегии, которая его не открывает
-    T=" $(minus "$(awk '{print $1}' "$TMP/ips.all" | tr '\n' ' ')" "$F") "
+    # (ZSKIP) сидел бы на основной стратегии, которая его не открывает.
+    # По облачному ревью (PR #18): запись «ничем» живёт 3 суток от даты
+    # записи (O; без date -d — не живёт), новые записи — первыми: демон
+    # берёт до 3 стратегий по порядку файла, старые не вытесняют новые
+    TA=" $(awk '{print $1}' "$TMP/ips.all" | tr '\n' ' ') "
+    T=" $(minus "$TA" "$F") "
     D=$(date '+%Y-%m-%d %H:%M')
+    O=$(date -d "@$(($(date +%s) - 259200))" '+%Y-%m-%d %H:%M' 2>/dev/null)
+    [ -n "$O" ] || O=9999
     {
-        [ -f "$ZALT" ] && K="$KEY" T="$T" awk -F'|' '!($1 == ENVIRON["K"] && index(ENVIRON["T"], " " $3 " "))' "$ZALT"
         while IFS='|' read -r h a; do printf '%s|%s|%s|%s|%s\n' "$KEY" "${NETID#*"|"}" "$h" "$a" "$D"; done < "$TMP/assign"
+        [ -f "$ZALT" ] && K="$KEY" T="$T" TA="$TA" O="$O" awk -F'|' '!($1 == ENVIRON["K"] && (index(ENVIRON["T"], " " $3 " ") || (index(ENVIRON["TA"], " " $3 " ") && $5 < ENVIRON["O"])))' "$ZALT"
     } > "$ZALT.tmp" && chmod 600 "$ZALT.tmp" && mv -f "$ZALT.tmp" "$ZALT"
     NOW=$(date +%s)
+    # ZSKIP — по всем проверенным (TA), иначе у «ничем» копились дубли
     {
-        [ -f "$ZSKIP" ] && K="$KEY" T="$T" N="$NOW" awk -F'|' '$3 + 86400 > ENVIRON["N"] && !($1 == ENVIRON["K"] && index(ENVIRON["T"], " " $2 " "))' "$ZSKIP"
+        [ -f "$ZSKIP" ] && K="$KEY" T="$TA" N="$NOW" awk -F'|' '$3 + 86400 > ENVIRON["N"] && !($1 == ENVIRON["K"] && index(ENVIRON["T"], " " $2 " "))' "$ZSKIP"
         for h in $F; do printf '%s|%s|%s\n' "$KEY" "$h" "$NOW"; done
     } > "$ZSKIP.tmp" && chmod 600 "$ZSKIP.tmp" && mv -f "$ZSKIP.tmp" "$ZSKIP"
     # Автосписок без лишнего (31.10): nfqws добавляет сайт после 3 неотвеченных
