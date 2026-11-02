@@ -1480,6 +1480,9 @@ warp_routes_off force      # туннель и его маршруты от уб
 warp_down
 phone_dns_rules_off
 rm -f "$DNSPROXY_PID_FILE" /data/local/tmp/vpn_tether_probe.*
+# /data/local/tmp переживает перезагрузку, а tun после неё часто с тем же
+# ifindex — старая метка срезала бы ретраи первого поиска таблицы (ревью PR #21)
+rm -f "$RT_MISS_FILE"
 dnsproxy_port_guard_down
 dnsproxy_exempt_down       # исключение AdGuard от убитого демона
 
