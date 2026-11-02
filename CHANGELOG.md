@@ -1664,7 +1664,8 @@
   настоящих адресов из DNS VPN (27.10: «недоступно в регионе», пока не истечёт TTL ~5 мин). По
   умолчанию — по-прежнему `dnat`: с `geo` VPN-клиент, выбирающий путь по доменам (AmneziaVPN по
   сайтам, fake-ip), для раздачи так не работает — это в подсказке WebUI. WebUI: пункт в «DNS раздачи
-  при VPN», строка DNS на главной; `docs/settings.md`. 13T 02.11 22:50–22:54 (YOTA): без VPN — chatgpt.com,
+  при VPN» — сам выбор перенесён из «Дополнительно» в основную карточку DNS (под «Для раздачи
+  напрямую»), строка DNS на главной; `docs/settings.md`. 13T 02.11 22:50–22:54 (YOTA): без VPN — chatgpt.com,
   gemini.google.com, claude.ai → 191.217.212.16 (wlrus); VPN поднят — `dnsproxy запущен (… vpn-geo)`,
   `dns_state=dnsproxy geo`, соединения dnsproxy через tun0 (src 198.18.0.1), те же три имени →
   тот же 191.217.212.16; через VPN до него: Gemini 200, ChatGPT и Claude 403 `Cf-Mitigated: challenge`

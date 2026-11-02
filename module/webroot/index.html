@@ -484,6 +484,16 @@ details.more > summary { color: var(--muted); }
       <div class="s">Зашифрованный DNS для устройств раздачи в режиме «напрямую».</div></div>
     <label class="sw"><input type="checkbox" id="directDoh"><span></span></label>
   </div>
+  <div class="row col" data-dep="DNSPROXY_ENABLE">
+    <div class="txt"><div class="t">DNS раздачи при VPN</div>
+      <div class="s">Источник DNS для устройств раздачи при включённом VPN. «Как без VPN» — тот же сервер DNS, что без VPN (обходит блокировку по стране), через туннель: после выключения VPN ИИ-сервисы сразу открываются, без сброса кэша DNS. Но VPN-клиент, который выбирает путь по доменам (AmneziaVPN по сайтам, fake-ip в sing-box и NekoBox), для раздачи так работать перестанет.</div></div>
+    <select data-key="DNS_VPN">
+      <option value="dnat">DNS VPN-клиента</option>
+      <option value="cache">DNS VPN-клиента + кэш</option>
+      <option value="doh">DoH через туннель (Google, Cloudflare)</option>
+      <option value="geo">Как без VPN (гео-DoH через туннель)</option>
+    </select>
+  </div>
   <div class="row" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Instagram и Facebook без VPN</div>
       <div class="s">Instagram, Facebook и Threads получают европейские адреса (ECS) и открываются без VPN вместе с обходом блокировок.</div></div>
@@ -512,16 +522,6 @@ details.more > summary { color: var(--muted); }
 
 <details class="card more">
   <summary>Дополнительно</summary>
-  <div class="row col" data-dep="DNSPROXY_ENABLE">
-    <div class="txt"><div class="t">DNS раздачи при VPN</div>
-      <div class="s">Источник DNS для устройств раздачи при включённом VPN. «Как без VPN» — тот же сервер DNS, что без VPN (обходит блокировку по стране), через туннель: после выключения VPN ИИ-сервисы сразу открываются, без сброса кэша DNS. Но VPN-клиент, который выбирает путь по доменам (AmneziaVPN по сайтам, fake-ip в sing-box и NekoBox), для раздачи так работать перестанет.</div></div>
-    <select data-key="DNS_VPN">
-      <option value="dnat">DNS VPN-клиента</option>
-      <option value="cache">DNS VPN-клиента + кэш</option>
-      <option value="doh">DoH через туннель (Google, Cloudflare)</option>
-      <option value="geo">Как без VPN (гео-DoH через туннель)</option>
-    </select>
-  </div>
   <div class="row col">
     <div class="txt"><div class="t">Запасные DoH-серверы</div>
       <div class="s">По порядку, если основной не отвечает. Google и Cloudflare сюда не добавляйте: они не обходят блокировку по стране, и ИИ-сервисы напишут «недоступно в вашем регионе».</div></div>
