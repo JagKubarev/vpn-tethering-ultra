@@ -143,21 +143,48 @@ guard_apply() {
     [ "$KILL_SWITCH" = "1" ] || return 0
     [ -z "$ifaces" ] && return 0
 
-    $iptables -N "$CHAIN_GUARD" 2>/dev/null
-    $iptables -F "$CHAIN_GUARD" 2>/dev/null
-    for iface in $ifaces; do
-        if [ "$mode" = "hard" ]; then
-            $iptables -A "$CHAIN_GUARD" -i "$iface" -j DROP 2>/dev/null
-        else
-            $iptables -A "$CHAIN_GUARD" -i "$iface" ! -o "$TUN_NAME" -j DROP 2>/dev/null
+    # Цепочка и хук (первым в FORWARD) — одной транзакцией iptables-restore.
+    # Раньше -F, -A, -D хука и -I шли по отдельности: при занятом xtables
+    # lock (AdGuard) -I не проходил после -D, и стоявший kill-switch пропадал
+    # (облачное ревью PR #19). Не прошла — старые цепочка и хук на месте
+    local rs hook="" ok=1
+    $iptables -C FORWARD -j "$CHAIN_GUARD" 2>/dev/null && hook="-D FORWARD -j $CHAIN_GUARD"
+    rs=$(
+        echo "*filter"
+        echo ":$CHAIN_GUARD - [0:0]"
+        for iface in $ifaces; do
+            if [ "$mode" = "hard" ]; then
+                echo "-A $CHAIN_GUARD -i $iface -j DROP"
+            else
+                echo "-A $CHAIN_GUARD -i $iface ! -o $TUN_NAME -j DROP"
+            fi
+        done
+        [ -n "$hook" ] && echo "$hook"
+        echo "-I FORWARD 1 -j $CHAIN_GUARD"
+        echo "COMMIT"
+    )
+    if ! printf '%s\n' "$rs" | ${iptables%% *}-restore -w 2 --noflush 2>/dev/null && \
+       ! printf '%s\n' "$rs" | ${iptables%% *}-restore --noflush 2>/dev/null; then
+        # по шагам, но стоящий хук не снимаем: не первый — ставим ещё один
+        # в позицию 1, нижняя копия безвредна (guard_down снимает до 8)
+        log "WARNING: Kill-switch: iptables-restore не прошёл — ставлю по шагам"
+        $iptables -N "$CHAIN_GUARD" 2>/dev/null
+        $iptables -F "$CHAIN_GUARD" 2>/dev/null
+        for iface in $ifaces; do
+            if [ "$mode" = "hard" ]; then
+                $iptables -A "$CHAIN_GUARD" -i "$iface" -j DROP 2>/dev/null || ok=0
+            else
+                $iptables -A "$CHAIN_GUARD" -i "$iface" ! -o "$TUN_NAME" -j DROP 2>/dev/null || ok=0
+            fi
+        done
+        if [ "$($iptables -S FORWARD 2>/dev/null | sed -n 2p)" != "-A FORWARD -j $CHAIN_GUARD" ]; then
+            $iptables -I FORWARD 1 -j "$CHAIN_GUARD" 2>/dev/null || ok=0
         fi
-    done
-    # гарантированно первым: сначала снимаем хук, потом ставим в позицию 1
-    $iptables -D FORWARD -j "$CHAIN_GUARD" 2>/dev/null
-    $iptables -I FORWARD 1 -j "$CHAIN_GUARD" 2>/dev/null || {
-        # занят xtables lock и т.п. — не делать вид, что kill-switch стоит
-        log "ERROR: Kill-switch: хук FORWARD -> $CHAIN_GUARD не встал ($mode [$ifaces])"
-        return 1; }
+        [ "$ok" = "1" ] || {
+            # занят xtables lock и т.п. — не делать вид, что kill-switch стоит
+            log "ERROR: Kill-switch: цепочка или хук FORWARD -> $CHAIN_GUARD не встали ($mode [$ifaces])"
+            return 1; }
+    fi
 
     # DNS к самому телефону. В armed его ловит DNAT в DNS VPN, а в hard
     # (пересборка / VPN не поднят) DNAT снят, и запросы клиента уходили
@@ -178,6 +205,15 @@ guard_apply() {
     [ "$GUARD_STATE" != "$mode" ] && log "Kill-switch: $mode [$ifaces]"
     GUARD_STATE="$mode"
     return 0
+}
+
+# IPv6 DROP раздачи на месте; пропал — вернуть (VPN и blocked)
+guard_v6_check() {
+    $ip6tables -C FORWARD -j DROP 2>/dev/null && return 0
+    if $ip6tables -I FORWARD -j DROP 2>/dev/null; then
+        log "WATCHDOG: ip6tables FORWARD DROP пропал — вернул"; return 0
+    fi
+    log "WATCHDOG: ip6tables FORWARD DROP пропал и не встал"; return 1
 }
 
 guard_down() {
@@ -213,6 +249,12 @@ verify_active_rules() {
     [ "$VPN_TETHER_MODE" = "on" ] || return 0
     [ -n "$LAST_TETHER_IFACES" ] || return 0
     [ -n "$LAST_TUN_INDEX" ] || return 0
+
+    # IPv6 клиентов режет одно голое ip6tables FORWARD -j DROP — его снимает
+    # любая чужая уборка с тем же правилом, а проверки не было (облачное
+    # ревью PR #19). Цепочек нет — хватит вернуть; до проверки tun: и пока
+    # VPN переподключается, IPv6 не должен уходить напрямую
+    guard_v6_check || return 1
 
     local iface rules
     # tun пропал (VPN переподключается или выключен) — это работа гистерезиса
@@ -564,9 +606,16 @@ $ip link set dev "$TUN_NAME" mtu "$tun_mtu" 2>/dev/null && \
     log "WARNING: failed to set tun0 MTU (VPN app owns it)"
 
     # --- FORWARD: порядок ESTABLISHED → MSS → разрешение ---
+    # Всё — ПОД guard (hard, поставлен выше): ESTABLISHED на 1-м месте
+    # пропускал соединения, пережившие сброс conntrack, напрямую мимо guard
+    # на всю пересборку (dumpsys, dnsproxy — секунды) и при выходе с
+    # rules_ok=0 (облачное ревью PR #19). Итоговый порядок тот же: в конце
+    # guard_apply armed снова ставит guard первым
+    local fp=1
+    $iptables -C FORWARD -j "$CHAIN_GUARD" 2>/dev/null && fp=2
     # 1. Пропускаем уже установленные соединения (короткий путь, снижает нагрузку)
     $iptables -C FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
-        $iptables -I FORWARD 1 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+        $iptables -I FORWARD $fp -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
     # 2. MSS clamping — до разрешающих правил, чтобы SYN обработался первым
     $iptables -N "$CHAIN_MSS" 2>/dev/null
@@ -576,13 +625,13 @@ $ip link set dev "$TUN_NAME" mtu "$tun_mtu" 2>/dev/null && \
     $iptables -A "$CHAIN_MSS" -o "$TUN_NAME" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss "$tcp_mss"
     $iptables -A "$CHAIN_MSS" -i "$TUN_NAME" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss "$tcp_mss"
 
-    $iptables -C FORWARD -j "$CHAIN_MSS" 2>/dev/null || $iptables -I FORWARD 2 -j "$CHAIN_MSS"
+    $iptables -C FORWARD -j "$CHAIN_MSS" 2>/dev/null || $iptables -I FORWARD $((fp + 1)) -j "$CHAIN_MSS"
 
     # 3. Разрешающие правила — ACCEPT (не RETURN: на Android политика FORWARD=DROP,
     #    RETURN вернёт пакет в цепочку и он дропнется без явного ACCEPT)
     $iptables -N "$CHAIN_FWD" 2>/dev/null
     $iptables -F "$CHAIN_FWD"
-    $iptables -C FORWARD -j "$CHAIN_FWD" 2>/dev/null || $iptables -I FORWARD 3 -j "$CHAIN_FWD"
+    $iptables -C FORWARD -j "$CHAIN_FWD" 2>/dev/null || $iptables -I FORWARD $((fp + 2)) -j "$CHAIN_FWD"
     $iptables -A "$CHAIN_FWD" -s 10.0.0.0/8     -o "$TUN_NAME" -j ACCEPT
     $iptables -A "$CHAIN_FWD" -s 172.16.0.0/12  -o "$TUN_NAME" -j ACCEPT
     $iptables -A "$CHAIN_FWD" -s 192.168.0.0/16 -o "$TUN_NAME" -j ACCEPT

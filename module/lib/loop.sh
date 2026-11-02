@@ -159,6 +159,7 @@ handle_change() {
             log "WATCHDOG: guard в blocked пропал, ставлю заново"
             guard_apply hard $tether_ifaces
         }
+        guard_v6_check
     fi
 
     apply_state "$tun_idx" $tether_ifaces || log "ERROR: apply_state failed"
