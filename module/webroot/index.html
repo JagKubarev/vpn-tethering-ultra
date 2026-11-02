@@ -1293,6 +1293,8 @@ $('#cfgImp').addEventListener('click', () => $('#cfgFile').click());
 $('#cfgFile').addEventListener('change', async (e) => {
   const f = (e.target.files || [])[0]; e.target.value = '';
   if (!f) return;
+  // «Применить» в конце перечитывает форму (loadConf) — подставленное пропало бы
+  if (busy) { toast('Подождите — применяются настройки'); return; }
   if (f.size > 64 << 10) { toast(f.name + ': больше 64 КБ — это не настройки'); return; }
   // разбор как у демона (load_user_conf): # — комментарий, кавычки вокруг значения снимаются
   const kv = {}; let zl = null;
@@ -1308,11 +1310,14 @@ $('#cfgFile').addEventListener('change', async (e) => {
   const ok = new Set(), bad = [];
   if (lines.length) {
     const r = await ctl('conf-check ' + q(b64(lines.join('\n') + '\n')));
+    let n = 0;
     (r.out || '').split('\n').forEach((l) => {
-      const m = /^(OK|BAD|UNK) (\S+)/.exec(l);
+      const m = /^(OK|BAD|UNK) (\S+)/.exec(l); if (m) n++;
       if (m && m[1] === 'OK') ok.add(m[2]); else if (m && m[1] === 'BAD') bad.push(m[2]);
     });
-    if (!ok.size && !bad.length && zl === null) { toast(errText(r, 'В файле нет настроек модуля')); return; }
+    // проверка не ответила (ERR, нет base64) — не сбрасывать форму к умолчаниям
+    if (!n) { toast('Импорт: ' + errText(r, 'модуль не проверил значения')); return; }
+    if (!ok.size && !bad.length && zl === null) { toast('В файле нет настроек модуля'); return; }
   }
   if (!confirm('Подставить настройки из «' + f.name + '»? Чего нет в файле — вернётся к умолчанию. Запишется после «Применить».')) return;
   KEYS.forEach((k) => { CUR[k] = ok.has(k) ? kv[k] : (DEF[k] || ''); });

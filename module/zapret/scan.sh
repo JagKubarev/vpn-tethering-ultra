@@ -307,7 +307,8 @@ st blocked="$(echo $BLOCKED)"
 # (01.11 12:41 и 13:47 проверка срывалась на 205/226 и 204/226 при живой сети)
 if [ "$MODE" = sites ] && [ -z "$SITES_ARG" ]; then
     _req=$(echo $SITES | wc -w); _got=$(wc -l < "$TMP/ips"); _nb=$(echo $BLOCKED | wc -w)
-    _cb=0; case " $BLOCKED " in *" ya.ru "*) _cb=1 ;; esac
+    # не открылся — и когда адрес ya.ru не узнали (в BLOCKED его тогда нет)
+    _cb=1; case " $BASE_OK " in *" ya.ru "*) _cb=0 ;; esac
     if [ $((_got * 10)) -lt $((_req * 6)) ] || { [ "$_got" -ge 20 ] && [ $((_nb * 10)) -gt $((_got * 9)) ] && [ "$_cb" = 1 ]; }; then
         st state=error msg="сеть или телефон не успевали (адресов $_got из $_req, закрыто $_nb) — повторю позже"
         exit 1
