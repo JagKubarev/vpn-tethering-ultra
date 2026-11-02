@@ -121,7 +121,11 @@ echo $$ > "$OUT.pid"
 # идёт регистрация WARP (warp/warp.sh gen) — подождать. После pid: пока ждём,
 # демон и WebUI видят «подбор идёт» и второй scan.sh не запустят. Замок старше
 # 3 мин — от убитого процесса (gen обновляет его на каждом конфиге)
-_i=0; while [ -n "$(find /data/local/tmp/vpn_tether_warpgen.lock -maxdepth 0 -mmin -3 2>/dev/null)" ] && [ $_i -lt 90 ]; do sleep 1; _i=$((_i + 1)); done
+# Ждём, пока замок свежий (до 5 мин): gen 5 бывает дольше 2 мин, а после
+# прежних 90 с подбор шёл при живой очереди gen — базовая проверка через
+# его nfqws, закрытые сайты «открыты без обхода» (ревью PR #20). Не дождались — отказ
+_i=0; while [ -n "$(find /data/local/tmp/vpn_tether_warpgen.lock -maxdepth 0 -mmin -3 2>/dev/null)" ] && [ $_i -lt 300 ]; do sleep 1; _i=$((_i + 1)); done
+[ -z "$(find /data/local/tmp/vpn_tether_warpgen.lock -maxdepth 0 -mmin -3 2>/dev/null)" ] ||     { st state=error msg="идёт создание конфигов WARP — подбор отложен"; exit 1; }
 # nfqws на нашей очереди от убитого (kill -9, OOM) прогона: иначе очередь
 # занята, все прогоны «nfqws: …», и сирота портит HTTPS от root
 for _p in $(pgrep -f "nfqws.*--qnum=$Q " 2>/dev/null); do kill -9 "$_p" 2>/dev/null; done
@@ -555,13 +559,18 @@ if [ "$MODE" = "check" ]; then
         tail -n 1 "$OUT.results" | awk -F'|' -v nb="$NB" \
             '{ o = $1 - ($2 - nb); need = (nb >= 4) ? nb - 1 : nb; exit !($3 == 0 && o >= need) }'
     }
-    # последний прогон не открыл вообще ничего, даже контрольные — это связь
-    nothing_opened() { tail -n 1 "$OUT.results" | awk -F'|' '{ exit !($1 == 0) }'; }
+    # последний прогон не открыл вообще ничего, даже контрольные — это связь.
+    # Не «nfqws: …» (не запустился — сломана стратегия, а не связь) и не пустой
+    # файл: раньше и то и другое было «нет связи», и сломанную стратегию
+    # сторож не менял никогда (ревью PR #20)
+    nothing_opened() { tail -n 1 "$OUT.results" | awk -F'|' '{ n = 1; r = ($1 == 0 && $7 !~ /^nfqws: /) } END { exit !(n && r) }'; }
     # что не открылось у последнего прогона: "youtube.com:x28 ..." (для журнала)
     last_fail() { tail -n 1 "$OUT.results" | cut -d'|' -f7 | cut -c1-200; }
     # текущая — оба профиля (своя YouTube, если есть), с пометками @G/@Q
     CUR=$(sh "$MODDIR/service.sh" --zapret-strategy "${NETID%%"|"*}" "${NETID#*"|"}" full 2>/dev/null | \
         sed "s#@$ZDIR/tls_clienthello_www_google_com.bin#@G#g; s#@$ZDIR/quic_initial_www_google_com.bin#@Q#g")
+    # не узнали текущую — проверять нечего (раньше пустой CUR тоже шёл как «нет связи»)
+    [ -n "$CUR" ] || { st state=error msg="не удалось узнать текущую стратегию сети"; exit 1; }
     S_total=2
     st stage="проверяю стратегию сети"
     if [ -n "$CUR" ] && { passed "$CUR" "текущая" || passed "$CUR" "текущая"; }; then
@@ -615,6 +624,11 @@ if [ "$MODE" = "check" ]; then
                 exit 0
             fi
             r=$(sh "$MODDIR/webctl.sh" znet-set custom "$a" "автопроверка: прежняя рабочая" "$y" 2>/dev/null)
+            # не сохранилась — не «починил», а дальше по истории и подбор (ревью PR #20)
+            case "$r" in
+                OK*) ;;
+                *) event "автопроверка: прежнюю не сохранил (${r:-нет ответа}) — пробую дальше"; continue ;;
+            esac
             event "автопроверка: вернул прежнюю стратегию: $a${y:+ (YouTube: $y)}"
             wd_last "починил: прежняя стратегия"
             st state=done stage="готово" msg="вернул прежнюю рабочую стратегию"
@@ -792,7 +806,14 @@ if [ "$PERNET" = "1" ] && [ -n "$BEST" ]; then
         else
             how="открыла $((${BEST%%"|"*} + gy)) из $NB"
         fi
-        r=$(sh "$MODDIR/webctl.sh" znet-set custom "${BEST#*"|"}" "подбор: $how" "$BEST_YT" 2>/dev/null)
+        # YouTube в этом прогоне не мерили (свой список сайтов, YouTube открыт без
+        # обхода) — без 5-го аргумента: znet-set оставит свою стратегию YouTube
+        # сети, а не сотрёт её (ревью PR #20)
+        if [ "$NBY" -gt 0 ]; then
+            r=$(sh "$MODDIR/webctl.sh" znet-set custom "${BEST#*"|"}" "подбор: $how" "$BEST_YT" 2>/dev/null)
+        else
+            r=$(sh "$MODDIR/webctl.sh" znet-set custom "${BEST#*"|"}" "подбор: $how" 2>/dev/null)
+        fi
         case "$r" in
             OK*) MSG="лучшая запомнена для сети «${NETID#*"|"}» ($how)" ;;
             *)   MSG="не удалось запомнить: ${r#ERR }" ;;
