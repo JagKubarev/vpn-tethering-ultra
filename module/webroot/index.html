@@ -1274,6 +1274,8 @@ $('#revertBtn').addEventListener('click', () => {
   renderForm(); loadWarp();
 });
 $('#resetAll').addEventListener('click', () => {
+  // как у импорта: «Применить» в конце перечитывает форму — сброс пропал бы
+  if (busy) { toast('Подождите — применяются настройки'); return; }
   if (!confirm('Вернуть все настройки к значениям по умолчанию?')) return;
   KEYS.forEach((k) => { CUR[k] = DEF[k] || ''; }); renderForm(); loadWarp();
 });
