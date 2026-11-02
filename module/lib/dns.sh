@@ -773,7 +773,8 @@ dns_operator_dead() {
         # нет в кэше или из кэша молчат: адреса могли смениться при том же WAN
         # (другая точка на wlan0, переподключение мобильной) — старый адрес
         # роутера молчал бы, и при живом операторе откат не делался бы
-        s=$(dumpsys connectivity 2>/dev/null | grep -oE "InterfaceName: [^ ]+|DnsAddresses: \[[^]]*\]" | \
+        # с таймаутом, как в get_vpn_dns: dumpsys мог повесить цикл (ревью PR #19)
+        s=$($TIMEOUT_CMD sh -c "dumpsys connectivity 2>/dev/null" | grep -oE "InterfaceName: [^ ]+|DnsAddresses: \[[^]]*\]" | \
             awk -v w="$w" '$0 == "InterfaceName: " w {f = 1; next} f && /^DnsAddresses/ {print; exit} /^InterfaceName/ {f = 0}' | \
             grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -2 | tr '\n' ' ')
         if [ -z "$s" ]; then DNS_OP_CACHE=""; DNS_PROBE_LAST_MS="$ms"; return 1; fi

@@ -610,7 +610,9 @@ WARP_APP_TS=0
 # через 1.1.1.1. Свой разбор ответа: у busybox nslookup нет -port, dig нет.
 warp_dq() {
     local d="${1%.}" q="" l srv=127.0.0.1 port="$DNSPROXY_PORT"
-    [ -n "$DNSPROXY_BIN" ] && [ -n "$port" ] || { srv=1.1.1.1; port=53; }
+    # жив, а не «бинарь есть»: остановленный (DNS_PHONE=0 без раздачи, не
+    # поднялся) давал пустой ответ на все WARP_DOMAINS на 10 мин (ревью PR #19)
+    [ -n "$port" ] && dnsproxy_alive || { srv=1.1.1.1; port=53; }
     for l in $(echo "$d" | tr '.' ' '); do q="$q$(printf '\\%03o' ${#l})$l"; done
     # shellcheck disable=SC2059
     printf "\\022\\064\\001\\000\\000\\001\\000\\000\\000\\000\\000\\000$q\\000\\000\\001\\000\\001" | \
@@ -641,7 +643,8 @@ warp_domains_refresh() {
     # подложенный .dq99 увёл бы чужие адреса в WARP
     rm -f "$WARP_DIR"/.dq*
     for d in $WARP_DOMAINS; do warp_dq "$d" > "$WARP_DIR/.dq$k" 2>/dev/null & pids="$pids $!"; k=$((k + 1)); done
-    for p in $pids; do wait "$p" 2>/dev/null; done
+    # до конца, а не до сигнала: USR1 прерывает wait — недочитанные ответы (ревью PR #19)
+    for p in $pids; do while kill -0 "$p" 2>/dev/null; do wait "$p" 2>/dev/null; done; done
     ips=$(cat "$WARP_DIR"/.dq* 2>/dev/null | tr '\n' ' '); rm -f "$WARP_DIR"/.dq*
     # с прошлым обновлением (ответы DNS скачут — открытое соединение не теряет
     # маршрут), но не со всеми прошлыми: адрес, ушедший другому, не копится

@@ -1140,6 +1140,7 @@ EMPTY_TETHER_COUNT=0
 ORIGINAL_TUN_MTU=""
 ORIGINAL_TUN_IFINDEX=""   # чей это MTU: восстанавливаем только тому же tun
 TUN_MTU_FILE="/data/local/tmp/vpn_tether_tunmtu"   # "ifindex mtu" оригинала — переживает kill -9
+RT_MISS_FILE="/data/local/tmp/vpn_tether_rtmiss"   # "ifейс ifindex время" первого промаха read_table_index
 
 TETHER_IFACES="wlan2 wlan1 wlan0 ap0 hotspot swlan0 swlan1 swlan2 rndis0 usb0 eth0 bt-pan bnep0 ncm0 wwan0 tether0 qmi0"
 

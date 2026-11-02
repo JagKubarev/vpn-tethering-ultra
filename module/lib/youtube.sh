@@ -449,8 +449,19 @@ $dip playch"*) ;; *) YT_PLAY_PEND="$YT_PLAY_PEND$dip playch
             b=${dip##*.}; b=$((b - b % 16))
             grep -q -e "^$dip/32 " -e "^${dip%.*}.$b/28 " "$YT_DEAD_FILE" 2>/dev/null && continue
             grep -q "^$dip " "$YT_SPROBE_FILE.ok" 2>/dev/null && continue
+            # в проверку — 4; Play сверх них — обратно в очередь, а не в никуда:
+            # HIT по соединению второй раз не придёт (ревью PR #19). YouTube
+            # приходит каждый круг сам
+            if [ "$cnt" -ge 4 ]; then
+                [ "${hit#*_}" = playch ] || continue
+                case "
+$YT_PLAY_PEND" in *"
+$dip playch"*) ;; *) YT_PLAY_PEND="$YT_PLAY_PEND$dip playch
+" ;; esac
+                continue
+            fi
             echo "$hit" | tr '_' ' ' >> "$YT_SPROBE_FILE.in"
-            cnt=$((cnt + 1)); [ "$cnt" -ge 4 ] && break
+            cnt=$((cnt + 1))
         done
         if [ -s "$YT_SPROBE_FILE.in" ]; then
             (
