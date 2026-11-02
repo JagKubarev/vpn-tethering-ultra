@@ -564,7 +564,6 @@ details.more > summary { color: var(--muted); }
       <div class="s">Показывать текущий режим в описании модуля в менеджере.</div></div>
     <label class="sw"><input type="checkbox" data-key="STATUS_IN_DESCRIPTION"><span></span></label>
   </div>
-  <div class="row"><button class="btn small" id="resetAll">Сбросить все настройки</button></div>
 </details>
 </section>
 
@@ -672,6 +671,26 @@ details.more > summary { color: var(--muted); }
       <button class="btn small" id="metaBtn">Проверить</button>
     </div>
     <div id="metaRes" style="font-size:14px"></div>
+  </div>
+</div>
+
+<h2>Настройки</h2>
+<div class="card">
+  <div class="row wrap">
+    <div class="txt"><div class="t">Экспорт</div>
+      <div class="s" id="cfgExpRes">Сохранённые настройки и свой список сайтов обхода — файлом в «Загрузки»: для другого телефона или после переустановки. Конфиги WARP — на вкладке WARP.</div></div>
+    <button class="btn small" id="cfgExp">Сохранить</button>
+  </div>
+  <div class="row wrap">
+    <div class="txt"><div class="t">Импорт</div>
+      <div class="s" id="cfgImpRes">Настройки из файла подставятся в форму — проверьте и нажмите «Применить». Чего нет в файле, вернётся к умолчанию.</div></div>
+    <button class="btn small" id="cfgImp">Выбрать файл</button>
+    <input type="file" id="cfgFile" style="display:none">
+  </div>
+  <div class="row wrap">
+    <div class="txt"><div class="t">Сбросить все настройки</div>
+      <div class="s">Вернуть к умолчаниям — после «Применить». Свой список сайтов, конфиги WARP и стратегии сетей не трогаются.</div></div>
+    <button class="btn small" id="resetAll">Сбросить</button>
   </div>
 </div>
 
@@ -1257,6 +1276,53 @@ $('#revertBtn').addEventListener('click', () => {
 $('#resetAll').addEventListener('click', () => {
   if (!confirm('Вернуть все настройки к значениям по умолчанию?')) return;
   KEYS.forEach((k) => { CUR[k] = DEF[k] || ''; }); renderForm(); loadWarp();
+});
+// экспорт — сохранённое (vpn_tether.conf и свой список), не то, что сейчас в форме
+$('#cfgExp').addEventListener('click', async () => {
+  const b = $('#cfgExp'); b.disabled = true;
+  try {
+    const r = await ctl('conf-export');
+    const m = /^OK (\S+)/.exec(r.out.trim());
+    if (!m) { toast(errText(r, 'Не получилось сохранить')); return; }
+    $('#cfgExpRes').textContent = 'Сохранено: Загрузки/' + m[1].split('/').pop() +
+      (changedKeys().length || zlistDirty() ? '. Изменения, ещё не применённые, в файл не вошли.' : '');
+  } finally { b.disabled = false; }
+});
+// импорт: файл -> проверка значений модулем (как у «Применить») -> форма; записывает «Применить»
+$('#cfgImp').addEventListener('click', () => $('#cfgFile').click());
+$('#cfgFile').addEventListener('change', async (e) => {
+  const f = (e.target.files || [])[0]; e.target.value = '';
+  if (!f) return;
+  if (f.size > 64 << 10) { toast(f.name + ': больше 64 КБ — это не настройки'); return; }
+  // разбор как у демона (load_user_conf): # — комментарий, кавычки вокруг значения снимаются
+  const kv = {}; let zl = null;
+  let txt = await f.text(); if (txt.charCodeAt(0) === 0xFEFF) txt = txt.slice(1);   // BOM
+  txt.split(/\r?\n/).forEach((l) => {
+    l = l.replace(/#.*/, ''); const i = l.indexOf('='); if (i < 0) return;
+    const k = l.slice(0, i).replace(/[ \t]/g, ''); let v = l.slice(i + 1).trim();
+    if (/^".*"$|^'.*'$/.test(v)) v = v.slice(1, -1);
+    if (k === 'ZAPRET_LIST') zl = v; else if (k) kv[k] = v;
+  });
+  const lines = Object.keys(kv).map((k) => k + '=' + kv[k]);
+  if (!lines.length && zl === null) { toast('В файле нет настроек модуля'); return; }
+  const ok = new Set(), bad = [];
+  if (lines.length) {
+    const r = await ctl('conf-check ' + q(b64(lines.join('\n') + '\n')));
+    (r.out || '').split('\n').forEach((l) => {
+      const m = /^(OK|BAD|UNK) (\S+)/.exec(l);
+      if (m && m[1] === 'OK') ok.add(m[2]); else if (m && m[1] === 'BAD') bad.push(m[2]);
+    });
+    if (!ok.size && !bad.length && zl === null) { toast(errText(r, 'В файле нет настроек модуля')); return; }
+  }
+  if (!confirm('Подставить настройки из «' + f.name + '»? Чего нет в файле — вернётся к умолчанию. Запишется после «Применить».')) return;
+  KEYS.forEach((k) => { CUR[k] = ok.has(k) ? kv[k] : (DEF[k] || ''); });
+  $('#zlist').value = (zl || '').split(/[\s,;]+/).filter(Boolean).join('\n');
+  renderForm(); loadWarp();
+  const unk = lines.length - ok.size - bad.length;
+  $('#cfgImpRes').textContent = 'Из файла настроек: ' + ok.size + (zl ? ', и свой список сайтов' : '') +
+    (bad.length ? '; с неверным значением — по умолчанию: ' + bad.join(', ') : '') +
+    (unk ? '; незнакомых ключей пропущено: ' + unk : '') + '. Проверьте и нажмите «Применить».';
+  toast('Настройки подставлены — проверьте и нажмите «Применить»');
 });
 
 // ---------------------------------------------------------------- переключение
@@ -1969,6 +2035,11 @@ function mockExec(cmd) {
   if (/^warp-import /.test(a)) { const n = /^warp-import '([^']+)'/.exec(a)[1]; M.warp.push(n + '|engage.cloudflareclient.com:4500|import|2026-10-27 00:21'); return { errno: 0, out: 'OK ' + n }; }
   if (/^warp-del /.test(a)) { const n = a.slice(10).replace(/'/g, ''); M.warp = M.warp.filter((l) => l.split('|')[0] !== n); return { errno: 0, out: 'OK' }; }
   if (/^warp-save /.test(a)) return { errno: 0, out: 'OK /storage/emulated/0/Download/x.conf' };
+  if (a === 'conf-export') return { errno: 0, out: 'OK /storage/emulated/0/Download/vpn_tether_settings_20261102_1930.conf' };
+  if (/^conf-check /.test(a)) {
+    const t = atob(/^conf-check '([^']*)'/.exec(a)[1]);
+    return { errno: 0, out: t.split('\n').filter(Boolean).map((l) => { const k = l.split('=')[0]; return (KEYS.includes(k) ? (k === 'ZAPRET_ALT_MIN' && !/^\d+$/.test(l.split('=')[1]) ? 'BAD ' : 'OK ') : 'UNK ') + k; }).join('\n') };
+  }
   if (a === 'warp-saveall') return { errno: 0, out: 'OK /storage/emulated/0/Download/warp-configs_20261027_1040.zip 3' };
   if (a === 'clients') return { errno: 0, out: '192.168.43.77|e0:2b:e9:75:60:84|REACHABLE|DESKTOP-LAPTOP|31|21545980|0|1243512870|67710170\n192.168.43.67|42:96:f4:ac:3a:91|STALE|realme-9-Pro-5G|2|7553|0||\n|00:27:15:ec:84:bd|-|android-tv|0|0|1||\n' };
   if (/^client-(un)?block /.test(a)) return { errno: 0, out: 'OK' };

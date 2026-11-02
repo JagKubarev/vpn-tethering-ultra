@@ -595,7 +595,7 @@ umask 022
 # второй демон. 20.10 так и было: "service.sh --get" у 2.2.1 запускал второй
 # демон, два экземпляра сносили правила друг друга (и MTU каскадом вниз).
 case "$1" in
-    ''|--defaults|--check|--get|--zapret-strategy) ;;
+    ''|--defaults|--check|--check-lines|--get|--zapret-strategy) ;;
     *) echo "service.sh: неизвестный аргумент '$1'" >&2; exit 2 ;;
 esac
 
@@ -947,6 +947,17 @@ case "$1" in
         USER_CONF_NOTE=""
         _conf_set "$2" "$3"
         case "$USER_CONF_NOTE" in *'!'*) exit 1 ;; esac
+        exit 0 ;;
+    --check-lines)
+        # импорт настроек (WebUI): «КЛЮЧ=значение» построчно со stdin, одним
+        # процессом вместо --check на каждый ключ -> «OK|BAD|UNK КЛЮЧ»
+        while IFS= read -r _l || [ -n "$_l" ]; do
+            _k=${_l%%=*}
+            case " $CONF_KEYS " in *" $_k "*) ;; *) echo "UNK $_k"; continue ;; esac
+            USER_CONF_NOTE=""
+            _conf_set "$_k" "${_l#*=}"
+            case "$USER_CONF_NOTE" in *'!'*) echo "BAD $_k" ;; *) echo "OK $_k" ;; esac
+        done
         exit 0 ;;
 esac
 
@@ -1387,7 +1398,7 @@ LOG_REPEAT_THRESHOLD=5
 
 # ------------------------------------------------------------------------
 # Функции демона — в lib/, по областям. Подключает только сам демон:
-# служебные вызовы (--defaults, --check, --get, --zapret-strategy) выходят
+# служебные вызовы (--defaults, --check, --check-lines, --get, --zapret-strategy) выходят
 # выше и lib/ не читают. MODULE_DIR задан выше (раньше нельзя: см.
 # is_our_daemon). В файлах есть и переменные состояния — порядок подключения
 # тот же, в каком они шли здесь, когда всё было одним файлом.

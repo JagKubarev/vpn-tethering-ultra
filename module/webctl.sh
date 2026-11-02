@@ -8,6 +8,8 @@
 #   webctl.sh conf             D КЛЮЧ=умолчание / U КЛЮЧ=из файла
 #   webctl.sh set КЛЮЧ ЗНАЧ    записать в vpn_tether.conf (с проверкой)
 #   webctl.sh unset КЛЮЧ       вернуть к умолчанию (строка комментируется)
+#   webctl.sh conf-export      настройки и свой список сайтов одним файлом в «Загрузки»
+#   webctl.sh conf-check B64   импорт: проверить строки КЛЮЧ=значение -> OK|BAD|UNK КЛЮЧ
 #   webctl.sh apply            демону: перечитать настройки -> токен
 #   webctl.sh toggle           VPN <-> напрямую -> токен
 #   webctl.sh ack              последний подтверждённый токен
@@ -174,6 +176,38 @@ case "$1" in
         rm -f "$CONF.tmp"
         echo "OK"
         ;;
+
+    conf-export)
+        # настройки одним файлом в «Загрузки»: свои значения из vpn_tether.conf
+        # (только известные ключи, последнее из повторов) и свой список сайтов
+        # обхода. Импорт — в WebUI: файл -> форма -> «Применить»
+        F=/storage/emulated/0/Download/vpn_tether_settings_$(date '+%Y%m%d_%H%M').conf
+        {
+            echo "# VPN Tethering Ultra — настройки, $(date '+%d.%m.%Y %H:%M')"
+            sed -n 's/^version=/# модуль: /p' "$MODDIR/module.prop"
+            echo "# Импорт: WebUI -> Сервис -> «Импорт». Чего нет в файле — вернётся к умолчанию."
+            sh "$MODDIR/webctl.sh" conf | awk '
+                /^D / { k = substr($0, 3); sub(/=.*/, "", k); d[k] = 1; next }
+                /^U / { l = substr($0, 3); k = l; sub(/=.*/, "", k)
+                        if (k in d) { if (!(k in v)) o[++n] = k; v[k] = l } }
+                END { for (i = 1; i <= n; i++) print v[o[i]] }'
+            l=$(sed 's/#.*//' "$ZLIST_USER" 2>/dev/null | tr -d '\r' | tr -s ' \t\n' '   ' | sed 's/^ //; s/ $//')
+            [ -n "$l" ] && echo "ZAPRET_LIST=$l"
+        } > "$F" 2>/dev/null
+        [ -s "$F" ] || { echo "ERR не удалось записать в «Загрузки»"; exit 1; }
+        chmod 644 "$F" 2>/dev/null
+        ( content call --uri content://media --method scan_file --arg "$F" >/dev/null 2>&1 & )
+        echo "OK $F" ;;
+
+    conf-check)
+        # импорт настроек: «КЛЮЧ=значение» построчно (base64) -> «OK|BAD|UNK КЛЮЧ»
+        # на строку; проверка та же, что у set (service.sh), одним процессом
+        [ ${#2} -le 200000 ] || { echo "ERR файл слишком большой"; exit 1; }
+        B64=base64
+        command -v base64 >/dev/null 2>&1 || for b in /data/adb/ksu/bin/busybox /data/adb/magisk/busybox /data/adb/ap/bin/busybox; do
+            [ -x "$b" ] && { B64="$b base64"; break; }
+        done
+        printf '%s' "$2" | $B64 -d 2>/dev/null | sh "$MODDIR/service.sh" --check-lines 2>/dev/null ;;
 
     unset)
         key="$2"

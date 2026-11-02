@@ -13,7 +13,7 @@ KernelSU/Magisk-модуль (id `vpn-to-hotspot-usb`, автор Kubarev, те�
 
 - `module/service.sh` (~1150 строк) — демон: журнал изменений в шапке, блок
   `USER CONFIG`, чтение конфига и проверка значений, служебные вызовы из WebUI
-  (`--defaults | --check | --get | --zapret-strategy`; с любым другим аргументом —
+  (`--defaults | --check | --check-lines | --get | --zapret-strategy`; с любым другим аргументом —
   выход, защита от второго демона), lock, все глобальные переменные, запуск.
 - `module/lib/*.sh` — функции демона по областям, подключаются из `service.sh`
   (`. "$MODULE_DIR/lib/…"`) после всех переменных; служебные вызовы до них не доходят:
