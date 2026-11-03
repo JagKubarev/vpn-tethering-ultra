@@ -585,6 +585,20 @@
 #   стратегии сети, подписи стратегий, warp.sh list одним stat+awk. DoH: без
 #   мёртвого dagami (not-a-dns, оба GeoHide, comss, commonnet); импорт WARP
 #   отклоняет Endpoint-заглушки; кэш DNS оператора и zone_re — под mksh.
+# v3.22.0 — DNS_VPN=geo: при VPN DNS_UPSTREAMS (гео-DoH) через туннель, те же
+#   адреса, что без VPN. WARP_TETHER: группы WARP и для раздачи (0 — только
+#   телефону). Сторож (scan.sh check): волна Google (HTTPS молчит и без обхода,
+#   HTTP 204) — стратегию не трогает, метка zscan.wave — 15 мин без проверок;
+#   «nfqws: …» и пустой CUR — не «нет связи»; ответ znet-set проверяется.
+#   Подбор не стирает стратегию YouTube, если YouTube не мерили (NBY=0).
+#   Kill-switch: guard одной транзакцией iptables-restore, ESTABLISHED под
+#   guard, guard_v6_check в сторожах. warp_dq — по живому dnsproxy; очередь
+#   Play без потерь; dumpsys с таймаутом; wait до конца процесса; ретраи
+#   read_table_index — 20 с на tun (RT_MISS_FILE). Проверка сайтов: по 4, раз
+#   в 6 ч, адреса через DNS модуля; «ничем» хранят ZALT 3 суток, новые первыми;
+#   ZSKIP без дублей. DoH: DNS4EU, LibreDNS, dns_primary_alive --no-alpn.
+#   WebUI: экспорт/импорт настроек, настройки по смыслу (YouTube, QUIC, «Обход
+#   для приложений», WARP «Для кого»), подсказка «Что выбрать» у DNS при VPN.
 # ============================================================================
 # ============================================================================
 
@@ -1438,7 +1452,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.21.0 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.22.0 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
