@@ -158,7 +158,7 @@ IPv6 к сетям групп отбивается (ip6 nat на устройс�
 Кроме этих ключей, в блоке `USER CONFIG` в `service.sh` есть внутренние параметры, которые
 через конфиг не задаются: `DISABLE_HW_OFFLOAD`, `TARGETED_CT_FLUSH`, `RULE_WATCHDOG`,
 `DNSPROXY_PORT=5354`, `DNSPROXY_GID=3999`, `DNS_ALT_HOLD=600`, `DNS_ALT_HOLD_FLAP=1800`,
-`DNS_PROBE_SLOW_MS=3000`, `YT_DEAD_AFTER=6`, `YT_SILENT_AFTER=10`, `YT_DEAD_TTL=600`, `YT_DEAD_MAX=16` и др.
+`DNS_PROBE_SLOW_MS=3000`, `YT_DEAD_AFTER=6`, `YT_SILENT_AFTER=10`, `YT_DEAD_TTL=1800`, `YT_DEAD_MAX=64` и др.
 
 Пример:
 

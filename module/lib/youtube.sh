@@ -283,7 +283,11 @@ yt_dead_add() {
     # лимит — только для новой записи: /28 заменяет свои /32, записей не прибавит
     # (с /28 одиночных /32 копится больше — при полном списке стойка не закрывалась)
     nlist=$(awk 'END {print NR}' "$YT_DEAD_FILE" 2>/dev/null)
-    [ -z "$sib" ] && [ "${nlist:-0}" -ge "$YT_DEAD_MAX" ] && return 1
+    if [ -z "$sib" ] && [ "${nlist:-0}" -ge "$YT_DEAD_MAX" ]; then
+        # раньше — молча: плеер висел на неотбитом сервере, и в журнале пусто
+        [ $((now - YT_DEAD_FULL_LOG)) -ge 600 ] && { YT_DEAD_FULL_LOG=$now; log "WARNING: YouTube: список отбоя полон ($YT_DEAD_MAX) — $dip не отбиваю"; }
+        return 1
+    fi
     if [ -n "$sib" ]; then
         awk -v p="${dip%.*}." -v b="$b" '{ a = $1; if (index(a, p) == 1 && a ~ /\/32$/) { sub(/\/32$/, "", a); l = substr(a, length(p) + 1); if (l - l % 16 == b) next } print }' "$YT_DEAD_FILE" > "$YT_DEAD_FILE.tmp" && mv -f "$YT_DEAD_FILE.tmp" "$YT_DEAD_FILE"
         echo "$n28 $((now + YT_DEAD_TTL)) $sib$dip" >> "$YT_DEAD_FILE"
