@@ -520,15 +520,24 @@ yt_dead_recheck() {
     # только добавленные больше минуты назад (свежие проверять рано)
     awk -v now="$now" -v ttl="$YT_DEAD_TTL" '$2 - ttl + 60 <= now' "$YT_DEAD_FILE" > "$YT_RECHECK_FILE.in" 2>/dev/null
     [ -s "$YT_RECHECK_FILE.in" ] || return 0
+    # записи — по 4 одновременно: мёртвый адрес занимает весь тайм-аут (3 с),
+    # и с YT_DEAD_MAX=64 круг по одной тянулся до ~3 мин, ожившие ждали
+    # снятия отбоя столько же; адреса внутри записи — по очереди, как раньше
     (
+        : > "$YT_RECHECK_FILE.tmp"
+        n=0
         while read -r net _ ips; do
-            res=dead
-            for ip in $(echo "$ips" | tr ',' ' '); do
-                case "$ip" in *[!0-9.]*|'') continue ;; esac
-                [ "$(yt_probe_ip "$ip")" = ok ] && { res=ok; break; }
-            done
-            echo "$net $res"
-        done < "$YT_RECHECK_FILE.in" > "$YT_RECHECK_FILE.tmp"
+            (
+                res=dead
+                for ip in $(echo "$ips" | tr ',' ' '); do
+                    case "$ip" in *[!0-9.]*|'') continue ;; esac
+                    [ "$(yt_probe_ip "$ip")" = ok ] && { res=ok; break; }
+                done
+                echo "$net $res" >> "$YT_RECHECK_FILE.tmp"
+            ) </dev/null &
+            n=$((n + 1)); [ $((n % 4)) -eq 0 ] && wait
+        done < "$YT_RECHECK_FILE.in"
+        wait
         mv -f "$YT_RECHECK_FILE.tmp" "$YT_RECHECK_FILE.done"
     ) </dev/null >/dev/null 2>&1 &
     YT_RECHECK_PID=$!
