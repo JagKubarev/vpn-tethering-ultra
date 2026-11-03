@@ -646,13 +646,18 @@ DNS_VPN="dnat"         # VPN-режим:    dnat  = DNAT в DNS из VPN (как
                        #                       через туннель — те же адреса в обоих
                        #                       режимах, после выключения VPN в кэше
                        #                       клиентов нет «настоящих» (гео-ошибки)
-# Основные апстримы (DoH https://, DoT tls://, DoQ quic://, обычный ip:53)
-DNS_UPSTREAMS="https://dns.wlrus.cfd/dns-query"
+# Основные апстримы (DoH https://, DoT tls://, DoQ quic://, обычный ip:53).
+# not-a-dns (3.22.1): Wlrus 03.11 на github.com отвечал «имя есть, адресов нет»
+# (NOERROR без ответов, три раза подряд) — это не ошибка, на запасные dnsproxy
+# не уходит, и GitHub не открывался; not-a-dns, comss и Google отдают адрес.
+# Wlrus — первым запасным
+DNS_UPSTREAMS="https://not-a-dns.quic.best/dns-query"
 # Если основные недоступны. Только шифрованные — иначе запросы ушли бы
 # оператору открытым текстом.
 # Первый, которого нет среди основных, — замена основному; при сбое основным
 # становится только он, остальные — его запасные (по порядку). not-a-dns,
-# geohide и comss, как и Wlrus, обходят гео-блок. Первым — not-a-dns (30.10):
+# geohide и comss, как и Wlrus, обходят гео-блок. С 3.22.1 not-a-dns —
+# основной, Wlrus — первый запасной. Раньше первым запасным был not-a-dns (30.10):
 # другой владелец, чем у Wlrus, все три ИИ, Gemini — co.uk, 0.4-0.5с, за день
 # ни одного сбоя, а geohide.ru дважды не прошёл проверку (13:57, 14:15). Затем
 # dns.geohide.ru:444 и geohide.ru (GeoHide, другие серверы, те же прокси;
@@ -669,7 +674,7 @@ DNS_UPSTREAMS="https://dns.wlrus.cfd/dns-query"
 # (25.10: «регион недоступен» на ноуте, переподключение Wi-Fi не помогало;
 # причина вероятная, в логе не поймана). Молчат
 # все — модуль и так уводит DNS к оператору (проверка dns_health).
-DNS_FALLBACKS="https://not-a-dns.quic.best/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.commonnet.work/dns-query"
+DNS_FALLBACKS="https://dns.wlrus.cfd/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.commonnet.work/dns-query"
 # Апстримы для DNS_VPN=doh (идут через туннель)
 DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Чем резолвить имена самих апстримов (dns.wlrus.cfd и т.д.). Подмена тут не
