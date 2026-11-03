@@ -455,12 +455,22 @@ get_tun_mtu() {
 }
 
 read_table_index() {
-    local iface=$1 attempts=15 delay_ms=100 index name cand last live
+    local iface=$1 attempts=15 delay_ms=100 index name cand last live ifx miss=""
 
     [ -s /data/misc/net/rt_tables ] || { sleep 1; return 1; }
     # Нет самого ифейса (VPN выключен) — ждать строку в rt_tables бессмысленно.
     # Ретраи нужны только сразу после появления tun, пока netd не дописал таблицу.
     $ip link show "$iface" >/dev/null 2>&1 || return 1
+    # Ретраи (~10 с) — только первые 20 с после первого промаха у этого tun
+    # (ifindex): root-tun (box, Clash, kernel wg0) строку в rt_tables не
+    # получит никогда, и цикл стоял ~10 с на каждом круге (ревью PR #19).
+    # Вызов идёт в $(...) — память в файле; найдена таблица — файл убираем
+    read -r ifx < "/sys/class/net/$iface/ifindex"
+    [ -f "$RT_MISS_FILE" ] && read -r miss < "$RT_MISS_FILE"
+    case "$miss" in
+        "$iface $ifx "*) [ $(($(date +%s) - ${miss##* })) -gt 20 ] && attempts=1 ;;
+        *) miss="" ;;
+    esac
 
     while [ $attempts -gt 0 ]; do
         # ВАЖНО: раньше бралось ПЕРВОЕ совпадение. При реконнекте VPN Android
@@ -479,7 +489,7 @@ read_table_index() {
             $ip route show table "$index" 2>/dev/null | grep -q . && live="$index"
         done
 
-        [ -n "$live" ] && { echo "$live"; return 0; }
+        [ -n "$live" ] && { [ -n "$miss" ] && rm -f "$RT_MISS_FILE"; echo "$live"; return 0; }
 
         if [ -n "$last" ] && [ $attempts -le 1 ]; then
             # ни одна таблица не отдала маршруты — отдаём последнюю, но
@@ -489,6 +499,7 @@ read_table_index() {
             echo "$last"
             return 0
         fi
+        [ -z "$miss" ] && { miss="$iface $ifx $(date +%s)"; echo "$miss" > "$RT_MISS_FILE"; }
 
         attempts=$((attempts - 1))
         [ $attempts -gt 0 ] && { sleep 0.$(printf "%03d" $delay_ms); delay_ms=$((delay_ms * 3 / 2)); [ $delay_ms -gt 999 ] && delay_ms=999; }

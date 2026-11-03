@@ -294,7 +294,8 @@ zapret_vpn_uids() {
 # Владелец поднятого VPN (любой клиент, даже не из списка) — запоминаем
 zapret_learn_vpn_owner() {
     local u
-    u=$(dumpsys connectivity 2>/dev/null | grep -A3 'VPN CONNECTED' | grep -oE 'OwnerUid: [0-9]+' | head -1 | grep -oE '[0-9]+$')
+    # с таймаутом, как в get_vpn_dns: dumpsys мог повесить цикл (ревью PR #19)
+    u=$($TIMEOUT_CMD sh -c "dumpsys connectivity 2>/dev/null" | grep -A3 'VPN CONNECTED' | grep -oE 'OwnerUid: [0-9]+' | head -1 | grep -oE '[0-9]+$')
     case "$u" in ''|*[!0-9]*) return 0 ;; esac
     [ "$u" -ge 10000 ] || return 0
     grep -qx "$u" "$ZAPRET_VPN_UIDS_FILE" 2>/dev/null && return 0
@@ -756,7 +757,7 @@ zapret_tls_ok() {   # $1 — IP; мимо обхода и AdGuard (группа 
 }
 ZAPRET_WL_HITS=0       # подряд проверок «похоже на белые списки» (вход — со второй)
 zapret_whitelist_check() {
-    local now f p1 p2
+    local now f p1 p2 p
     # дешёвое — первым: без отката DNS и без паузы делать нечего
     [ "$ZAPRET_WL" = "1" ] || [ "$DNS_DEGRADED" = "1" ] || { ZAPRET_WL_HITS=0; return 0; }
     [ "$ZAPRET_ENABLE" = "1" ] && [ -n "$NFQWS_BIN" ] && [ -n "$LAST_WAN_IFACE" ] || { ZAPRET_WL=0; ZAPRET_WL_HITS=0; return 0; }
@@ -778,7 +779,9 @@ zapret_whitelist_check() {
     rm -f "$f".1 "$f".2
     ( zapret_tls_ok 1.1.1.1 && : > "$f".1 ) </dev/null >/dev/null 2>&1 & p1=$!
     ( zapret_tls_ok 9.9.9.9 && : > "$f".2 ) </dev/null >/dev/null 2>&1 & p2=$!
-    wait $p1 $p2
+    # до конца, а не до сигнала: USR1 (Action, «Применить») прерывает wait, и
+    # недоделанная проверка считалась провалом — ложная пауза обхода (ревью PR #19)
+    for p in $p1 $p2; do while kill -0 "$p" 2>/dev/null; do wait "$p" 2>/dev/null; done; done
     if [ -f "$f".1 ] || [ -f "$f".2 ]; then
         [ "$ZAPRET_WL" = "1" ] && log "zapret: зарубежные адреса снова открываются — белых списков нет, обход включаю"
         ZAPRET_WL=0; ZAPRET_WL_HITS=0

@@ -585,6 +585,20 @@
 #   стратегии сети, подписи стратегий, warp.sh list одним stat+awk. DoH: без
 #   мёртвого dagami (not-a-dns, оба GeoHide, comss, commonnet); импорт WARP
 #   отклоняет Endpoint-заглушки; кэш DNS оператора и zone_re — под mksh.
+# v3.22.0 — DNS_VPN=geo: при VPN DNS_UPSTREAMS (гео-DoH) через туннель, те же
+#   адреса, что без VPN. WARP_TETHER: группы WARP и для раздачи (0 — только
+#   телефону). Сторож (scan.sh check): волна Google (HTTPS молчит и без обхода,
+#   HTTP 204) — стратегию не трогает, метка zscan.wave — 15 мин без проверок;
+#   «nfqws: …» и пустой CUR — не «нет связи»; ответ znet-set проверяется.
+#   Подбор не стирает стратегию YouTube, если YouTube не мерили (NBY=0).
+#   Kill-switch: guard одной транзакцией iptables-restore, ESTABLISHED под
+#   guard, guard_v6_check в сторожах. warp_dq — по живому dnsproxy; очередь
+#   Play без потерь; dumpsys с таймаутом; wait до конца процесса; ретраи
+#   read_table_index — 20 с на tun (RT_MISS_FILE). Проверка сайтов: по 4, раз
+#   в 6 ч, адреса через DNS модуля; «ничем» хранят ZALT 3 суток, новые первыми;
+#   ZSKIP без дублей. DoH: DNS4EU, LibreDNS, dns_primary_alive --no-alpn.
+#   WebUI: экспорт/импорт настроек, настройки по смыслу (YouTube, QUIC, «Обход
+#   для приложений», WARP «Для кого»), подсказка «Что выбрать» у DNS при VPN.
 # ============================================================================
 # ============================================================================
 
@@ -628,6 +642,10 @@ DNS_VPN="dnat"         # VPN-режим:    dnat  = DNAT в DNS из VPN (как
                        #               cache = DNS из VPN через dnsproxy + кэш
                        #               doh   = DNS_VPN_UPSTREAMS через туннель + кэш
                        #                       (замер: ~200мс вместо ~550мс, кэш ~5мс)
+                       #               geo   = как без VPN: DNS_UPSTREAMS (+ запасные)
+                       #                       через туннель — те же адреса в обоих
+                       #                       режимах, после выключения VPN в кэше
+                       #                       клиентов нет «настоящих» (гео-ошибки)
 # Основные апстримы (DoH https://, DoT tls://, DoQ quic://, обычный ip:53)
 DNS_UPSTREAMS="https://dns.wlrus.cfd/dns-query"
 # Если основные недоступны. Только шифрованные — иначе запросы ушли бы
@@ -796,6 +814,7 @@ WARP_TELEGRAM=1         # сети Telegram (заблокирован по IP)
 WARP_APPS=""            # приложения телефона целиком (пакеты через пробел)
 WARP_DOMAINS=""         # домены; их адреса на Cloudflare/Akamai/Fastly/CloudFront — мимо
 WARP_PHONE=1            # группы — и для приложений телефона, не только раздачи
+WARP_TETHER=1           # группы — и для раздачи (0 — WARP только телефону)
 # Скрыть раздачу от оператора (3.2; раньше — модуль tether_unblock).
 #  - net.tethering.noprovisioning: Android не спрашивает оператора, можно ли
 #    раздавать (иначе оператор может не дать включить точку или оборвать);
@@ -865,7 +884,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_QUIC_FAKE|QUIC_BLOCK_YT|QUIC_YT_FAKE|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE)
+        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
@@ -881,7 +900,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
         ZAPRET_ARGS)     zapret_args_valid "$val" || ok=0 ;;
         DNS_META_ECS)    _ip4_valid "$val" || ok=0 ;;
         DNS_DIRECT) case "$val" in doh|plain) ;; *) ok=0 ;; esac ;;
-        DNS_VPN)    case "$val" in dnat|cache|doh) ;; *) ok=0 ;; esac ;;
+        DNS_VPN)    case "$val" in dnat|cache|doh|geo) ;; *) ok=0 ;; esac ;;
         DNS_HEALTH_INTERVAL|DNS_HEALTH_RECOVER)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 2 ] && [ "$val" -le 600 ] || ok=0 ;; esac ;;
         DNS_UPSTREAMS|DNS_FALLBACKS|DNS_VPN_UPSTREAMS|DNS_BOOTSTRAP|DNS_META_UPSTREAMS)
@@ -927,7 +946,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -1140,6 +1159,7 @@ EMPTY_TETHER_COUNT=0
 ORIGINAL_TUN_MTU=""
 ORIGINAL_TUN_IFINDEX=""   # чей это MTU: восстанавливаем только тому же tun
 TUN_MTU_FILE="/data/local/tmp/vpn_tether_tunmtu"   # "ifindex mtu" оригинала — переживает kill -9
+RT_MISS_FILE="/data/local/tmp/vpn_tether_rtmiss"   # "ifейс ifindex время" первого промаха read_table_index
 
 TETHER_IFACES="wlan2 wlan1 wlan0 ap0 hotspot swlan0 swlan1 swlan2 rndis0 usb0 eth0 bt-pan bnep0 ncm0 wwan0 tether0 qmi0"
 
@@ -1432,7 +1452,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.21.0 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.22.0 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
@@ -1474,6 +1494,9 @@ warp_routes_off force      # туннель и его маршруты от уб
 warp_down
 phone_dns_rules_off
 rm -f "$DNSPROXY_PID_FILE" /data/local/tmp/vpn_tether_probe.*
+# /data/local/tmp переживает перезагрузку, а tun после неё часто с тем же
+# ifindex — старая метка срезала бы ретраи первого поиска таблицы (ревью PR #21)
+rm -f "$RT_MISS_FILE"
 dnsproxy_port_guard_down
 dnsproxy_exempt_down       # исключение AdGuard от убитого демона
 

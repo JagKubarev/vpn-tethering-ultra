@@ -121,13 +121,25 @@ echo $$ > "$OUT.pid"
 # идёт регистрация WARP (warp/warp.sh gen) — подождать. После pid: пока ждём,
 # демон и WebUI видят «подбор идёт» и второй scan.sh не запустят. Замок старше
 # 3 мин — от убитого процесса (gen обновляет его на каждом конфиге)
-_i=0; while [ -n "$(find /data/local/tmp/vpn_tether_warpgen.lock -maxdepth 0 -mmin -3 2>/dev/null)" ] && [ $_i -lt 90 ]; do sleep 1; _i=$((_i + 1)); done
+# Ждём, пока замок свежий (до 5 мин): gen 5 бывает дольше 2 мин, а после
+# прежних 90 с подбор шёл при живой очереди gen — базовая проверка через
+# его nfqws, закрытые сайты «открыты без обхода» (ревью PR #20). Не дождались — отказ
+_i=0; while [ -n "$(find /data/local/tmp/vpn_tether_warpgen.lock -maxdepth 0 -mmin -3 2>/dev/null)" ] && [ $_i -lt 300 ]; do sleep 1; _i=$((_i + 1)); done
+[ -z "$(find /data/local/tmp/vpn_tether_warpgen.lock -maxdepth 0 -mmin -3 2>/dev/null)" ] ||     { st state=error msg="идёт создание конфигов WARP — подбор отложен"; exit 1; }
 # nfqws на нашей очереди от убитого (kill -9, OOM) прогона: иначе очередь
 # занята, все прогоны «nfqws: …», и сирота портит HTTPS от root
 for _p in $(pgrep -f "nfqws.*--qnum=$Q " 2>/dev/null); do kill -9 "$_p" 2>/dev/null; done
 : > "$OUT.results"
 S_done=0; S_total=0; S_blocked=""; S_started=$(date +%H:%M:%S)
 st state=running stage="подготовка" msg=""
+
+# Сторож вскоре после волны Google (метка от прошлого сторожа моложе 15 мин):
+# не проверять и ничего не слать. В волну застревает почти всё видео, демон
+# звал бы сторожа каждые 3 мин, и каждый раз — залп запросов к закрытым сайтам
+if [ "$MODE" = check ] && [ -n "$(find "$OUT.wave" -maxdepth 0 -mmin -15 2>/dev/null)" ]; then
+    st state=done stage="готово" msg="недавно была волна Google — проверка отложена"
+    exit 0
+fi
 
 [ -n "$WAN" ] || { st state=error msg="модуль ещё не видел сеть оператора"; exit 1; }
 ip -4 addr show "$WAN" 2>/dev/null | grep -q "inet " || { st state=error msg="у $WAN нет адреса — сеть только что сменилась? Повторите через полминуты"; exit 1; }
@@ -478,16 +490,23 @@ EOF
     # не проверенные (адрес не узнали) остаются как были. Не открывшиеся
     # ничем — тоже: чаще это провал сети во время проверки (02.11: bbc, linkedin,
     # viber «ничем», а основной обход их открывает), а без записи сайт сутки
-    # (ZSKIP) сидел бы на основной стратегии, которая его не открывает
-    T=" $(minus "$(awk '{print $1}' "$TMP/ips.all" | tr '\n' ' ')" "$F") "
+    # (ZSKIP) сидел бы на основной стратегии, которая его не открывает.
+    # По облачному ревью (PR #18): запись «ничем» живёт 3 суток от даты
+    # записи (O; без date -d — не живёт), новые записи — первыми: демон
+    # берёт до 3 стратегий по порядку файла, старые не вытесняют новые
+    TA=" $(awk '{print $1}' "$TMP/ips.all" | tr '\n' ' ') "
+    T=" $(minus "$TA" "$F") "
     D=$(date '+%Y-%m-%d %H:%M')
+    O=$(date -d "@$(($(date +%s) - 259200))" '+%Y-%m-%d %H:%M' 2>/dev/null)
+    [ -n "$O" ] || O=9999
     {
-        [ -f "$ZALT" ] && K="$KEY" T="$T" awk -F'|' '!($1 == ENVIRON["K"] && index(ENVIRON["T"], " " $3 " "))' "$ZALT"
         while IFS='|' read -r h a; do printf '%s|%s|%s|%s|%s\n' "$KEY" "${NETID#*"|"}" "$h" "$a" "$D"; done < "$TMP/assign"
+        [ -f "$ZALT" ] && K="$KEY" T="$T" TA="$TA" O="$O" awk -F'|' '!($1 == ENVIRON["K"] && (index(ENVIRON["T"], " " $3 " ") || (index(ENVIRON["TA"], " " $3 " ") && $5 < ENVIRON["O"])))' "$ZALT"
     } > "$ZALT.tmp" && chmod 600 "$ZALT.tmp" && mv -f "$ZALT.tmp" "$ZALT"
     NOW=$(date +%s)
+    # ZSKIP — по всем проверенным (TA), иначе у «ничем» копились дубли
     {
-        [ -f "$ZSKIP" ] && K="$KEY" T="$T" N="$NOW" awk -F'|' '$3 + 86400 > ENVIRON["N"] && !($1 == ENVIRON["K"] && index(ENVIRON["T"], " " $2 " "))' "$ZSKIP"
+        [ -f "$ZSKIP" ] && K="$KEY" T="$TA" N="$NOW" awk -F'|' '$3 + 86400 > ENVIRON["N"] && !($1 == ENVIRON["K"] && index(ENVIRON["T"], " " $2 " "))' "$ZSKIP"
         for h in $F; do printf '%s|%s|%s\n' "$KEY" "$h" "$NOW"; done
     } > "$ZSKIP.tmp" && chmod 600 "$ZSKIP.tmp" && mv -f "$ZSKIP.tmp" "$ZSKIP"
     # Автосписок без лишнего (31.10): nfqws добавляет сайт после 3 неотвеченных
@@ -548,13 +567,35 @@ if [ "$MODE" = "check" ]; then
         tail -n 1 "$OUT.results" | awk -F'|' -v nb="$NB" \
             '{ o = $1 - ($2 - nb); need = (nb >= 4) ? nb - 1 : nb; exit !($3 == 0 && o >= need) }'
     }
-    # последний прогон не открыл вообще ничего, даже контрольные — это связь
-    nothing_opened() { tail -n 1 "$OUT.results" | awk -F'|' '{ exit !($1 == 0) }'; }
+    # последний прогон не открыл вообще ничего, даже контрольные — это связь.
+    # Не «nfqws: …» (не запустился — сломана стратегия, а не связь) и не пустой
+    # файл: раньше и то и другое было «нет связи», и сломанную стратегию
+    # сторож не менял никогда (ревью PR #20)
+    nothing_opened() { tail -n 1 "$OUT.results" | awk -F'|' '{ n = 1; r = ($1 == 0 && $7 !~ /^nfqws: /) } END { exit !(n && r) }'; }
     # что не открылось у последнего прогона: "youtube.com:x28 ..." (для журнала)
     last_fail() { tail -n 1 "$OUT.results" | cut -d'|' -f7 | cut -c1-200; }
+    # Волна ТСПУ на Google: HTTPS ко всем его адресам молчит и без обхода, HTTP
+    # отвечает — стратегия ни при чём. 03.11 08:01 сторож в волну счёл её
+    # сломанной, подбор (Google ожил к концу) заменил рабочую стратегию YOTA и
+    # стёр её стратегию YouTube. Запросы сканера мимо AdGuard и основного
+    # обхода (выше), nfqws сканера между прогонами не запущен — напрямую.
+    # Волна — метка $OUT.wave: следующие 15 мин сторож не проверяет (в начале,
+    # до всех запросов), и выход
+    wave_google() {
+        _g443=$(curl -s -o /dev/null -m 5 --interface "$WAN" --capath "$CA" -w '%{http_code}' https://www.google.com/generate_204 2>/dev/null)
+        _g80=$(curl -s -o /dev/null -m 5 --interface "$WAN" -w '%{http_code}' http://www.google.com/generate_204 2>/dev/null)
+        [ "$_g443" = 000 ] && [ "$_g80" = 204 ] || return 0
+        touch "$OUT.wave"
+        event "автопроверка: Google по HTTPS молчит и без обхода, по HTTP отвечает — волна ТСПУ, стратегию не трогаю ($(last_fail))"
+        wd_last "волна Google, отложил"
+        st state=done stage="готово" msg="волна Google (HTTPS молчит и без обхода) — стратегию не трогаю"
+        exit 0
+    }
     # текущая — оба профиля (своя YouTube, если есть), с пометками @G/@Q
     CUR=$(sh "$MODDIR/service.sh" --zapret-strategy "${NETID%%"|"*}" "${NETID#*"|"}" full 2>/dev/null | \
         sed "s#@$ZDIR/tls_clienthello_www_google_com.bin#@G#g; s#@$ZDIR/quic_initial_www_google_com.bin#@Q#g")
+    # не узнали текущую — проверять нечего (раньше пустой CUR тоже шёл как «нет связи»)
+    [ -n "$CUR" ] || { st state=error msg="не удалось узнать текущую стратегию сети"; exit 1; }
     S_total=2
     st stage="проверяю стратегию сети"
     if [ -n "$CUR" ] && { passed "$CUR" "текущая" || passed "$CUR" "текущая"; }; then
@@ -572,6 +613,8 @@ if [ "$MODE" = "check" ]; then
         st state=done stage="готово" msg="нет связи — проверка отложена"
         exit 0
     fi
+    # сразу, а не после минуты и третьего прогона: в волну они — лишний залп
+    wave_google
     FAIL1=$(last_fail)
     st stage="перепроверка через минуту"
     sleep 60
@@ -587,6 +630,8 @@ if [ "$MODE" = "check" ]; then
         st state=done stage="готово" msg="нет связи — проверка отложена"
         exit 0
     fi
+    # волна могла начаться за эту минуту
+    wave_google
     event "автопроверка: стратегия не открывает ($(last_fail)) — ищу замену"
     # прежние стратегии этой сети и сетей с тем же названием (YOTA = 25011 и
     # 25002), новые первыми, без повторов (только свои параметры: custom)
@@ -608,6 +653,11 @@ if [ "$MODE" = "check" ]; then
                 exit 0
             fi
             r=$(sh "$MODDIR/webctl.sh" znet-set custom "$a" "автопроверка: прежняя рабочая" "$y" 2>/dev/null)
+            # не сохранилась — не «починил», а дальше по истории и подбор (ревью PR #20)
+            case "$r" in
+                OK*) ;;
+                *) event "автопроверка: прежнюю не сохранил (${r:-нет ответа}) — пробую дальше"; continue ;;
+            esac
             event "автопроверка: вернул прежнюю стратегию: $a${y:+ (YouTube: $y)}"
             wd_last "починил: прежняя стратегия"
             st state=done stage="готово" msg="вернул прежнюю рабочую стратегию"
@@ -785,7 +835,14 @@ if [ "$PERNET" = "1" ] && [ -n "$BEST" ]; then
         else
             how="открыла $((${BEST%%"|"*} + gy)) из $NB"
         fi
-        r=$(sh "$MODDIR/webctl.sh" znet-set custom "${BEST#*"|"}" "подбор: $how" "$BEST_YT" 2>/dev/null)
+        # YouTube в этом прогоне не мерили (свой список сайтов, YouTube открыт без
+        # обхода) — без 5-го аргумента: znet-set оставит свою стратегию YouTube
+        # сети, а не сотрёт её (ревью PR #20)
+        if [ "$NBY" -gt 0 ]; then
+            r=$(sh "$MODDIR/webctl.sh" znet-set custom "${BEST#*"|"}" "подбор: $how" "$BEST_YT" 2>/dev/null)
+        else
+            r=$(sh "$MODDIR/webctl.sh" znet-set custom "${BEST#*"|"}" "подбор: $how" 2>/dev/null)
+        fi
         case "$r" in
             OK*) MSG="лучшая запомнена для сети «${NETID#*"|"}» ($how)" ;;
             *)   MSG="не удалось запомнить: ${r#ERR }" ;;

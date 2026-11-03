@@ -147,7 +147,13 @@ gen_one() {
     ppub=$(printf '%s' "$r" | jstr public_key)
     addr=$(printf '%s' "$r" | grep -o '"addresses":{[^}]*}' | head -1)
     v4=$(printf '%s' "$addr" | jstr v4); v6=$(printf '%s' "$addr" | jstr v6)
-    case "$ppub$v4" in *[!A-Za-z0-9+/=.]*|'') echo "включение WARP: $(printf '%s' "$r" | head -c 120)"; return 1 ;; esac
+    # по отдельности: склеенные проходили, если пусто одно из двух, — конфиг с
+    # пустым PublicKey или «Address = /32» (ревью PR #20). Ключ — base64 32
+    # байт (44 знака), адрес — IPv4
+    case "$ppub" in *[!A-Za-z0-9+/=]*|'') ppub="" ;; esac
+    [ ${#ppub} -eq 44 ] || ppub=""
+    case "$v4" in *[!0-9.]*|'') v4="" ;; *.*.*.*) ;; *) v4="" ;; esac
+    if [ -z "$ppub" ] || [ -z "$v4" ]; then echo "включение WARP: $(printf '%s' "$r" | head -c 120)"; return 1; fi
     {
         echo "# vpn_tether: gen $(date '+%Y-%m-%d %H:%M')"
         echo "[Interface]"
@@ -173,8 +179,13 @@ gen() {
     case "$n" in [1-5]) ;; *) echo "ERR число 1..5"; return 1 ;; esac
     [ -x "$AWG" ] || { echo "ERR нет $AWG"; return 1; }
     # scan.sh: его curl от root попали бы в нашу очередь (и наоборот)
+    # жив и это scan.sh (cmdline): pid убитого мог достаться чужому (ревью PR #20)
     pid=$(cat "$ZSCAN.pid" 2>/dev/null)
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "ERR идёт подбор обхода — повторите позже"; return 1; fi
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        case "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" in
+            *zapret/scan.sh*) echo "ERR идёт подбор обхода — повторите позже"; return 1 ;;
+        esac
+    fi
     mkdir "$GEN_LOCK" 2>/dev/null || {
         # замок от убитого процесса — старше 3 минут (живой gen обновляет его на каждом конфиге)
         [ -n "$(find "$GEN_LOCK" -maxdepth 0 -mmin +3 2>/dev/null)" ] && rm -rf "$GEN_LOCK" && mkdir "$GEN_LOCK" 2>/dev/null \
