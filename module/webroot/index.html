@@ -403,6 +403,57 @@ details.more > summary { color: var(--muted); }
       <div class="s">Медленное видеосоединение YouTube обрывается, и плеер переходит на быстрый сервер. Если быстрых нет — пауза.</div></div>
     <label class="sw"><input type="checkbox" data-key="YT_SLOW_RETRY"><span></span></label>
   </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">YouTube без кэшей оператора</div>
+      <div class="s">Блокирует серверы-кэши оператора, чтобы видео загружалось с серверов Google. Не включайте, если оператор отдаёт видео только с кэшей.</div></div>
+    <label class="sw"><input type="checkbox" data-key="YT_GGC_BLOCK"><span></span></label>
+  </div>
+  <div class="row">
+    <div class="txt"><div class="t">Клиенты YouTube и Google Play</div>
+      <div class="s">YouTube, YouTube Music, ReVanced, Morphe, NewPipe и др., а также Google Play — без QUIC, если установлены. По обычному HTTPS модуль может оборвать медленное видеосоединение и отбить молчащий сервер, по QUIC — нет (это при обходе блокировок для телефона и без VPN).</div></div>
+    <label class="sw"><input type="checkbox" data-key="QUIC_BLOCK_YT"><span></span></label>
+  </div>
+  <div class="row" data-dep="QUIC_BLOCK_YT">
+    <div class="txt"><div class="t">Подделка вместо закрытия</div>
+      <div class="s">QUIC клиентов YouTube и Google Play не закрывается, а пробивается обходом (как в zapret2): на YOTA так работает и быстрее перематывает. Только при включённом обходе; без обхода — закрытие, через VPN QUIC идёт в туннеле как есть. AdGuard закрывает QUIC сам — модуль пропускает QUIC YouTube и Play мимо него, и реклама в YouTube через AdGuard может вернуться.</div></div>
+    <label class="sw"><input type="checkbox" data-key="QUIC_YT_FAKE"><span></span></label>
+  </div>
+</div>
+
+<h2>QUIC</h2>
+<div class="card">
+  <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
+  <div class="row" data-dep="ZAPRET_ENABLE" data-depoff="ZAPRET_QUIC_FAKE">
+    <div class="txt"><div class="t">Без QUIC на раздаче</div>
+      <div class="s">Раздаче закрывается QUIC (HTTP/3): браузеры сразу идут по HTTPS, где работает обход. Только для трафика мимо VPN. Не действует, пока включено «QUIC раздачи — с подделкой» (если подделка не встала — в ядре нет connbytes — действует она).</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_BLOCK"><span></span></label>
+  </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">QUIC раздачи — с подделкой</div>
+      <div class="s">QUIC устройств раздачи не закрывается, а пробивается обходом: YouTube и Google Play на смартфоне раздачи идут по QUIC и быстрее перематывают. Главнее «Без QUIC на раздаче». Если на устройстве стоит свой AdGuard, он закрывает QUIC сам.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_FAKE"><span></span></label>
+  </div>
+</div>
+<div class="card pad mt8">
+  <div class="muted" style="font-size:13px">Выбранным приложениям закрывается QUIC (UDP 443) — они идут по HTTPS. Помогает, если оператор режет QUIC.</div>
+  <div class="chips" id="quicChips"></div>
+  <div class="mt8"><button class="btn small" id="quicAdd">Добавить приложение</button></div>
+</div>
+
+<h2>Кому обход</h2>
+<div class="card">
+  <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Обход для приложений телефона</div>
+      <div class="s">Обход и для приложений телефона, чей трафик идёт мимо VPN. VPN-клиенты не затрагиваются.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_PHONE"><span></span></label>
+  </div>
+  <div class="row col" data-dep="ZAPRET_PHONE">
+    <div class="txt"><div class="t">Приложения мимо обхода</div>
+      <div class="s">Их трафик обход не трогает — например, банки, если с обходом они не открываются. Если приложение фильтрует AdGuard, его HTTPS открывает AdGuard от своего имени: тогда исключите приложение и в AdGuard.</div></div>
+    <div class="chips" id="zexChips"></div>
+    <div class="mt8"><button class="btn small" id="zexAdd">Добавить приложение</button></div>
+  </div>
 </div>
 
 <h2>Подбор стратегии</h2>
@@ -418,35 +469,6 @@ details.more > summary { color: var(--muted); }
   <div id="scRes" class="mt8"></div>
 </div>
 
-<details class="card more">
-  <summary>Дополнительно</summary>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">Обход для приложений телефона</div>
-      <div class="s">Обход и для приложений телефона, чей трафик идёт мимо VPN. VPN-клиенты не затрагиваются.</div></div>
-    <label class="sw"><input type="checkbox" data-key="ZAPRET_PHONE"><span></span></label>
-  </div>
-  <div class="row col" data-dep="ZAPRET_PHONE">
-    <div class="txt"><div class="t">Приложения мимо обхода</div>
-      <div class="s">Их трафик обход не трогает — например, банки, если с обходом они не открываются. Если приложение фильтрует AdGuard, его HTTPS открывает AdGuard от своего имени: тогда исключите приложение и в AdGuard.</div></div>
-    <div class="chips" id="zexChips"></div>
-    <div class="mt8"><button class="btn small" id="zexAdd">Добавить приложение</button></div>
-  </div>
-  <div class="row" data-dep="ZAPRET_ENABLE" data-depoff="ZAPRET_QUIC_FAKE">
-    <div class="txt"><div class="t">Без QUIC на раздаче</div>
-      <div class="s">Раздаче закрывается QUIC (HTTP/3): браузеры сразу идут по HTTPS, где работает обход. Только для трафика мимо VPN. Не действует, пока включено «QUIC раздачи — с подделкой» (если подделка не встала — в ядре нет connbytes — действует она).</div></div>
-    <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_BLOCK"><span></span></label>
-  </div>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">QUIC раздачи — с подделкой</div>
-      <div class="s">QUIC устройств раздачи не закрывается, а пробивается обходом: YouTube и Google Play на смартфоне раздачи идут по QUIC и быстрее перематывают. Главнее «Без QUIC на раздаче». Если на устройстве стоит свой AdGuard, он закрывает QUIC сам.</div></div>
-    <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_FAKE"><span></span></label>
-  </div>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">YouTube без кэшей оператора</div>
-      <div class="s">Блокирует серверы-кэши оператора, чтобы видео загружалось с серверов Google. Не включайте, если оператор отдаёт видео только с кэшей.</div></div>
-    <label class="sw"><input type="checkbox" data-key="YT_GGC_BLOCK"><span></span></label>
-  </div>
-</details>
 </section>
 
 <section class="tab" data-tab="net">
@@ -501,24 +523,6 @@ details.more > summary { color: var(--muted); }
   </div>
 </div>
 
-<h2>Приложения без QUIC</h2>
-<div class="card">
-  <div class="row">
-    <div class="txt"><div class="t">Клиенты YouTube и Google Play</div>
-      <div class="s">YouTube, YouTube Music, ReVanced, Morphe, NewPipe и др., а также Google Play — без QUIC, если установлены. По обычному HTTPS модуль может оборвать медленное видеосоединение и отбить молчащий сервер, по QUIC — нет (это при обходе блокировок для телефона и без VPN).</div></div>
-    <label class="sw"><input type="checkbox" data-key="QUIC_BLOCK_YT"><span></span></label>
-  </div>
-  <div class="row" data-dep="QUIC_BLOCK_YT">
-    <div class="txt"><div class="t">Подделка вместо закрытия</div>
-      <div class="s">QUIC клиентов YouTube и Google Play не закрывается, а пробивается обходом (как в zapret2): на YOTA так работает и быстрее перематывает. Только при включённом обходе; без обхода — закрытие, через VPN QUIC идёт в туннеле как есть. AdGuard закрывает QUIC сам — модуль пропускает QUIC YouTube и Play мимо него, и реклама в YouTube через AdGuard может вернуться.</div></div>
-    <label class="sw"><input type="checkbox" data-key="QUIC_YT_FAKE"><span></span></label>
-  </div>
-</div>
-<div class="card pad mt8">
-  <div class="muted" style="font-size:13px">Выбранным приложениям закрывается QUIC (UDP 443) — они идут по HTTPS. Помогает, если оператор режет QUIC.</div>
-  <div class="chips" id="quicChips"></div>
-  <div class="mt8"><button class="btn small" id="quicAdd">Добавить приложение</button></div>
-</div>
 
 <details class="card more">
   <summary>Дополнительно</summary>
@@ -556,16 +560,6 @@ details.more > summary { color: var(--muted); }
     <div class="txt"><div class="t">Meta: сервер DNS</div>
       <div class="s">Сервер с поддержкой ECS (Google — да, Cloudflare — нет).</div></div>
     <input type="text" data-key="DNS_META_UPSTREAMS" autocapitalize="off" autocorrect="off" spellcheck="false">
-  </div>
-  <div class="row">
-    <div class="txt"><div class="t">Адаптация TCP к качеству связи</div>
-      <div class="s">Раз в ~20 секунд проверяет связь и при потерях или большой задержке перенастраивает TCP.</div></div>
-    <label class="sw"><input type="checkbox" data-key="NET_PROFILE_ADAPTIVE"><span></span></label>
-  </div>
-  <div class="row">
-    <div class="txt"><div class="t">Состояние в описании модуля</div>
-      <div class="s">Показывать текущий режим в описании модуля в менеджере.</div></div>
-    <label class="sw"><input type="checkbox" data-key="STATUS_IN_DESCRIPTION"><span></span></label>
   </div>
 </details>
 </section>
@@ -679,6 +673,20 @@ details.more > summary { color: var(--muted); }
       <button class="btn small" id="metaBtn">Проверить</button>
     </div>
     <div id="metaRes" style="font-size:14px"></div>
+  </div>
+</div>
+
+<h2>Модуль</h2>
+<div class="card">
+  <div class="row">
+    <div class="txt"><div class="t">Адаптация TCP к качеству связи</div>
+      <div class="s">Раз в ~20 секунд проверяет связь и при потерях или большой задержке перенастраивает TCP.</div></div>
+    <label class="sw"><input type="checkbox" data-key="NET_PROFILE_ADAPTIVE"><span></span></label>
+  </div>
+  <div class="row">
+    <div class="txt"><div class="t">Состояние в описании модуля</div>
+      <div class="s">Показывать текущий режим в описании модуля в менеджере.</div></div>
+    <label class="sw"><input type="checkbox" data-key="STATUS_IN_DESCRIPTION"><span></span></label>
   </div>
 </div>
 
