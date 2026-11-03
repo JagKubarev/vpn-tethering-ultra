@@ -133,6 +133,14 @@ for _p in $(pgrep -f "nfqws.*--qnum=$Q " 2>/dev/null); do kill -9 "$_p" 2>/dev/n
 S_done=0; S_total=0; S_blocked=""; S_started=$(date +%H:%M:%S)
 st state=running stage="подготовка" msg=""
 
+# Сторож вскоре после волны Google (метка от прошлого сторожа моложе 15 мин):
+# не проверять и ничего не слать. В волну застревает почти всё видео, демон
+# звал бы сторожа каждые 3 мин, и каждый раз — залп запросов к закрытым сайтам
+if [ "$MODE" = check ] && [ -n "$(find "$OUT.wave" -maxdepth 0 -mmin -15 2>/dev/null)" ]; then
+    st state=done stage="готово" msg="недавно была волна Google — проверка отложена"
+    exit 0
+fi
+
 [ -n "$WAN" ] || { st state=error msg="модуль ещё не видел сеть оператора"; exit 1; }
 ip -4 addr show "$WAN" 2>/dev/null | grep -q "inet " || { st state=error msg="у $WAN нет адреса — сеть только что сменилась? Повторите через полминуты"; exit 1; }
 [ -x "$NQ" ] || { st state=error msg="нет nfqws"; exit 1; }
@@ -566,6 +574,23 @@ if [ "$MODE" = "check" ]; then
     nothing_opened() { tail -n 1 "$OUT.results" | awk -F'|' '{ n = 1; r = ($1 == 0 && $7 !~ /^nfqws: /) } END { exit !(n && r) }'; }
     # что не открылось у последнего прогона: "youtube.com:x28 ..." (для журнала)
     last_fail() { tail -n 1 "$OUT.results" | cut -d'|' -f7 | cut -c1-200; }
+    # Волна ТСПУ на Google: HTTPS ко всем его адресам молчит и без обхода, HTTP
+    # отвечает — стратегия ни при чём. 03.11 08:01 сторож в волну счёл её
+    # сломанной, подбор (Google ожил к концу) заменил рабочую стратегию YOTA и
+    # стёр её стратегию YouTube. Запросы сканера мимо AdGuard и основного
+    # обхода (выше), nfqws сканера между прогонами не запущен — напрямую.
+    # Волна — метка $OUT.wave: следующие 15 мин сторож не проверяет (в начале,
+    # до всех запросов), и выход
+    wave_google() {
+        _g443=$(curl -s -o /dev/null -m 5 --interface "$WAN" --capath "$CA" -w '%{http_code}' https://www.google.com/generate_204 2>/dev/null)
+        _g80=$(curl -s -o /dev/null -m 5 --interface "$WAN" -w '%{http_code}' http://www.google.com/generate_204 2>/dev/null)
+        [ "$_g443" = 000 ] && [ "$_g80" = 204 ] || return 0
+        touch "$OUT.wave"
+        event "автопроверка: Google по HTTPS молчит и без обхода, по HTTP отвечает — волна ТСПУ, стратегию не трогаю ($(last_fail))"
+        wd_last "волна Google, отложил"
+        st state=done stage="готово" msg="волна Google (HTTPS молчит и без обхода) — стратегию не трогаю"
+        exit 0
+    }
     # текущая — оба профиля (своя YouTube, если есть), с пометками @G/@Q
     CUR=$(sh "$MODDIR/service.sh" --zapret-strategy "${NETID%%"|"*}" "${NETID#*"|"}" full 2>/dev/null | \
         sed "s#@$ZDIR/tls_clienthello_www_google_com.bin#@G#g; s#@$ZDIR/quic_initial_www_google_com.bin#@Q#g")
@@ -588,6 +613,8 @@ if [ "$MODE" = "check" ]; then
         st state=done stage="готово" msg="нет связи — проверка отложена"
         exit 0
     fi
+    # сразу, а не после минуты и третьего прогона: в волну они — лишний залп
+    wave_google
     FAIL1=$(last_fail)
     st stage="перепроверка через минуту"
     sleep 60
@@ -603,19 +630,8 @@ if [ "$MODE" = "check" ]; then
         st state=done stage="готово" msg="нет связи — проверка отложена"
         exit 0
     fi
-    # Волна ТСПУ на Google: HTTPS ко всем его адресам молчит и без обхода, HTTP
-    # отвечает — стратегия ни при чём. 03.11 08:01 сторож в волну счёл её
-    # сломанной, подбор (Google ожил к концу) заменил рабочую стратегию YOTA и
-    # стёр её стратегию YouTube. Запросы сканера мимо AdGuard и основного
-    # обхода (выше), nfqws сканера между прогонами не запущен — напрямую
-    _g443=$(curl -s -o /dev/null -m 5 --interface "$WAN" --capath "$CA" -w '%{http_code}' https://www.google.com/generate_204 2>/dev/null)
-    _g80=$(curl -s -o /dev/null -m 5 --interface "$WAN" -w '%{http_code}' http://www.google.com/generate_204 2>/dev/null)
-    if [ "$_g443" = 000 ] && [ "$_g80" = 204 ]; then
-        event "автопроверка: Google по HTTPS молчит и без обхода, по HTTP отвечает — волна ТСПУ, стратегию не трогаю ($(last_fail))"
-        wd_last "волна Google, отложил"
-        st state=done stage="готово" msg="волна Google (HTTPS молчит и без обхода) — стратегию не трогаю"
-        exit 0
-    fi
+    # волна могла начаться за эту минуту
+    wave_google
     event "автопроверка: стратегия не открывает ($(last_fail)) — ищу замену"
     # прежние стратегии этой сети и сетей с тем же названием (YOTA = 25011 и
     # 25002), новые первыми, без повторов (только свои параметры: custom)
