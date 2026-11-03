@@ -267,12 +267,14 @@ yt_dead_add() {
     [ "$kill" = 1 ] && ss -K -tn dst "$dip" dport = :443 >/dev/null 2>&1
     grep -q -e "^$net " -e "^$n28 " "$YT_DEAD_FILE" 2>/dev/null && return 1
     [ "$now" -lt "$YT_DEAD_PAUSE" ] && return 1
-    # лавина (>=6 подсетей за минуту) — не мёртвые серверы, а сломанный
-    # обход или связь: отбив всё подряд, оставим плеер без серверов
+    # лавина (>=12 подсетей за минуту) — не мёртвые серверы, а сломанный
+    # обход или связь: отбив всё подряд, оставим плеер без серверов. Было 6:
+    # 03.11 19:34 (YOTA, шортсы) 6 настоящих мёртвых за минуту — пауза 5 мин,
+    # и плеер снова висел; ложные отбои и так снимает перепроверка за ~минуту
     keep=""
     for t in $YT_DEAD_ADDS; do [ $((now - t)) -lt 60 ] && keep="$keep $t"; done
     YT_DEAD_ADDS="$keep"
-    if [ "$(echo $YT_DEAD_ADDS | wc -w)" -ge 6 ]; then
+    if [ "$(echo $YT_DEAD_ADDS | wc -w)" -ge 12 ]; then
         YT_DEAD_PAUSE=$((now + 300))
         log "WARNING: YouTube: слишком много «мёртвых» видеосерверов подряд — похоже, сломан обход или связь; 5 мин новые не отбиваю"
         return 1
@@ -283,7 +285,11 @@ yt_dead_add() {
     # лимит — только для новой записи: /28 заменяет свои /32, записей не прибавит
     # (с /28 одиночных /32 копится больше — при полном списке стойка не закрывалась)
     nlist=$(awk 'END {print NR}' "$YT_DEAD_FILE" 2>/dev/null)
-    [ -z "$sib" ] && [ "${nlist:-0}" -ge "$YT_DEAD_MAX" ] && return 1
+    if [ -z "$sib" ] && [ "${nlist:-0}" -ge "$YT_DEAD_MAX" ]; then
+        # раньше — молча: плеер висел на неотбитом сервере, и в журнале пусто
+        [ $((now - YT_DEAD_FULL_LOG)) -ge 600 ] && { YT_DEAD_FULL_LOG=$now; log "WARNING: YouTube: список отбоя полон ($YT_DEAD_MAX) — $dip не отбиваю"; }
+        return 1
+    fi
     if [ -n "$sib" ]; then
         awk -v p="${dip%.*}." -v b="$b" '{ a = $1; if (index(a, p) == 1 && a ~ /\/32$/) { sub(/\/32$/, "", a); l = substr(a, length(p) + 1); if (l - l % 16 == b) next } print }' "$YT_DEAD_FILE" > "$YT_DEAD_FILE.tmp" && mv -f "$YT_DEAD_FILE.tmp" "$YT_DEAD_FILE"
         echo "$n28 $((now + YT_DEAD_TTL)) $sib$dip" >> "$YT_DEAD_FILE"
@@ -356,7 +362,7 @@ yt_dead_scan() {
                 # перепроверка мимо VPN (ревью 25.10)
                 if (wip == "" || rdst != wip || src == wip) next
                 # без метки бывает только «мёртв» — остальное не перебираем
-                if (bo < 600 || pr < 1 || br > 60 * pr) next
+                if (bo < 600 || pr < 1 || br > 80 * pr || pr > 32 || bo > 65536) next
                 split(dst, o, "."); n = ((o[1] * 256 + o[2]) * 256 + o[3]) * 256 + o[4]; g = 0
                 for (j = 1; j <= ng; j++) if (n >= gs[j] && n <= ge[j]) { g = 1; break }
                 if (!g) next
@@ -369,17 +375,24 @@ yt_dead_scan() {
             # мало, и safter ни байта нового -> кандидат на проверку (каждый
             # раз: повторы отсекают отбой и «живой» на 5 мин у демона)
             # *.4 — фронтенды www.youtube/youtubei (их не трогает и ytslow)
-            if ((yt || gv) && bo >= 600 && br > 60 * pr && br <= smax) {
+            if ((yt || gv) && bo >= 600 && br > 80 * pr && br <= smax) {
                 if (dst ~ /\.4$/) next
                 tb = (k in sbr && sbr[k] == br) ? stb[k] : now
                 if (now - tb >= safter) print "SIL", dst, tag
                 ns[k] = t0 " silent " d " " br " " tb
                 next
             }
-            # от сервера — только пустые пакеты (SYN-ACK 60 + ACK 52 байта): ни
-            # одного байта данных. Порог по объёму путал с мёртвыми простаивающие
+            # от сервера — только пустые пакеты: ни одного байта данных. Пустой
+            # пакет — до 80 байт (IP 20 + TCP до 60: метки времени, SACK; SACK
+            # бывает из-за нарезки обходом). Было 60: 03.11 18:58 сервер с
+            # подтверждениями по ~63 байта (TLS-ответа нет) ушёл в «молчит после
+            # запроса» — 10 с и проверка вместо 3 с, крутилка на шортсе ~14 с.
+            # Порог по общему объёму (а не на пакет) путал с мёртвыми простаивающие
             # соединения с коротким ответом (возобновлённая TLS-сессия)
-            if (bo < 600 || pr < 1 || br > 60 * pr) next
+            # и не выгрузка: при ней сервер тоже шлёт одни ACK (Drive, Фото, загрузка
+            # в YouTube — облачное ревью PR #22). У мёртвого — ClientHello с повторами
+            # (до ~27 КБ) и пара десятков пакетов от сервера, у выгрузки за 3 с — больше
+            if (bo < 600 || pr < 1 || br > 80 * pr || pr > 32 || bo > 65536) next
             kind = (pr <= 1) ? "stuck" : "dead"
             # Play (gvt1.com): имя YOTA не режет (замер 25.10), так что ClientHello
             # без подтверждения — мёртвый сервер/адрес, а не DPI. 26.10 Play висел
@@ -512,15 +525,24 @@ yt_dead_recheck() {
     # только добавленные больше минуты назад (свежие проверять рано)
     awk -v now="$now" -v ttl="$YT_DEAD_TTL" '$2 - ttl + 60 <= now' "$YT_DEAD_FILE" > "$YT_RECHECK_FILE.in" 2>/dev/null
     [ -s "$YT_RECHECK_FILE.in" ] || return 0
+    # записи — по 4 одновременно: мёртвый адрес занимает весь тайм-аут (3 с),
+    # и с YT_DEAD_MAX=64 круг по одной тянулся до ~3 мин, ожившие ждали
+    # снятия отбоя столько же; адреса внутри записи — по очереди, как раньше
     (
+        : > "$YT_RECHECK_FILE.tmp"
+        n=0
         while read -r net _ ips; do
-            res=dead
-            for ip in $(echo "$ips" | tr ',' ' '); do
-                case "$ip" in *[!0-9.]*|'') continue ;; esac
-                [ "$(yt_probe_ip "$ip")" = ok ] && { res=ok; break; }
-            done
-            echo "$net $res"
-        done < "$YT_RECHECK_FILE.in" > "$YT_RECHECK_FILE.tmp"
+            (
+                res=dead
+                for ip in $(echo "$ips" | tr ',' ' '); do
+                    case "$ip" in *[!0-9.]*|'') continue ;; esac
+                    [ "$(yt_probe_ip "$ip")" = ok ] && { res=ok; break; }
+                done
+                echo "$net $res" >> "$YT_RECHECK_FILE.tmp"
+            ) </dev/null &
+            n=$((n + 1)); [ $((n % 4)) -eq 0 ] && wait
+        done < "$YT_RECHECK_FILE.in"
+        wait
         mv -f "$YT_RECHECK_FILE.tmp" "$YT_RECHECK_FILE.done"
     ) </dev/null >/dev/null 2>&1 &
     YT_RECHECK_PID=$!
