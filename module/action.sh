@@ -125,6 +125,7 @@ show_status() {
                     if [ "$mode" = "vpn" ]; then dline="DoH через VPN"
                     else dline="$up, зашифрован"; fi ;;
                 "dnsproxy cache") dline="DNS VPN + кэш" ;;
+                "dnsproxy geo") dline="$up через VPN, зашифрован" ;;
                 "DNAT (dnsproxy упал)") dline="обычный (dnsproxy не запустился)" ;;
                 DNAT*)
                     if [ "$mode" = "vpn" ]; then dline="через VPN (${dns#DNAT })"

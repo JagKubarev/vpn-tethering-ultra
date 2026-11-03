@@ -222,6 +222,7 @@ details.kvbox > summary { padding: 12px 16px; min-height: 46px; font-size: 14px;
 details.kvbox .kv { border-top: 0; margin: 0; padding: 0 16px 16px; }
 details.more > summary { color: var(--muted); }
 .hint { color: var(--muted); font-size: 13px; margin: 8px 4px 0; }
+.tipbox { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--accent); border-radius: 6px; background: var(--input); color: var(--text); font-size: 13px; line-height: 1.45; }
 .offnote { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 10px 16px; font-size: 13.5px; color: var(--amber-text); background: var(--input); cursor: pointer; }
 .offnote::before { content: "!"; flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--amber); color: var(--card); font: 700 12px/18px system-ui, sans-serif; text-align: center; }
 .offnote[hidden] { display: none; }
@@ -266,7 +267,7 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row">
     <div class="txt"><div class="t">Скрытие раздачи</div>
-      <div class="s">Скрывает раздачу интернета от оператора.</div></div>
+      <div class="s">Оператор не видит, что телефон раздаёт интернет.</div></div>
     <label class="sw"><input type="checkbox" data-key="TETHER_STEALTH"><span></span></label>
   </div>
   <div class="row">
@@ -315,7 +316,7 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row col" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t" id="zStratTitle">Стратегия</div>
-      <div class="s" id="zStratSub">Метод обхода DPI.</div></div>
+      <div class="s" id="zStratSub">Способ обхода блокировок.</div></div>
     <select data-key="ZAPRET_STRATEGY">
       <option value="fakeddisorder">1 · fakeddisorder — лучшая в среднем</option>
       <option value="md5sig">2 · md5sig, разрез midsld</option>
@@ -343,7 +344,7 @@ details.more > summary { color: var(--muted); }
   <div class="row col" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Какие сайты обходить</div></div>
     <select data-key="ZAPRET_MODE">
-      <option value="list">Из списка и найденные сами</option>
+      <option value="list">Из списков и найденные автоматически</option>
       <option value="all">Все сайты</option>
     </select>
   </div>
@@ -372,7 +373,7 @@ details.more > summary { color: var(--muted); }
     <summary>Встроенный список и автосписок</summary>
     <div class="row col">
       <div class="txt"><div class="t">Автосписок: <span id="zautoN">0</span></div>
-        <div class="s">Сайты, добавленные сами после сбоев соединения, — с датой и причиной. ✕ — убрать из списка.</div></div>
+        <div class="s">Сайты, которые модуль добавил сам после сбоев соединения, — с датой и причиной. ✕ — убрать из списка.</div></div>
       <div id="zauto" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:8px;padding:2px 10px"></div>
       <div class="row" style="padding:10px 0 0;border-top:0">
         <div class="txt"><div class="s">Порог добавления, сбоев за минуту</div></div>
@@ -400,8 +401,59 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Переподключение медленного видео</div>
-      <div class="s">Медленное видеосоединение YouTube обрывается, и плеер переходит на быстрый сервер. Если быстрых нет — пауза.</div></div>
+      <div class="s">Медленное видеосоединение YouTube обрывается, и плеер переходит на быстрый сервер. Если быстрых серверов нет, обрывы на время прекращаются.</div></div>
     <label class="sw"><input type="checkbox" data-key="YT_SLOW_RETRY"><span></span></label>
+  </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">YouTube без кэшей оператора</div>
+      <div class="s">Блокирует серверы-кэши оператора, чтобы видео загружалось с серверов Google. Не включайте, если оператор отдаёт видео только с кэшей.</div></div>
+    <label class="sw"><input type="checkbox" data-key="YT_GGC_BLOCK"><span></span></label>
+  </div>
+  <div class="row">
+    <div class="txt"><div class="t">QUIC у YouTube и Google Play</div>
+      <div class="s">QUIC приложений YouTube (YouTube Music, ReVanced, Morphe, NewPipe и др.) и Google Play закрывается — они идут по HTTPS, где модуль пропускает неотвечающие серверы и переподключает медленное видео. С «Подделкой» ниже QUIC не закрывается, а пробивается обходом. Только без VPN.</div></div>
+    <label class="sw"><input type="checkbox" data-key="QUIC_BLOCK_YT"><span></span></label>
+  </div>
+  <div class="row" data-dep="QUIC_BLOCK_YT">
+    <div class="txt"><div class="t">Подделка вместо закрытия</div>
+      <div class="s">QUIC этих приложений пробивается обходом: на YOTA видео быстрее перематывается. Но по QUIC не работают пропуск серверов и переподключение медленного видео. Нужен включённый обход; через VPN QUIC идёт в туннеле как есть. AdGuard закрывает QUIC сам — модуль пускает QUIC этих приложений мимо него, поэтому реклама в YouTube через AdGuard может вернуться.</div></div>
+    <label class="sw"><input type="checkbox" data-key="QUIC_YT_FAKE"><span></span></label>
+  </div>
+</div>
+
+<h2>QUIC</h2>
+<div class="card">
+  <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
+  <div class="row" data-dep="ZAPRET_ENABLE" data-depoff="ZAPRET_QUIC_FAKE">
+    <div class="txt"><div class="t">Без QUIC на раздаче</div>
+      <div class="s">QUIC (HTTP/3) устройств раздачи закрывается — браузеры сразу идут по HTTPS, где работает обход. Только без VPN. Не действует, пока включена «Подделка QUIC на раздаче» (если подделка не встала — в ядре нет connbytes — действует закрытие).</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_BLOCK"><span></span></label>
+  </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Подделка QUIC на раздаче</div>
+      <div class="s">QUIC устройств раздачи не закрывается, а пробивается обходом: YouTube и Google Play на смартфоне раздачи быстрее перематывают. Свой AdGuard на устройстве закрывает QUIC сам.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_FAKE"><span></span></label>
+  </div>
+</div>
+<div class="card pad mt8">
+  <div class="muted" style="font-size:13px">Приложения телефона без QUIC (UDP 443) — идут по HTTPS. Помогает, если оператор режет QUIC.</div>
+  <div class="chips" id="quicChips"></div>
+  <div class="mt8"><button class="btn small" id="quicAdd">Добавить приложение</button></div>
+</div>
+
+<h2>Обход для приложений</h2>
+<div class="card">
+  <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Приложения телефона</div>
+      <div class="s">Обход блокировок и для приложений самого телефона, чей трафик идёт мимо VPN. Выключено — только для раздачи. VPN-клиенты не затрагиваются.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_PHONE"><span></span></label>
+  </div>
+  <div class="row col" data-dep="ZAPRET_PHONE">
+    <div class="txt"><div class="t">Исключения</div>
+      <div class="s">Приложения без обхода — например, банки, если с ним не открываются. Если приложение фильтрует AdGuard, исключите его и в AdGuard: его HTTPS открывает AdGuard от своего имени.</div></div>
+    <div class="chips" id="zexChips"></div>
+    <div class="mt8"><button class="btn small" id="zexAdd">Добавить приложение</button></div>
   </div>
 </div>
 
@@ -418,35 +470,6 @@ details.more > summary { color: var(--muted); }
   <div id="scRes" class="mt8"></div>
 </div>
 
-<details class="card more">
-  <summary>Дополнительно</summary>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">Обход для приложений телефона</div>
-      <div class="s">Обход и для приложений телефона, чей трафик идёт мимо VPN. VPN-клиенты не затрагиваются.</div></div>
-    <label class="sw"><input type="checkbox" data-key="ZAPRET_PHONE"><span></span></label>
-  </div>
-  <div class="row col" data-dep="ZAPRET_PHONE">
-    <div class="txt"><div class="t">Приложения мимо обхода</div>
-      <div class="s">Их трафик обход не трогает — например, банки, если с обходом они не открываются. Если приложение фильтрует AdGuard, его HTTPS открывает AdGuard от своего имени: тогда исключите приложение и в AdGuard.</div></div>
-    <div class="chips" id="zexChips"></div>
-    <div class="mt8"><button class="btn small" id="zexAdd">Добавить приложение</button></div>
-  </div>
-  <div class="row" data-dep="ZAPRET_ENABLE" data-depoff="ZAPRET_QUIC_FAKE">
-    <div class="txt"><div class="t">Без QUIC на раздаче</div>
-      <div class="s">Раздаче закрывается QUIC (HTTP/3): браузеры сразу идут по HTTPS, где работает обход. Только для трафика мимо VPN. Не действует, пока включено «QUIC раздачи — с подделкой» (если подделка не встала — в ядре нет connbytes — действует она).</div></div>
-    <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_BLOCK"><span></span></label>
-  </div>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">QUIC раздачи — с подделкой</div>
-      <div class="s">QUIC устройств раздачи не закрывается, а пробивается обходом: YouTube и Google Play на смартфоне раздачи идут по QUIC и быстрее перематывают. Главнее «Без QUIC на раздаче». Если на устройстве стоит свой AdGuard, он закрывает QUIC сам.</div></div>
-    <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_FAKE"><span></span></label>
-  </div>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">YouTube без кэшей оператора</div>
-      <div class="s">Блокирует серверы-кэши оператора, чтобы видео загружалось с серверов Google. Не включайте, если оператор отдаёт видео только с кэшей.</div></div>
-    <label class="sw"><input type="checkbox" data-key="YT_GGC_BLOCK"><span></span></label>
-  </div>
-</details>
 </section>
 
 <section class="tab" data-tab="net">
@@ -455,7 +478,7 @@ details.more > summary { color: var(--muted); }
   <div class="offnote" data-offnote="DNSPROXY_ENABLE" role="button">Зашифрованный DNS выключен — включается на Главной.</div>
   <div class="row col" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Сервер DNS (DoH)</div>
-      <div class="s">wlrus, not-a-dns, geohide, comss и commonnet открывают и сервисы с блокировкой по стране (ChatGPT, Gemini, Claude; Gemini через comss и commonnet — нет). Google, Cloudflare, AdGuard, Quad9, DNS4EU и LibreDNS отдают настоящие адреса: с ними эти сервисы пишут «недоступно в регионе» — это выбор ради приватности, а не обхода. Если сервер не отвечает — по порядку «Запасные DoH-серверы» из «Дополнительно».</div></div>
+      <div class="s">wlrus, not-a-dns, geohide, comss и commonnet открывают и сервисы с блокировкой по стране (ChatGPT, Gemini, Claude; Gemini через comss и commonnet — нет). Google, Cloudflare, AdGuard, Quad9, DNS4EU и LibreDNS дают настоящие адреса — это для приватности: сервисы с блокировкой по стране с ними не откроются. Не отвечает — по порядку «Запасные DoH-серверы» из «Дополнительно».</div></div>
     <select id="upSelect">
       <option value="https://dns.wlrus.cfd/dns-query">wlrus.cfd</option>
       <option value="https://not-a-dns.quic.best/dns-query">not-a-dns.quic.best</option>
@@ -484,6 +507,17 @@ details.more > summary { color: var(--muted); }
       <div class="s">Зашифрованный DNS для устройств раздачи в режиме «напрямую».</div></div>
     <label class="sw"><input type="checkbox" id="directDoh"><span></span></label>
   </div>
+  <div class="row col" data-dep="DNSPROXY_ENABLE">
+    <div class="txt"><div class="t">DNS раздачи при VPN</div>
+      <div class="s">DNS для устройств раздачи, когда VPN включён.</div>
+      <div class="tipbox"><b>Что выбрать.</b> «DNS VPN-клиента» — если VPN-клиент выбирает путь по доменам (AmneziaVPN по сайтам, fake-ip в sing-box и NekoBox). «Как без VPN» — если важно, чтобы ChatGPT, Gemini и другие сервисы с блокировкой по стране открывались сразу после выключения VPN, без сброса кэша DNS; выбор пути по доменам в VPN-клиенте для раздачи при этом не работает.</div></div>
+    <select data-key="DNS_VPN">
+      <option value="dnat">DNS VPN-клиента</option>
+      <option value="cache">DNS VPN-клиента + кэш</option>
+      <option value="doh">DoH через туннель (Google, Cloudflare)</option>
+      <option value="geo">Как без VPN (гео-DoH через туннель)</option>
+    </select>
+  </div>
   <div class="row" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Instagram и Facebook без VPN</div>
       <div class="s">Instagram, Facebook и Threads получают европейские адреса (ECS) и открываются без VPN вместе с обходом блокировок.</div></div>
@@ -491,36 +525,9 @@ details.more > summary { color: var(--muted); }
   </div>
 </div>
 
-<h2>Приложения без QUIC</h2>
-<div class="card">
-  <div class="row">
-    <div class="txt"><div class="t">Клиенты YouTube и Google Play</div>
-      <div class="s">YouTube, YouTube Music, ReVanced, Morphe, NewPipe и др., а также Google Play — без QUIC, если установлены. По обычному HTTPS модуль может оборвать медленное видеосоединение и отбить молчащий сервер, по QUIC — нет (это при обходе блокировок для телефона и без VPN).</div></div>
-    <label class="sw"><input type="checkbox" data-key="QUIC_BLOCK_YT"><span></span></label>
-  </div>
-  <div class="row" data-dep="QUIC_BLOCK_YT">
-    <div class="txt"><div class="t">Подделка вместо закрытия</div>
-      <div class="s">QUIC клиентов YouTube и Google Play не закрывается, а пробивается обходом (как в zapret2): на YOTA так работает и быстрее перематывает. Только при включённом обходе; без обхода — закрытие, через VPN QUIC идёт в туннеле как есть. AdGuard закрывает QUIC сам — модуль пропускает QUIC YouTube и Play мимо него, и реклама в YouTube через AdGuard может вернуться.</div></div>
-    <label class="sw"><input type="checkbox" data-key="QUIC_YT_FAKE"><span></span></label>
-  </div>
-</div>
-<div class="card pad mt8">
-  <div class="muted" style="font-size:13px">Выбранным приложениям закрывается QUIC (UDP 443) — они идут по HTTPS. Помогает, если оператор режет QUIC.</div>
-  <div class="chips" id="quicChips"></div>
-  <div class="mt8"><button class="btn small" id="quicAdd">Добавить приложение</button></div>
-</div>
 
 <details class="card more">
   <summary>Дополнительно</summary>
-  <div class="row col" data-dep="DNSPROXY_ENABLE">
-    <div class="txt"><div class="t">DNS раздачи при VPN</div>
-      <div class="s">Источник DNS для устройств раздачи при включённом VPN.</div></div>
-    <select data-key="DNS_VPN">
-      <option value="dnat">DNS VPN-клиента</option>
-      <option value="cache">DNS VPN-клиента + кэш</option>
-      <option value="doh">DoH через туннель (Google, Cloudflare)</option>
-    </select>
-  </div>
   <div class="row col">
     <div class="txt"><div class="t">Запасные DoH-серверы</div>
       <div class="s">По порядку, если основной не отвечает. Google и Cloudflare сюда не добавляйте: они не обходят блокировку по стране, и ИИ-сервисы напишут «недоступно в вашем регионе».</div></div>
@@ -528,7 +535,7 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row col">
     <div class="txt"><div class="t">Серверы DoH через VPN</div>
-      <div class="s">Серверы для режима «DoH через туннель».</div></div>
+      <div class="s">Для режима «DoH через туннель».</div></div>
     <input type="text" data-key="DNS_VPN_UPSTREAMS" autocapitalize="off" autocorrect="off" spellcheck="false">
   </div>
   <div class="row col">
@@ -556,16 +563,6 @@ details.more > summary { color: var(--muted); }
       <div class="s">Сервер с поддержкой ECS (Google — да, Cloudflare — нет).</div></div>
     <input type="text" data-key="DNS_META_UPSTREAMS" autocapitalize="off" autocorrect="off" spellcheck="false">
   </div>
-  <div class="row">
-    <div class="txt"><div class="t">Адаптация TCP к качеству связи</div>
-      <div class="s">Раз в ~20 секунд проверяет связь и при потерях или большой задержке перенастраивает TCP.</div></div>
-    <label class="sw"><input type="checkbox" data-key="NET_PROFILE_ADAPTIVE"><span></span></label>
-  </div>
-  <div class="row">
-    <div class="txt"><div class="t">Состояние в описании модуля</div>
-      <div class="s">Показывать текущий режим в описании модуля в менеджере.</div></div>
-    <label class="sw"><input type="checkbox" data-key="STATUS_IN_DESCRIPTION"><span></span></label>
-  </div>
 </details>
 </section>
 
@@ -579,6 +576,20 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row" data-dep="WARP_ENABLE" style="gap:10px"><span class="dot" id="warpDot"></span>
     <div class="txt"><div class="t" id="warpTitle">—</div><div class="s" id="warpSub"></div><div class="s" id="warpStats" hidden></div></div></div>
+</div>
+
+<h2>Для кого</h2>
+<div class="card">
+  <div class="row" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Для самого телефона</div>
+      <div class="s">Выбранное ниже идёт через WARP у приложений телефона.</div></div>
+    <label class="sw"><input type="checkbox" data-key="WARP_PHONE"><span></span></label>
+  </div>
+  <div class="row" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Для раздачи</div>
+      <div class="s">Выбранное ниже идёт через WARP у устройств на раздаче. Выключено — раздача ходит без WARP.</div></div>
+    <label class="sw"><input type="checkbox" data-key="WARP_TETHER"><span></span></label>
+  </div>
 </div>
 
 <h2>Что идёт через WARP</h2>
@@ -603,11 +614,6 @@ details.more > summary { color: var(--muted); }
       <div class="s">Весь трафик выбранных приложений телефона; пока WARP не поднят — напрямую. Если приложение фильтрует AdGuard, его TCP (в том числе HTTPS) открывает AdGuard от своего имени, и оно идёт мимо WARP (проверено), а UDP и QUIC — через WARP. Чтобы шло целиком, исключите приложение в AdGuard. Клиенты Telegram добавлять не нужно — их берёт переключатель «Telegram».</div></div>
     <div class="chips" id="warpChips"></div>
     <div class="mt8"><button class="btn small" id="warpAdd">Добавить приложение</button></div>
-  </div>
-  <div class="row" data-dep="WARP_ENABLE">
-    <div class="txt"><div class="t">Для самого телефона</div>
-      <div class="s">Telegram, Google и сайты идут через WARP и у приложений телефона, а не только у раздачи.</div></div>
-    <label class="sw"><input type="checkbox" data-key="WARP_PHONE"><span></span></label>
   </div>
 </div>
 
@@ -673,6 +679,20 @@ details.more > summary { color: var(--muted); }
       <button class="btn small" id="metaBtn">Проверить</button>
     </div>
     <div id="metaRes" style="font-size:14px"></div>
+  </div>
+</div>
+
+<h2>Модуль</h2>
+<div class="card">
+  <div class="row">
+    <div class="txt"><div class="t">Адаптация TCP к качеству связи</div>
+      <div class="s">Раз в ~20 секунд проверяет связь и при потерях или большой задержке перенастраивает TCP.</div></div>
+    <label class="sw"><input type="checkbox" data-key="NET_PROFILE_ADAPTIVE"><span></span></label>
+  </div>
+  <div class="row">
+    <div class="txt"><div class="t">Состояние в описании модуля</div>
+      <div class="s">Текущий режим — в описании модуля в менеджере (KernelSU, Magisk).</div></div>
+    <label class="sw"><input type="checkbox" data-key="STATUS_IN_DESCRIPTION"><span></span></label>
   </div>
 </div>
 
@@ -871,6 +891,7 @@ function renderStatus(s) {
     else if (ds === 'dnsproxy doh' && s.dns_alt === '1' && s.mode !== 'vpn') { t = up + ' (запасной), зашифрован. Основной не отвечает'; d = 'amber'; }
     else if (ds === 'dnsproxy doh') t = s.mode === 'vpn' ? 'DoH через VPN' : up + ', зашифрован';
     else if (ds === 'dnsproxy cache') t = 'DNS VPN + кэш';
+    else if (ds === 'dnsproxy geo') t = up + ' через VPN, зашифрован';
     else if (ds === 'DNAT (dnsproxy упал)') { t = 'обычный (dnsproxy не запустился)'; d = 'red'; }
     else if (ds.indexOf('DNAT') === 0) { t = (s.mode === 'vpn' ? 'через VPN ' : 'обычный ') + '(' + esc(ds.slice(5)) + ')'; d = s.mode === 'vpn' ? 'green' : ''; }
     if (t) h += kvRow('DNS раздачи', t, d);
@@ -956,7 +977,7 @@ const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAM
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE','ZAPRET_EXCL_APPS',
   'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK','YT_DEAD_FAILFAST','ZAPRET_WATCHDOG','ZAPRET_WATCHDOG_MIN',
   'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','YT_SLOW_RETRY','ZAPRET_AUTO_FAIL',
-  'WARP_ENABLE','WARP_CONF','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE'];   // = CONF_KEYS в service.sh
+  'WARP_ENABLE','WARP_CONF','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER'];   // = CONF_KEYS в service.sh
 // интервал в минутах человеческим языком: 15 -> «15 минут», 180 -> «3 часа»
 function fmtMin(v, def) {
   const m = +v || def;
@@ -1198,7 +1219,7 @@ $('#warpAdd').addEventListener('click', () => { SHEET_KEY = 'WARP_APPS'; $('#qui
 $('#zexAdd').addEventListener('click', () => { SHEET_KEY = 'ZAPRET_EXCL_APPS'; $('#quicAdd').click(); });
 $('#quicAdd').addEventListener('click', async (e) => {
   if (e.isTrusted) SHEET_KEY = 'QUIC_BLOCK_APPS';
-  $('#sheetTitle').textContent = { WARP_APPS: 'Приложения через WARP', ZAPRET_EXCL_APPS: 'Приложения мимо обхода' }[SHEET_KEY] || 'Приложения без QUIC';
+  $('#sheetTitle').textContent = { WARP_APPS: 'Приложения через WARP', ZAPRET_EXCL_APPS: 'Исключения из обхода' }[SHEET_KEY] || 'Приложения без QUIC';
   $('#appSearch').value = ''; $('#appList').innerHTML = '<div class="empty" style="padding:0 16px">Загружаю список…</div>';
   openSheet(true);
   await loadApps(); renderAppList(); renderChips();
@@ -2023,7 +2044,7 @@ function mockExec(cmd) {
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=предпросмотр\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
     '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nwarp=up\nwarp_conf=warp-2\nwarp_note=\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.wlrus.cfd/dns-query\nD DNS_FALLBACKS=https://not-a-dns.quic.best/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.commonnet.work/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\n' +
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.wlrus.cfd/dns-query\nD DNS_FALLBACKS=https://not-a-dns.quic.best/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.commonnet.work/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
     Object.keys(M.usr).map((k) => 'U ' + k + '=' + M.usr[k] + '\n').join('') };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +

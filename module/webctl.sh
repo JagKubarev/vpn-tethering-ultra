@@ -489,8 +489,9 @@ case "$1" in
             case "$d" in ''|*[!a-z0-9.-]*|*..*|.*|*.|-*) echo "ERR неверный адрес: $d"; exit 1 ;; *.*) ;; *) echo "ERR неверный адрес: $d"; exit 1 ;; esac
             sites="$sites $d"
         done
-        pid=$(cat "$ZSCAN.pid" 2>/dev/null)
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "ERR подбор уже идёт"; exit 1; fi
+        # zscan_busy — с проверкой cmdline: pid от убитого (kill -9, OOM) scan.sh
+        # мог достаться чужому процессу — «подбор идёт» до перезагрузки (ревью PR #20)
+        if zscan_busy; then echo "ERR подбор уже идёт"; exit 1; fi
         rm -f "$ZSCAN.status" "$ZSCAN.results"
         # отдельная сессия: страница может закрыться, подбор продолжится
         setsid sh "$MODDIR/zapret/scan.sh" "$mode" "${sites# }" </dev/null >/dev/null 2>&1 &
@@ -500,13 +501,12 @@ case "$1" in
         while [ $i -lt 30 ] && ! { [ -s "$ZSCAN.pid" ] && [ -s "$ZSCAN.status" ]; }; do sleep 0.1; i=$((i + 1)); done
         echo "OK" ;;
     zscan-stop)
-        pid=$(cat "$ZSCAN.pid" 2>/dev/null)
-        [ -n "$pid" ] && kill "$pid" 2>/dev/null
+        # только свой scan.sh: TERM чужому процессу с тем же pid — нет
+        zscan_busy && kill "$(cat "$ZSCAN.pid" 2>/dev/null)" 2>/dev/null
         echo "OK" ;;
     zscan-status)
         cat "$ZSCAN.status" 2>/dev/null
-        pid=$(cat "$ZSCAN.pid" 2>/dev/null)
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "alive=1"; else echo "alive=0"; fi ;;
+        if zscan_busy; then echo "alive=1"; else echo "alive=0"; fi ;;
     zscan-results)
         cat "$ZSCAN.results" 2>/dev/null ;;
 
@@ -640,7 +640,8 @@ case "$1" in
     znet-set)
         st="$2"; a="$3"; yt="$5"
         # WebUI зовёт без 5-го аргумента — своя стратегия YouTube сети
-        # остаётся прежней (раньше молча стиралась); подбор передаёт его всегда
+        # остаётся прежней (раньше молча стиралась); подбор передаёт его, только
+        # если YouTube в прогоне мерили (иначе тоже без него)
         keep_yt=0; [ $# -lt 5 ] && keep_yt=1
         note=$(printf '%s' "$4" | tr -d '\r\n|' | cut -c1-120)
         [ -z "$yt" ] || sh "$MODDIR/service.sh" --check ZAPRET_ARGS "$yt" 2>/dev/null || { echo "ERR недопустимые параметры YouTube"; exit 1; }

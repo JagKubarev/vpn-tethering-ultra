@@ -499,6 +499,11 @@ apply_dns_mode() {
         case "$DNS_VPN" in
             cache) want="cache"; ups="$dns4:53" ;;
             doh)   want="doh";   ups="$DNS_VPN_UPSTREAMS" ;;
+            # гео-DoH как без VPN, через туннель: клиенты получают те же
+            # адреса (прокси), что и без VPN, — после выключения VPN в их кэше
+            # нет настоящих адресов ChatGPT/Gemini («недоступно в регионе»).
+            # Маршрутизация VPN-клиента по доменам для раздачи — не работает
+            geo)   want="geo";   ups="$DNS_UPSTREAMS" ;;
         esac
         if [ -n "$want" ] && ! root_routed_via_tun; then
             log "WARNING: трафик root идёт мимо $TUN_NAME (per-app VPN?) — DNS_VPN=$DNS_VPN выключен, DNAT в DNS VPN"
@@ -773,7 +778,8 @@ dns_operator_dead() {
         # нет в кэше или из кэша молчат: адреса могли смениться при том же WAN
         # (другая точка на wlan0, переподключение мобильной) — старый адрес
         # роутера молчал бы, и при живом операторе откат не делался бы
-        s=$(dumpsys connectivity 2>/dev/null | grep -oE "InterfaceName: [^ ]+|DnsAddresses: \[[^]]*\]" | \
+        # с таймаутом, как в get_vpn_dns: dumpsys мог повесить цикл (ревью PR #19)
+        s=$($TIMEOUT_CMD sh -c "dumpsys connectivity 2>/dev/null" | grep -oE "InterfaceName: [^ ]+|DnsAddresses: \[[^]]*\]" | \
             awk -v w="$w" '$0 == "InterfaceName: " w {f = 1; next} f && /^DnsAddresses/ {print; exit} /^InterfaceName/ {f = 0}' | \
             grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -2 | tr '\n' ' ')
         if [ -z "$s" ]; then DNS_OP_CACHE=""; DNS_PROBE_LAST_MS="$ms"; return 1; fi
