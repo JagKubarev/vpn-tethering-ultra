@@ -136,6 +136,10 @@ detect_tun_name() {
             # «VPN ON», а раздача через оператора с реальным IP
             wwan*|r_rmnet*|rev_rmnet*|epdg*|stnet*|aware*|veth*|vlan*|docker*|lxc*|virbr*|macvlan*|ipvlan*)
                 continue ;;
+            # OnePlus на Android 17: vgate0 с частным адресом. Взятый за tun,
+            # давал «поднят VPN» без VPN — WARP снимался через секунды
+            vgate*)
+                continue ;;
         esac
         
         if $ip addr show "$iface" 2>/dev/null | grep -q "inet "; then
