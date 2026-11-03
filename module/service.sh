@@ -599,6 +599,9 @@
 #   ZSKIP без дублей. DoH: DNS4EU, LibreDNS, dns_primary_alive --no-alpn.
 #   WebUI: экспорт/импорт настроек, настройки по смыслу (YouTube, QUIC, «Обход
 #   для приложений», WARP «Для кого»), подсказка «Что выбрать» у DNS при VPN.
+# v3.22.1 — DNS_UPSTREAMS по умолчанию not-a-dns, Wlrus — первым в DNS_FALLBACKS:
+#   Wlrus на github.com отвечал NOERROR без ответов, dnsproxy это ошибкой не
+#   считает и на запасные не уходит — GitHub «не найден».
 # ============================================================================
 # ============================================================================
 
@@ -1457,7 +1460,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.22.0 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.22.1 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное

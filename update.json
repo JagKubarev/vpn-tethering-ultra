@@ -1,6 +1,6 @@
 {
-  "version": "v3.22.0",
-  "versionCode": 32200,
-  "zipUrl": "https://github.com/JagKubarev/vpn-tethering-ultra/releases/download/v3.22.0/VPN_Tethering_Ultra_v3.22.0.zip",
+  "version": "v3.22.1",
+  "versionCode": 32201,
+  "zipUrl": "https://github.com/JagKubarev/vpn-tethering-ultra/releases/download/v3.22.1/VPN_Tethering_Ultra_v3.22.1.zip",
   "changelog": "https://raw.githubusercontent.com/JagKubarev/vpn-tethering-ultra/main/update-changelog.md"
 }
