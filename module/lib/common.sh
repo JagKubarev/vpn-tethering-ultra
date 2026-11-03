@@ -47,8 +47,9 @@ is_vpn_tether_enabled() { [ "$VPN_TARGET" = "1" ]; }
 
 is_excluded_iface() {
     case "$1" in
-        tun*|wg*|awg*|vpn*|warp*|ppp*|lo|rmnet*|r_rmnet*|ccmni*|wwan*|pdp*|stnet*|epdg*|dummy*|sit*|ip6*|ifb*|v4-*|clat*|ipsec*|bond*|bridge*|pan*|bt-*|veth*|docker*|lxc*|virbr*|macvlan*|ipvlan*|vlan*|p2p*)
+        tun*|wg*|awg*|vpn*|warp*|ppp*|lo|rmnet*|r_rmnet*|ccmni*|wwan*|pdp*|stnet*|epdg*|dummy*|sit*|ip6*|ifb*|v4-*|clat*|ipsec*|bond*|bridge*|pan*|bt-*|veth*|docker*|lxc*|virbr*|macvlan*|ipvlan*|vlan*|p2p*|vgate*)
             # p2p* — Wi-Fi Direct / Quick Share (свой DHCP), не раздача
+            # vgate* — служебный OnePlus/Android 17 (03.11, 4PDA): не раздача и не VPN
             return 0 ;;
     esac
     return 1
