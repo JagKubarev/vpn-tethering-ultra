@@ -603,6 +603,19 @@ if [ "$MODE" = "check" ]; then
         st state=done stage="готово" msg="нет связи — проверка отложена"
         exit 0
     fi
+    # Волна ТСПУ на Google: HTTPS ко всем его адресам молчит и без обхода, HTTP
+    # отвечает — стратегия ни при чём. 03.11 08:01 сторож в волну счёл её
+    # сломанной, подбор (Google ожил к концу) заменил рабочую стратегию YOTA и
+    # стёр её стратегию YouTube. Запросы сканера мимо AdGuard и основного
+    # обхода (выше), nfqws сканера между прогонами не запущен — напрямую
+    _g443=$(curl -s -o /dev/null -m 5 --interface "$WAN" --capath "$CA" -w '%{http_code}' https://www.google.com/generate_204 2>/dev/null)
+    _g80=$(curl -s -o /dev/null -m 5 --interface "$WAN" -w '%{http_code}' http://www.google.com/generate_204 2>/dev/null)
+    if [ "$_g443" = 000 ] && [ "$_g80" = 204 ]; then
+        event "автопроверка: Google по HTTPS молчит и без обхода, по HTTP отвечает — волна ТСПУ, стратегию не трогаю ($(last_fail))"
+        wd_last "волна Google, отложил"
+        st state=done stage="готово" msg="волна Google (HTTPS молчит и без обхода) — стратегию не трогаю"
+        exit 0
+    fi
     event "автопроверка: стратегия не открывает ($(last_fail)) — ищу замену"
     # прежние стратегии этой сети и сетей с тем же названием (YOTA = 25011 и
     # 25002), новые первыми, без повторов (только свои параметры: custom)
