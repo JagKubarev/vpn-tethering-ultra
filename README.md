@@ -35,12 +35,13 @@
 ## Скриншоты
 
 <p align="center">
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/home-dark.png"><img src="docs/screenshots/home-light.png" width="24%" alt="Главная: режим раздачи и основные выключатели"></picture>
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/bypass-dark.png"><img src="docs/screenshots/bypass-light.png" width="24%" alt="Обход: стратегия для каждой сети"></picture>
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/net-dark.png"><img src="docs/screenshots/net-light.png" width="24%" alt="Сеть: DNS-сервер и приложения без QUIC"></picture>
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/tools-dark.png"><img src="docs/screenshots/tools-light.png" width="24%" alt="Инструменты: диагностика сети и проверки"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/home-dark.png"><img src="docs/screenshots/home-light.png" width="19%" alt="Главная: режим раздачи и основные выключатели"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/bypass-dark.png"><img src="docs/screenshots/bypass-light.png" width="19%" alt="Обход: стратегия для каждой сети"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/net-dark.png"><img src="docs/screenshots/net-light.png" width="19%" alt="Сеть: сервер DNS, DNS для телефона и раздачи"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/warp-dark.png"><img src="docs/screenshots/warp-light.png" width="19%" alt="WARP: туннель, для кого и что через него идёт"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/tools-dark.png"><img src="docs/screenshots/tools-light.png" width="19%" alt="Сервис: диагностика сети и проверки"></picture>
 </p>
-<p align="center"><sub>Главная · Обход · Сеть · Инструменты</sub></p>
+<p align="center"><sub>Главная · Обход · Сеть · WARP · Сервис</sub></p>
 
 ## Возможности
 
@@ -55,7 +56,9 @@
   dnsproxy по DoH — без подмены ответов оператором и с доступом к сервисам с гео-блокировкой
   (ChatGPT, Gemini, Claude и т. п.).
   Проверка здоровья, цепочка запасных серверов, адреса Instagram и Facebook «как из Европы» (ECS).
-  Когда пропадает вся сеть, DNS не уходит на оператора — ждёт её возврата.
+  Когда пропадает вся сеть, DNS не уходит на оператора — ждёт её возврата. При VPN DNS раздачи —
+  DNS VPN-клиента или «как без VPN» (тот же DoH, но через туннель): после выключения VPN
+  сервисы с блокировкой по стране открываются сразу.
 - **Обход блокировок (zapret/nfqws)** для трафика мимо VPN — раздачи напрямую и приложений
   телефона. Своя стратегия для каждой сети, подбор в WebUI (~2 или ~7 мин), сторож, который
   сам чинит сломавшуюся стратегию, отдельные стратегии для отдельных сайтов. Банки и Госуслуги
@@ -63,7 +66,7 @@
 - **WARP без VPN-клиента.** Для того, что обход не открывает (Telegram, сайты с блокировкой
   по IP или по стране), — свой туннель WARP на AmneziaWG в режиме «напрямую». Через него идут
   только выбранные группы: Telegram (клиенты на телефоне — целиком), по желанию Google, свои
-  домены и приложения телефона. Конфиги создаются прямо с телефона или импортируются из
+  домены и приложения телефона; для телефона и для раздачи — отдельными переключателями. Конфиги создаются прямо с телефона или импортируются из
   AmneziaVPN; перестал отвечать — модуль переходит на следующий (пропавшая сеть, например в
   метро, сбоем конфига не считается).
 - **YouTube на мобильном интернете.** Отбой «молчащих» видеосерверов, обрыв медленных
@@ -301,6 +304,7 @@ for Meta domains (ECS); **DPI circumvention** with zapret's `nfqws` for traffic 
 per-network strategies, a quick/full strategy scanner, a self-repairing watchdog, per-site
 strategies and an exclusion list for banks and government services; a built-in **WARP tunnel**
 (AmneziaWG, no VPN app needed) for selected groups — Telegram, Google, custom domains, whole apps —
+separately for the phone and for tethered devices,
 with configs generated on the phone or imported from AmneziaVPN; **YouTube helpers** for mobile
 networks (fail-fast on silent video servers, dropping slow video connections, QUIC with fake Initials
 instead of blocking); tethering stealth (TTL 63) and per-app QUIC blocking.
