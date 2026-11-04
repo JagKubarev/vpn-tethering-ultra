@@ -721,9 +721,13 @@ case "$1" in
         CA=/apex/com.android.conscrypt/cacerts
         [ -d "$CA" ] || CA=/system/etc/security/cacerts
         G=3999
-        dcurl() { su 0 -g $G -c "$(command -v curl) -s --interface $wan --capath $CA $*" 2>/dev/null; }
+        # старый Magisk не знает -g (MT6580): тогда от root, ошибка не должна
+        # выглядеть как блокировка
+        asg() { su 0 -g $G -c "$1" 2>/dev/null; }
+        su 0 -g $G -c true 2>/dev/null || asg() { sh -c "$1" 2>/dev/null; }
+        dcurl() { asg "$(command -v curl) -s --interface $wan --capath $CA $*"; }
         doh_a() { dcurl "-m 6 -H 'accept: application/dns-json' 'https://dns.google/resolve?name=$1&type=A'" | grep -oE '"data":"[0-9.]+"' | grep -oE '[0-9.]+' | head -1; }
-        plain_a() { su 0 -g $G -c "$BB nslookup $1 $2" 2>/dev/null | awk '/^Name:/ {n = 1} n && /^Address/ {print $NF; exit}' | grep -E '^[0-9.]+$'; }
+        plain_a() { asg "$BB nslookup $1 $2" | awk '/^Name:/ {n = 1} n && /^Address/ {print $NF; exit}' | grep -E '^[0-9.]+$'; }
 
         # 1. DNS: обычный DNS к 8.8.8.8 (оператор может перехватывать :53).
         # Разные адреса ещё не подмена: CDN (Cloudflare и т.п.) раздаёт разные
