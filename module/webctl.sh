@@ -291,7 +291,7 @@ case "$1" in
         fi
         ;;
     log-prev)   # лог прошлого запуска демона (до ребута/перезапуска)
-        tail -n 400 "$LOG_FILE.prev" 2>/dev/null
+        tail -n 1000 "$LOG_FILE.prev" 2>/dev/null
         ;;
 
     apps)

@@ -380,7 +380,8 @@ best() { # best N [этап]
 }
 
 POS_A="1 2 midsld sniext+1 1,midsld host+1 1,host+1,midsld"
-# ts нет: у клиентов Windows TCP timestamps выключены, фейк дойдёт до сервера
+# ts один нельзя: у клиентов Windows TCP timestamps выключены, фейк дойдёт до
+# сервера. В паре с md5sig (быстрый подбор) можно: фейк отбросит и там
 FOOL_ALL="md5sig badseq badsum datanoack ttl3 ttl5 autottl"
 fool_arg() {
     case "$1" in

@@ -84,6 +84,7 @@ h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacin
 .health:empty { display: none; }
 .health .hi { display: inline-flex; align-items: center; gap: 6px; }
 .health .hint { flex-basis: 100%; color: var(--amber-text); overflow-wrap: anywhere; }
+.health .hint.red { color: var(--red); }
 
 .kv { display: grid; grid-template-columns: fit-content(40%) minmax(0, 1fr); gap: 8px 14px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; }
 .kv .k { color: var(--muted); overflow-wrap: break-word; }
@@ -973,18 +974,20 @@ function renderHealth(s, w, confBad) {
   const it = [], hints = [];
   const add = (name, d, hint) => {
     it.push('<span class="hi"><span class="dot ' + d + '"></span>' + name + '</span>');
-    if (hint) hints.push('<span class="hint">' + esc(hint) + '</span>');
+    if (hint) hints.push('<span class="hint' + (d === 'red' ? ' red' : '') + '">' + esc(hint) + '</span>');
   };
   if (s.zapret === 'on') add('Обход', 'green');
   else if (s.zapret === 'fail') add('Обход', 'red', 'Обход не запустился, повтор через минуту. Не поможет — отправьте логи (вкладка «Сервис»).');
   else if (s.zapret === 'nokernel') add('Обход', 'red', 'Ядро телефона не поддерживает обход.');
   else if (s.zapret === 'wl') add('Обход', 'amber', 'Обход на паузе: похоже, включены белые списки оператора.');
   if (s.dnsproxy_enable === '1') {
-    if (s.dns_degraded === '1') add('DNS', 'amber', 'DoH не отвечает, пока работает обычный DNS. Модуль проверяет сам.');
+    if (s.dns_state === 'DNAT (dnsproxy упал)') add('DNS', 'red', 'dnsproxy не запустился, DNS обычный. Если не пройдёт — отправьте логи (вкладка «Сервис»).');
+    else if (s.dns_degraded === '1') add('DNS', 'amber', 'DoH не отвечает, пока работает ' + (s.mode === 'vpn' ? 'DNS VPN' : 'обычный DNS') + '. Модуль проверяет сам.');
     else if (s.dns_alt === '1') add('DNS', 'amber', 'Основной DoH не отвечает, работает запасной.');
     else add('DNS', 'green');
   }
-  if (s.warp && s.warp !== 'disabled') add('WARP', w.d, w.d === 'green' ? '' : w.t + (w.s ? '. ' + w.s : ''));
+  // пауза и подъём — не проблема: подсказка только у красного и у жёлтого с пояснением
+  if (s.warp && s.warp !== 'disabled') add('WARP', w.d, w.d === 'red' || (w.d === 'amber' && w.s) ? w.t + (w.s ? '. ' + w.s : '') : '');
   if (s.curl_src === 'none') add('curl', 'red', 'Нет curl: WARP, подбор и проверки сайтов не работают. Отправьте логи (вкладка «Сервис»).');
   if (s.stealth_rivals) add('Лишний модуль', 'amber', s.stealth_rivals + ': подробности в «Подробнее».');
   if (confBad) add('Настройки', 'amber', 'Часть настроек пропущена: подробности в «Подробнее».');
@@ -1641,18 +1644,18 @@ $('#warpPasteOk').addEventListener('click', async () => {
 });
 
 // Журнал хранится целиком, поиск и «Только проблемы» фильтруют показанное
-let LOG_RAW = '';
+let LOG_RAW = '', LOG_HEAD = '', LOG_NONE = 'Журнал пуст';
 const LOG_BAD = /WARNING|ERR |ошибк|не удалось|не запустил|сорвал|не отвечает|нет трафика|нет рабочего/i;
 function showLog() {
   const q = $('#logQ').value.trim().toLowerCase(), only = $('#logWarn').getAttribute('aria-pressed') === 'true';
   const l = LOG_RAW.split('\n').filter((x) => (!only || LOG_BAD.test(x)) && (!q || x.toLowerCase().includes(q)));
   const pre = $('#log');
-  pre.textContent = !LOG_RAW ? 'Журнал пуст' : l.join('\n').trim() || 'Ничего не найдено';
+  pre.textContent = LOG_HEAD + (!LOG_RAW ? LOG_NONE : l.join('\n').trim() || 'Ничего не найдено');
   pre.scrollTop = pre.scrollHeight;
 }
 async function loadLog() {
   const r = await ctl('log 1000');
-  LOG_RAW = r.out || '';
+  LOG_RAW = r.out || ''; LOG_HEAD = ''; LOG_NONE = 'Журнал пуст';
   showLog();
 }
 $('#logQ').addEventListener('input', showLog);
@@ -1696,7 +1699,8 @@ $('#logSend').addEventListener('click', async () => {
 });
 $('#logPrev').addEventListener('click', async () => {
   const r = await ctl('log-prev');
-  LOG_RAW = r.out ? '— прошлый запуск (до перезагрузки/перезапуска) —\n' + r.out : 'Лога прошлого запуска нет';
+  LOG_RAW = r.out || ''; LOG_NONE = 'Лога прошлого запуска нет';
+  LOG_HEAD = r.out ? '— прошлый запуск (до перезагрузки/перезапуска) —\n' : '';
   showLog();
 });
 $('#logCopy').addEventListener('click', async () => {
