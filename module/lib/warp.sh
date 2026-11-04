@@ -285,6 +285,11 @@ warp_probe() {
         case "$out" in *warp=on*|*warp=plus*) return 0 ;; esac
     else
         case "$out" in *ip=*) return 0 ;; esac
+        # свой сервер: 1.1.1.1 за ним бывает закрыт (сервер в России, фильтр), а
+        # туннель жив — любой ответ 8.8.8.8 через него тоже трафик. Cloudflare — строго
+        cmd="$CURL_BIN -s -k -m 3 -o /dev/null -w %{http_code} --interface $WARP_IF https://8.8.8.8/"
+        if [ "$WARP_SU_G" = "1" ]; then out=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else out=$(eval "$cmd" 2>/dev/null); fi
+        case "$out" in ''|000) ;; *) return 0 ;; esac
     fi
     return 1
 }
