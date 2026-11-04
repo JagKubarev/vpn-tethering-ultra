@@ -34,6 +34,15 @@ case "$ARCH" in
         ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG, arm64+armv7"
         ;;
 esac
+# свой curl — на прошивках без системного (Xiaomi): модуль находит его по PATH
+case "$ARCH" in
+    arm64) c=arm64 ;;
+    arm) c=arm ;;
+    *) case "$(uname -m)" in aarch64|arm64) c=arm64 ;; *) c=arm ;; esac ;;
+esac
+mv -f "$MODPATH/bin/curl-$c" "$MODPATH/bin/curl"
+rm -f "$MODPATH/bin/curl-arm64" "$MODPATH/bin/curl-arm"
+set_perm "$MODPATH/bin/curl" 0 0 0755
 set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/action.sh"  0 0 0755
 set_perm "$MODPATH/webctl.sh"  0 0 0755

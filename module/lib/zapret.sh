@@ -751,7 +751,7 @@ zapret_down() {
 # Яндекса проходит. Раз в минуту; ожил любой зарубежный — обход обратно.
 zapret_tls_ok() {   # $1 — IP; мимо обхода и AdGuard (группа dnsproxy), через WAN
     local cmd c
-    cmd="curl -sk -o /dev/null -m 3 --interface $LAST_WAN_IFACE -w %{http_code} https://$1/"
+    cmd="$CURL_BIN -sk -o /dev/null -m 3 --interface $LAST_WAN_IFACE -w %{http_code} https://$1/"
     if [ "$DNSPROXY_SU_G" = "1" ]; then c=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else c=$(eval "$cmd" 2>/dev/null); fi
     [ -n "$c" ] && [ "$c" != "000" ]
 }

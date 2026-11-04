@@ -21,6 +21,7 @@
 # ============================================================================
 MODDIR="${0%/*}/.."
 [ -f "$MODDIR/service.sh" ] || MODDIR=/data/adb/modules/vpn-to-hotspot-usb
+PATH="$PATH:$MODDIR/bin"; export PATH   # curl: нет системного — свой из модуля
 ZDIR="$MODDIR/zapret"
 OUT=/data/local/tmp/vpn_tether_zscan
 Q=203
@@ -254,9 +255,10 @@ NS=$(wc -l < "$TMP/ips")
 # таких. Сайт засчитывается, только если открылся обоими. Не умеет curl —
 # проверяем только обычным.
 BIG=""
-if curl -s -o /dev/null -m 6 --curves X25519Kyber768Draft00:X25519 --interface "$WAN" --capath "$CA" https://ya.ru/ 2>/dev/null; then
-    BIG="X25519Kyber768Draft00:X25519"
-fi
+# Kyber — системный curl (BoringSSL), MLKEM — свой из модуля (OpenSSL)
+for g in X25519Kyber768Draft00:X25519 X25519MLKEM768:X25519; do
+    curl -s -o /dev/null -m 6 --curves "$g" --interface "$WAN" --capath "$CA" https://ya.ru/ 2>/dev/null && { BIG="$g"; break; }
+done
 
 # test_sites -> "ok_count avg_ms" и $TMP/res (h ok|rc)
 TPAR=16; [ "$MODE" = sites ] && TPAR=4

@@ -1478,6 +1478,18 @@ trap 'cleanup_on_exit' TERM INT
 echo "=== VPN Tether v3.22.4 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
+# curl: системный, если есть, иначе свой из модуля (PATH — в конце, системный
+# первым). 04.11 Xiaomi: системного нет — WARP, подбор и проверки падали молча
+PATH="$PATH:$MODULE_DIR/bin"; export PATH
+CURL_BIN=$(command -v curl); CURL_SRC=system
+case "$CURL_BIN" in "$MODULE_DIR"/*) CURL_SRC=module ;; esac
+if ! "${CURL_BIN:-curl}" --version >/dev/null 2>&1; then
+    CURL_SRC=none
+    log "WARNING: нет рабочего curl — WARP, подбор и проверки сайтов работать не будут"
+elif [ "$CURL_SRC" = module ]; then
+    log "curl: системного нет, использую свой из модуля"
+fi
+: "${CURL_BIN:=curl}"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
 [ "$STATUS_IN_DESCRIPTION" = "1" ] || set_description "$MODULE_DESC_DEFAULT"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"

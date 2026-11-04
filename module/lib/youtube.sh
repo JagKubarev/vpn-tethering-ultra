@@ -243,7 +243,7 @@ yt_dead_hits() {
 # Печатает ok/dead. Зовётся только в фоне — до 3 с на адрес.
 yt_probe_ip() {
     local cmd c
-    cmd="curl -s -k -o /dev/null -m 3 --interface $LAST_WAN_IFACE --connect-to www.google.com:443:$1:443 -w '%{http_code}' https://www.google.com/generate_204"
+    cmd="$CURL_BIN -s -k -o /dev/null -m 3 --interface $LAST_WAN_IFACE --connect-to www.google.com:443:$1:443 -w '%{http_code}' https://www.google.com/generate_204"
     if [ "$DNSPROXY_SU_G" = "1" ]; then c=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else c=$(eval "$cmd" 2>/dev/null); fi
     if [ "$c" = 204 ]; then echo ok; else echo dead; fi
 }

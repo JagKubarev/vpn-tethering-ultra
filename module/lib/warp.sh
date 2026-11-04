@@ -267,7 +267,7 @@ warp_start() {   # имя конфига
 warp_probe() {
     # по IP: при отказе DNS (DoH не отвечает) проверка по имени валилась и
     # живой туннель считался мёртвым (27.10 09:52)
-    local cmd="curl -s -m 5 --interface $WARP_IF --capath $WARP_CA https://1.1.1.1/cdn-cgi/trace" out
+    local cmd="$CURL_BIN -s -m 5 --interface $WARP_IF --capath $WARP_CA https://1.1.1.1/cdn-cgi/trace" out
     if [ -z "$WARP_SU_G" ]; then
         WARP_SU_G=0
         su -g "$DNSPROXY_GID" -c true >/dev/null 2>&1 && WARP_SU_G=1
@@ -291,7 +291,7 @@ warp_tg_dead() {
     local a c
     for a in 149.154.167.51 149.154.167.91 149.154.175.50; do
         if [ "$WARP_SU_G" = "1" ]; then
-            c=$(su -g "$DNSPROXY_GID" -c "curl -s -o /dev/null -m 3 --interface $WARP_IF -w %{http_code} http://$a/api" 2>/dev/null)
+            c=$(su -g "$DNSPROXY_GID" -c "$CURL_BIN -s -o /dev/null -m 3 --interface $WARP_IF -w %{http_code} http://$a/api" 2>/dev/null)
         else
             c=$(curl -s -o /dev/null -m 3 --interface $WARP_IF -w %{http_code} "http://$a/api" 2>/dev/null)
         fi
@@ -317,7 +317,7 @@ warp_uplink() {
     fi
     for u in https://1.1.1.1/cdn-cgi/trace https://8.8.8.8/; do
         if [ "$WARP_SU_G" = "1" ]; then
-            su -g "$DNSPROXY_GID" -c "curl -s -k -m 3 -o /dev/null $u" >/dev/null 2>&1 && return 0
+            su -g "$DNSPROXY_GID" -c "$CURL_BIN -s -k -m 3 -o /dev/null $u" >/dev/null 2>&1 && return 0
         else
             curl -s -k -m 3 -o /dev/null "$u" >/dev/null 2>&1 && return 0
         fi

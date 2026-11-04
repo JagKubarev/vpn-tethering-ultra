@@ -843,7 +843,7 @@ dns_primary_alive() {
     # поддерживает) и «HTTP/0.9» (DNS4EU: сразу кадры HTTP/2) — TLS с этим именем
     # прошёл, сервер на месте. Подмена ТСПУ и тишина TLS не проходят (02.11, 13T)
     if [ "$DNSPROXY_SU_G" = "1" ]; then
-        code=$(su -g "$DNSPROXY_GID" -c "curl -s -o /dev/null -m 4 --no-alpn --capath /apex/com.android.conscrypt/cacerts -H 'accept: application/dns-message' -w '%{http_code} %{errormsg}' '$u'" 2>/dev/null)
+        code=$(su -g "$DNSPROXY_GID" -c "$CURL_BIN -s -o /dev/null -m 4 --no-alpn --capath /apex/com.android.conscrypt/cacerts -H 'accept: application/dns-message' -w '%{http_code} %{errormsg}' '$u'" 2>/dev/null)
     else
         code=$(curl -s -o /dev/null -m 4 --no-alpn --capath /apex/com.android.conscrypt/cacerts -H 'accept: application/dns-message' -w '%{http_code} %{errormsg}' "$u" 2>/dev/null)
     fi
