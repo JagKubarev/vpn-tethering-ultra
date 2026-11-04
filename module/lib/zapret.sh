@@ -201,7 +201,7 @@ rm -f "$ZAPRET_CAPS_FILE" 2>/dev/null   # от прошлой загрузки: 
 # xtables у netd/scan.sh, не создалась цепочка) — повтор в следующем такте.
 # Иначе разовый сбой на загрузке выключал zapret до перезагрузки (ревью 27.10)
 zapret_caps() {
-    local c=VPN_ZCAP cb=0 str=0 nfq=0 e miss=""
+    local c=VPN_ZCAP cb=0 str=0 nfq=0 own=1 e miss=""
     [ -n "$ZAPRET_CAPS" ] && return 0
     $iptables -t mangle -N $c 2>/dev/null; $iptables -t mangle -F $c 2>/dev/null
     if ! e=$($iptables -t mangle -L $c -n 2>&1 >/dev/null); then
@@ -229,9 +229,11 @@ zapret_caps() {
     if [ "$cb$str$nfq" = "000" ] && [ "$ZAPRET_CAPS_TRIES" -lt 2 ]; then
         ZAPRET_CAPS_TRIES=$((ZAPRET_CAPS_TRIES + 1)); return 1
     fi
-    ZAPRET_CAPS="cb=$cb str=$str nfq=$nfq"
+    zapret_owner_works || own=0
+    ZAPRET_CAPS="cb=$cb str=$str nfq=$nfq own=$own"
     printf '%s\n' $ZAPRET_CAPS > "$ZAPRET_CAPS_FILE" 2>/dev/null
     [ -n "$miss" ] && log "WARNING: zapret: ядро не умеет:$miss"
+    [ "$own" = 0 ] && log "WARNING: zapret: на этом ядре правила по приложениям в POSTROUTING срабатывают на всё — «мимо обхода» по приложениям не работает, остаются исключения по сайтам"
     if [ "$nfq" = 0 ]; then
         log "WARNING: zapret: без NFQUEUE обход невозможен — выключен до перезагрузки; нужен VPN или другое ядро"
     elif [ "$cb" = 0 ]; then
@@ -247,6 +249,16 @@ zapret_caps() {
     fi
     [ "$str" = 0 ] && log "WARNING: zapret: без string — «YouTube мимо кэшей оператора» и отбой мёртвых серверов недоступны"
     return 0
+}
+# На части старых ядер (MT6580, 3.18) -m owner в POSTROUTING совпадает с любым
+# значением, в OUTPUT — нет: обход молча не видел трафик, а подбор шёл успешно
+zapret_owner_works() {
+    local r="-d 127.0.0.2 -m owner --uid-owner 12345 -j RETURN" n
+    $iptables -t mangle -I POSTROUTING 1 $r 2>/dev/null || return 0
+    ping -c 1 -W 1 127.0.0.2 >/dev/null 2>&1
+    n=$($iptables -t mangle -L POSTROUTING -v -n -x 2>/dev/null | grep -m1 '127\.0\.0\.2' | sed 's/^ *//' | cut -d' ' -f1)
+    $iptables -t mangle -D POSTROUTING $r 2>/dev/null
+    [ "${n:-0}" = 0 ]
 }
 zapret_cap() { case " $ZAPRET_CAPS " in *" $1=1 "*) return 0 ;; esac; return 1; }
 
@@ -613,14 +625,17 @@ zapret_rules_on() {
         $t -t mangle -A "$CHAIN_ZAPRET" -o lo -j RETURN 2>/dev/null
         $t -t mangle -A "$CHAIN_ZAPRET" -d "$lan" -j RETURN 2>/dev/null
         $t -t mangle -A "$CHAIN_ZAPRET" -m mark --mark "$ZAPRET_MARK/$ZAPRET_MARK" -j RETURN 2>/dev/null
-        # метку выше на rmnet стирает qcom_qos_reset — дублируем по группе сокета
-        $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$ZAPRET_GID" -j RETURN 2>/dev/null
+        # метку выше на rmnet стирает qcom_qos_reset — дублируем по группе сокета.
+        # own=0: любое такое правило забрало бы весь трафик до NFQUEUE
+        zapret_cap own && $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$ZAPRET_GID" -j RETURN 2>/dev/null
         if [ "$ZAPRET_PHONE" = "1" ]; then
-            for u in $excl; do
-                $t -t mangle -A "$CHAIN_ZAPRET" -m owner --uid-owner "$u" -j RETURN 2>/dev/null
-            done
-            [ -n "$DNSPROXY_GID" ] && \
-                $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$DNSPROXY_GID" -j RETURN 2>/dev/null
+            if zapret_cap own; then
+                for u in $excl; do
+                    $t -t mangle -A "$CHAIN_ZAPRET" -m owner --uid-owner "$u" -j RETURN 2>/dev/null
+                done
+                [ -n "$DNSPROXY_GID" ] && \
+                    $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$DNSPROXY_GID" -j RETURN 2>/dev/null
+            fi
         else
             # только раздача: у её пакетов нет локального сокета
             $t -t mangle -A "$CHAIN_ZAPRET" -m owner --socket-exists -j RETURN 2>/dev/null

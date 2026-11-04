@@ -22,6 +22,11 @@
 MODDIR="${0%/*}/.."
 [ -f "$MODDIR/service.sh" ] || MODDIR=/data/adb/modules/vpn-to-hotspot-usb
 PATH="$PATH:$MODDIR/bin"; export PATH   # curl: нет системного — свой из модуля
+BB=/data/adb/ksu/bin/busybox
+[ -x "$BB" ] || BB=/data/adb/magisk/busybox
+[ -x "$BB" ] || BB=/data/adb/ap/bin/busybox
+# в Android 8 нет awk (MT6580, 04.11): этот скрипт идёт под mksh, не под busybox
+command -v awk >/dev/null 2>&1 || awk() { "$BB" awk "$@"; }
 ZDIR="$MODDIR/zapret"
 OUT=/data/local/tmp/vpn_tether_zscan
 Q=203
@@ -34,6 +39,16 @@ SITES_ARG="$2"
 for _c in ya.ru www.google.com; do case " $SITES " in *" $_c "*) ;; *) SITES="$SITES $_c" ;; esac; done
 CA=/apex/com.android.conscrypt/cacerts
 [ -d "$CA" ] || CA=/system/etc/security/cacerts
+# адрес через DoH. 1.1.1.1 в Android 8 не проходит проверку: корня SSL.com нет в
+# cacerts (MT6580, rc=60), тогда 8.8.8.8
+doh_ip() {   # имя таймаут
+    local u r
+    for u in "https://1.1.1.1/dns-query?name=$1&type=A" "https://8.8.8.8/resolve?name=$1&type=A"; do
+        r=$(curl -s -m "$2" --capath "$CA" -H 'accept: application/dns-json' "$u" 2>/dev/null | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')
+        [ -n "$r" ] && { echo "$r"; return 0; }
+    done
+    return 1
+}
 case "$(uname -m)" in aarch64|arm64) NQ="$MODDIR/bin/nfqws-arm64" ;; *) NQ="$MODDIR/bin/nfqws-arm" ;; esac
 WAN=$(sed -n 's/^wan=//p' "$MODDIR/status" 2>/dev/null)
 IPT="iptables -w 2"
@@ -197,8 +212,7 @@ if [ "$MODE" = quick ] || [ "$MODE" = full ]; then
                 ''|*[!uzpkfa50vqlgb61wrmhc72xsnid83ytoje94-]*) ;;
                 *)
                     _gh="rr1---sn-$(echo "$_gv" | tr 'uzpkfa50vqlgb61wrmhc72xsnid83ytoje94' '0123456789abcdefghijklmnopqrstuvwxyz').googlevideo.com"
-                    _gi=$(curl -s -m 5 --capath "$CA" -H 'accept: application/dns-json' \
-                        "https://1.1.1.1/dns-query?name=$_gh&type=A" 2>/dev/null | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')
+                    _gi=$(doh_ip "$_gh" 5)
                     _gc=""
                     [ -n "$_gi" ] && _gc=$(curl -s -k -o /dev/null -m 4 --interface "$WAN" --connect-to "www.google.com:443:$_gi:443" \
                         -w '%{http_code}' https://www.google.com/generate_204 2>/dev/null)
@@ -234,8 +248,7 @@ resolve() { # resolve ПАРАЛЛЕЛЬНО ТАЙМАУТ
             ip=""
             [ "$SYSDNS" = 1 ] && ip=$(ping -c 1 -W 1 "$h" 2>/dev/null | sed -n '1s/^PING [^(]*(\([0-9.]*\)).*/\1/p')
             case "$ip" in 0.*|127.*|10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|169.254.*|100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*) ip="" ;; esac
-            [ -n "$ip" ] || ip=$(curl -s -m "$2" --capath "$CA" -H 'accept: application/dns-json' \
-                "https://1.1.1.1/dns-query?name=$h&type=A" 2>/dev/null | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')
+            [ -n "$ip" ] || ip=$(doh_ip "$h" "$2")
             [ -n "$ip" ] && echo "$h $ip" > "$TMP/a.$h"
         ) &
         pids="$pids $!"; n=$((n + 1))

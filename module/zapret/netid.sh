@@ -27,7 +27,8 @@ case "$w" in
     wlan*|swlan*)
         # cmd wifi status — лёгкий; dumpsys wifi — запасной (тяжёлый, но есть везде)
         s=$(cmd wifi status 2>/dev/null | grep -m1 'SSID: "' | sed -n 's/.*SSID: "\(.*\)", BSSID.*/\1/p')
-        [ -n "$s" ] || s=$(dumpsys wifi 2>/dev/null | grep -m1 'mWifiInfo SSID: "' | sed -n 's/.*SSID: "\(.*\)", BSSID.*/\1/p')
+        # в Android 8 имя без кавычек; <unknown ssid> и <none> — это ещё не сеть
+        [ -n "$s" ] || s=$(dumpsys wifi 2>/dev/null | grep -m1 'mWifiInfo SSID: ' | sed -n 's/.*SSID: \(.*\), BSSID.*/\1/p' | sed 's/^"//; s/"$//; /^<.*>$/d')
         s=$(printf '%s' "$s" | clean)
         [ -n "$s" ] && echo "wifi:$s|$s"
         ;;

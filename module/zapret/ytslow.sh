@@ -29,6 +29,11 @@
 DPID="$1"
 MODDIR="${0%/*}/.."
 [ -f "$MODDIR/service.sh" ] || MODDIR=/data/adb/modules/vpn-to-hotspot-usb
+BB=/data/adb/ksu/bin/busybox
+[ -x "$BB" ] || BB=/data/adb/magisk/busybox
+[ -x "$BB" ] || BB=/data/adb/ap/bin/busybox
+# в Android 8 нет awk (MT6580, 04.11): этот скрипт идёт под mksh, не под busybox
+command -v awk >/dev/null 2>&1 || awk() { "$BB" awk "$@"; }
 case "$(uname -m)" in aarch64|arm64) CT="$MODDIR/bin/conntrack-arm64" ;; *) CT="$MODDIR/bin/conntrack-arm" ;; esac
 # демон передаёт свой (бывает системный conntrack — тогда в bin/ его нет)
 [ -n "$2" ] && CT="$2"

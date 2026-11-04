@@ -62,8 +62,6 @@ WARP_TG_MAX=5
 WARP_TG_PAUSE=1800       # не помогли WARP_TG_MAX подряд — 30 мин не переподключать
 WARP_TG_HOLD=0           # до этого времени (epoch) не переподключать
 WARP_SU_G=""             # su -g работает (проверка — мимо прокси AdGuard)
-WARP_CA=/apex/com.android.conscrypt/cacerts
-[ -d "$WARP_CA" ] || WARP_CA=/system/etc/security/cacerts
 
 # Остатки от убитого демона: интерфейс, правило, процесс, сокет
 warp_kill_strays() {
@@ -275,7 +273,8 @@ warp_start() {   # имя конфига
 warp_probe() {
     # по IP: при отказе DNS (DoH не отвечает) проверка по имени валилась и
     # живой туннель считался мёртвым (27.10 09:52)
-    local cmd="$CURL_BIN -s -m 5 --interface $WARP_IF --capath $WARP_CA https://1.1.1.1/cdn-cgi/trace" out
+    # -k: в Android 8 нет корня сертификата 1.1.1.1, а запрос и так идёт в туннель
+    local cmd="$CURL_BIN -s -k -m 5 --interface $WARP_IF https://1.1.1.1/cdn-cgi/trace" out
     if [ -z "$WARP_SU_G" ]; then
         WARP_SU_G=0
         su -g "$DNSPROXY_GID" -c true >/dev/null 2>&1 && WARP_SU_G=1
@@ -286,6 +285,11 @@ warp_probe() {
         case "$out" in *warp=on*|*warp=plus*) return 0 ;; esac
     else
         case "$out" in *ip=*) return 0 ;; esac
+        # свой сервер: 1.1.1.1 за ним бывает закрыт (сервер в России, фильтр), а
+        # туннель жив — любой ответ 8.8.8.8 через него тоже трафик. Cloudflare — строго
+        cmd="$CURL_BIN -s -k -m 3 -o /dev/null -w %{http_code} --interface $WARP_IF https://8.8.8.8/"
+        if [ "$WARP_SU_G" = "1" ]; then out=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else out=$(eval "$cmd" 2>/dev/null); fi
+        case "$out" in ''|000) ;; *) return 0 ;; esac
     fi
     return 1
 }
