@@ -201,7 +201,7 @@ rm -f "$ZAPRET_CAPS_FILE" 2>/dev/null   # от прошлой загрузки: 
 # xtables у netd/scan.sh, не создалась цепочка) — повтор в следующем такте.
 # Иначе разовый сбой на загрузке выключал zapret до перезагрузки (ревью 27.10)
 zapret_caps() {
-    local c=VPN_ZCAP cb=0 str=0 nfq=0 e miss=""
+    local c=VPN_ZCAP cb=0 str=0 nfq=0 own=1 e miss=""
     [ -n "$ZAPRET_CAPS" ] && return 0
     $iptables -t mangle -N $c 2>/dev/null; $iptables -t mangle -F $c 2>/dev/null
     if ! e=$($iptables -t mangle -L $c -n 2>&1 >/dev/null); then
@@ -229,7 +229,7 @@ zapret_caps() {
     if [ "$cb$str$nfq" = "000" ] && [ "$ZAPRET_CAPS_TRIES" -lt 2 ]; then
         ZAPRET_CAPS_TRIES=$((ZAPRET_CAPS_TRIES + 1)); return 1
     fi
-    zapret_owner_works && own=1 || own=0
+    zapret_owner_works || own=0
     ZAPRET_CAPS="cb=$cb str=$str nfq=$nfq own=$own"
     printf '%s\n' $ZAPRET_CAPS > "$ZAPRET_CAPS_FILE" 2>/dev/null
     [ -n "$miss" ] && log "WARNING: zapret: ядро не умеет:$miss"
