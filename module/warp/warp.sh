@@ -67,10 +67,12 @@ normalize() {
             k = substr($0, 1, i - 1); v = substr($0, i + 1)
             gsub(/^[ \t]+|[ \t]+$/, "", k); gsub(/^[ \t]+|[ \t]+$/, "", v)
             # J1–J3/Itime (AmneziaWG 1.5) awg v3.1 не знает — «Line unrecognized»: в пропущенные
-            if (sec == "i") ok = k ~ /^(PrivateKey|Address|DNS|MTU|ListenPort|Jc|Jmin|Jmax|S[1-4]|H[1-4]|I[1-5])$/
-            else if (sec == "p") ok = k ~ /^(PublicKey|PresharedKey|AllowedIPs|Endpoint|PersistentKeepalive)$/
+            # ключи AWG 3 awg v3.1 знает: без HeaderProtectionKey рукопожатия со своим сервером нет
+            if (sec == "i") ok = k ~ /^(PrivateKey|Address|DNS|MTU|ListenPort|Jc|Jmin|Jmax|S[1-4]|H[1-4]|I[1-5]|HeaderProtectionKey|ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts|RandomTrailers|DisableCookies)$/
+            else if (sec == "p") ok = k ~ /^(PublicKey|PresharedKey|AllowedIPs|Endpoint|PersistentKeepalive|AdvancedSecurity)$/
             else { err = "строка " NR " до [Interface]"; exit }
-            if (!ok) { skip++; next }
+            # «(off)» — параметр выключен; awg такое значение не принимает
+            if (!ok || v == "(off)") { skip++; next }
             t = v; gsub(/[][]/, "", t)   # скобки — отдельно: в классе с ними busybox awk ошибается
             if (v == "" || t ~ /[^A-Za-z0-9+\/=.:,<> _-]/) { err = "недопустимое значение " k; exit }
             if (k ~ /Key$/ && (length(v) != 44 || v !~ /^[A-Za-z0-9+\/]+=$/)) { err = "неверный " k; exit }

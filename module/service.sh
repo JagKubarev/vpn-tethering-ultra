@@ -611,6 +611,8 @@
 # v3.22.3 — vgate* (OnePlus, Android 17: tun /32 без маршрута наружу) не VPN и
 #   не раздача: detect_tun_name брал его за tun без VPN — «поднят VPN», WARP
 #   снимался через секунды; поиск раздачи вешал на него kill-switch и DNAT.
+# v3.22.4 — подбор: без --wssize, syndata и ts, меньше лишних прогонов, seqovl в
+#   шаблоне с pos=3; bootstrap DoH 8.8.4.4; импорт WARP не теряет ключи AWG 3.
 # ============================================================================
 # ============================================================================
 
@@ -1473,7 +1475,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.22.3 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.22.4 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
