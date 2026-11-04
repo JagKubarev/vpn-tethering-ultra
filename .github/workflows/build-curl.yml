@@ -1,0 +1,80 @@
+# Сборка curl (лицензия curl, MIT-подобная) с OpenSSL (Apache-2.0) под Android
+# (arm64 и armv7): на части прошивок (Xiaomi, 04.11) системного curl нет, а без
+# него не работают WARP, подбор и проверки. Исходники — официальные релизы.
+# OpenSSL 3.5+: X25519MLKEM768 — большой ClientHello для подбора (scan.sh).
+name: build-curl
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [curl-bundle]
+    paths: ['.github/workflows/build-curl.yml']
+
+env:
+  CURL_VER: 8.23.0
+  OPENSSL_VER: 3.6.5
+  NDK_MAJOR: 30
+  API: 21
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Исходники
+        run: |
+          mkdir -p out
+          u=$(echo "$CURL_VER" | tr . _)
+          curl -fsSL -o "curl-$CURL_VER.tar.xz" "https://github.com/curl/curl/releases/download/curl-$u/curl-$CURL_VER.tar.xz"
+          curl -fsSL -o "openssl-$OPENSSL_VER.tar.gz" "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VER/openssl-$OPENSSL_VER.tar.gz"
+          sha256sum "curl-$CURL_VER.tar.xz" "openssl-$OPENSSL_VER.tar.gz" | tee out/SOURCES.sha256
+
+      - name: curl + OpenSSL (Android NDK)
+        run: |
+          NDK=$(ls -d "$ANDROID_HOME"/ndk/"$NDK_MAJOR".* 2>/dev/null | sort -V | tail -1)
+          [ -n "$NDK" ] || { echo "нет NDK r$NDK_MAJOR в образе: $(ls "$ANDROID_HOME"/ndk)"; exit 1; }
+          grep Pkg.Revision "$NDK/source.properties"
+          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export ANDROID_NDK_ROOT="$NDK" PATH="$TC:$PATH"
+          # Динамически, с системной libc, API 21 (как awg): статическая libc.a NDK
+          # на старых ядрах падает, и имена резолвит штатный netd. OpenSSL — внутрь.
+          for a in aarch64-linux-android:android-arm64:arm64 armv7a-linux-androideabi:android-arm:arm; do
+            t=${a%%:*}; r=${a#*:}; o=${r%%:*}; n=${r##*:}
+            inst="$PWD/inst-$n"
+            rm -rf "openssl-$OPENSSL_VER" "curl-$CURL_VER"
+            tar xzf "openssl-$OPENSSL_VER.tar.gz"
+            tar xJf "curl-$CURL_VER.tar.xz"
+            (
+              cd "openssl-$OPENSSL_VER"
+              ./Configure "$o" -D__ANDROID_API__="$API" -Os --prefix="$inst" --libdir=lib \
+                no-shared no-tests no-docs no-legacy no-engine no-comp no-dtls no-ssl3 no-srp no-apps
+              make -j4 build_libs
+              make install_dev
+            )
+            (
+              cd "curl-$CURL_VER"
+              ./configure --host="$t" CC="$TC/$t$API-clang" AR="$TC/llvm-ar" RANLIB="$TC/llvm-ranlib" \
+                CFLAGS=-Os --with-openssl="$inst" --disable-shared --enable-static \
+                --with-ca-path=/system/etc/security/cacerts --without-ca-bundle --without-ca-fallback \
+                --without-libpsl --without-zlib --without-brotli --without-zstd --without-nghttp2 \
+                --without-libidn2 --disable-ldap --disable-ldaps --disable-rtsp --disable-dict \
+                --disable-telnet --disable-tftp --disable-pop3 --disable-imap --disable-smb \
+                --disable-smtp --disable-gopher --disable-mqtt --disable-ftp --disable-file \
+                --disable-manual --disable-docs --disable-ntlm --disable-tls-srp
+              make -j4
+              "$TC/llvm-strip" src/curl
+              cp src/curl "../out/curl-$n"
+              cp COPYING ../out/curl.LICENSE
+            )
+            cp "openssl-$OPENSSL_VER/LICENSE.txt" out/openssl.LICENSE
+          done
+
+      - name: Проверка
+        run: |
+          file out/curl-*
+          ls -la out
+          sha256sum out/curl-* | tee -a out/SOURCES.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: curl-android
+          path: out/
