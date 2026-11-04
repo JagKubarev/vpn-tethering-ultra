@@ -698,7 +698,7 @@ if [ "$MODE" = "quick" ]; then
 --dpi-desync=multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1 --dup=2 --dup-cutoff=n3 --dup-fooling=md5sig
 EOF
 else
-    S_total=$(( 14 + 7 + 36 + 4 + 5 + 12 + 6 ))
+    S_total=$(( 14 + 7 + 32 + 4 + 5 + 12 + 6 ))
     # A: только разрез, без подделок
     st stage="1/4 разрез без подделок"
     for m in multisplit multidisorder; do
@@ -716,6 +716,8 @@ else
     for f in $F2; do
         for m in multisplit multidisorder fakedsplit fakeddisorder; do
             for p in 1 midsld 1,midsld 1,host+1,midsld; do
+                # fakedsplit/fakeddisorder режут в одном месте: 1,midsld = midsld (замер 04.11)
+                case "$m:$p" in faked*:1,midsld) continue ;; esac
                 run_strat "--dpi-desync=fake,$m $(fool_arg $f) --dpi-desync-split-pos=$p $FAKE" "3"
             done
         done
@@ -726,7 +728,7 @@ else
     # а при белых списках это может оказаться единственным, что проходит
     st stage="3/4 приманки с российским SNI"
     run_strat "--dpi-desync=fake,hostfakesplit --dpi-desync-split-pos=host+1 --dpi-desync-hostfakesplit-midhost=midsld --dpi-desync-hostfakesplit-mod=host=www.google.com --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=sberbank.ru --dpi-desync-fooling=datanoack --dpi-desync-repeats=6 --dpi-desync-cutoff=n6" "3"
-    run_strat "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,sld+1 --dpi-desync-split-seqovl=2 --dpi-desync-split-seqovl-pattern=@G --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=max.ru --dpi-desync-fooling=datanoack --dpi-desync-repeats=6 --dpi-desync-cutoff=n5" "3"
+    run_strat "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=3,sld+1 --dpi-desync-split-seqovl=2 --dpi-desync-split-seqovl-pattern=@G --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=max.ru --dpi-desync-fooling=datanoack --dpi-desync-repeats=6 --dpi-desync-cutoff=n5" "3"
     run_strat "--dpi-desync=fake,multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1 --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=gosuslugi.ru --dpi-desync-fooling=datanoack --dpi-desync-cutoff=n5" "3"
     # подставное имя в hostfakesplit — VK (есть во всех белых списках; фейки
     # с ним — у magisk-zapret2)
