@@ -222,7 +222,7 @@ meta_eu_start() {
     while [ $i -lt 25 ]; do
         sleep 0.2
         if [ -n "$(dnsproxy_pids "$META_EU_PORT")" ] && \
-           ss -lun 2>/dev/null | grep -qE "[:.]$META_EU_PORT[[:space:]]"; then
+           udp_listening "$META_EU_PORT"; then
             DNSPROXY_META_ON=1
             return 0
         fi
@@ -294,6 +294,13 @@ uptime_ms() {
     u="${u%.*}${u#*.}"
     u="${u#${u%%[!0]*}}"
     echo $(( ${u:-0} * 10 ))
+}
+
+# слушает ли кто UDP-порт. ss нет на Android 8 (MT6580): рабочий dnsproxy считался
+# не поднявшимся и убивался по кругу
+udp_listening() {   # порт
+    ss -lun 2>/dev/null | grep -qE "[:.]$1[[:space:]]" && return 0
+    grep -qE ":$(printf '%04X' "$1") 0+:0000 " /proc/net/udp /proc/net/udp6 2>/dev/null
 }
 
 dnsproxy_probe() {   # [адрес] — по умолчанию dnsproxy; с адресом — :53 от группы dnsproxy
@@ -422,7 +429,7 @@ dnsproxy_start() {
         sleep 0.2
         u=$(dnsproxy_pids | head -1)
         [ -n "$u" ] && echo "$u" > "$DNSPROXY_PID_FILE"
-        if [ -n "$u" ] && ss -lun 2>/dev/null | grep -qE "[:.]$DNSPROXY_PORT[[:space:]]"; then
+        if [ -n "$u" ] && udp_listening "$DNSPROXY_PORT"; then
             DNSPROXY_SIG="$sig"
             DNSPROXY_STARTED_ROUTE="$route_now"
             log "dnsproxy запущен (pid $u, gid ${DNSPROXY_GID:-0}, $tag): $ups$meta"

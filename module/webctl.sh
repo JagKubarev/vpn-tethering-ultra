@@ -67,6 +67,19 @@ ZSKIP=/data/adb/vpn_tether_zapret_altskip   # ключ|сайт|epoch — не �
 BB=/data/adb/ksu/bin/busybox
 [ -x "$BB" ] || BB=/data/adb/magisk/busybox
 [ -x "$BB" ] || BB=/data/adb/ap/bin/busybox
+# в Android 8 нет awk (MT6580, 04.11): этот скрипт идёт под mksh, не под busybox
+command -v awk >/dev/null 2>&1 || awk() { "$BB" awk "$@"; }
+
+# адрес через DoH. 1.1.1.1 в Android 8 не проходит проверку: корня SSL.com нет в
+# cacerts (MT6580, rc=60), тогда 8.8.8.8
+doh_ip() {   # имя таймаут
+    local u r
+    for u in "https://1.1.1.1/dns-query?name=$1&type=A" "https://8.8.8.8/resolve?name=$1&type=A"; do
+        r=$(curl -s -m "$2" --capath "$CA" -H 'accept: application/dns-json' "$u" 2>/dev/null | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')
+        [ -n "$r" ] && { echo "$r"; return 0; }
+    done
+    return 1
+}
 
 daemon_pid() {
     local pid
@@ -541,8 +554,7 @@ case "$1" in
         iptables -w 2 -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
         iptables -w 2 -t mangle -I VPN_ZAPRET 1 -m owner --uid-owner 0 -j RETURN 2>/dev/null
         # адрес — через DoH (обычный DNS мимо VPN оператор может подменить)
-        ip=$(curl -s -m 6 --capath "$CA" -H 'accept: application/dns-json' \
-            "https://1.1.1.1/dns-query?name=$h&type=A" 2>/dev/null | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')
+        ip=$(doh_ip "$h" 6)
         # запасной nslookup: только IPv4 — «Address 1: 2a06:…» давал «ip 2»
         [ -n "$ip" ] || ip=$("$BB" nslookup "$h" 1.1.1.1 2>/dev/null | sed -n '/^Name/,$p' | grep -oE 'Address( [0-9]+)?:[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1 | awk '{print $NF}')
         case "$ip" in *.*.*.*) ;; *) echo "ERR не удалось узнать адрес $h"; exit 1 ;; esac
@@ -610,8 +622,7 @@ case "$1" in
         trap 'exit 1' INT TERM HUP
         iptables -w 2 -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
         iptables -w 2 -t mangle -I VPN_ZAPRET 1 -m owner --uid-owner 0 -j RETURN 2>/dev/null
-        ip=$(curl -s -m 6 --capath "$CA" -H 'accept: application/dns-json' \
-            "https://1.1.1.1/dns-query?name=dl.google.com&type=A" 2>/dev/null | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')
+        ip=$(doh_ip dl.google.com 6)
         [ -n "$ip" ] || { echo "ERR не удалось узнать адрес сервера Google"; exit 1; }
         H="rr1---sn-gvnuxaxjvh-n8vz.googlevideo.com"
         yt_one() {

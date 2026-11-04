@@ -62,8 +62,6 @@ WARP_TG_MAX=5
 WARP_TG_PAUSE=1800       # не помогли WARP_TG_MAX подряд — 30 мин не переподключать
 WARP_TG_HOLD=0           # до этого времени (epoch) не переподключать
 WARP_SU_G=""             # su -g работает (проверка — мимо прокси AdGuard)
-WARP_CA=/apex/com.android.conscrypt/cacerts
-[ -d "$WARP_CA" ] || WARP_CA=/system/etc/security/cacerts
 
 # Остатки от убитого демона: интерфейс, правило, процесс, сокет
 warp_kill_strays() {
@@ -275,7 +273,8 @@ warp_start() {   # имя конфига
 warp_probe() {
     # по IP: при отказе DNS (DoH не отвечает) проверка по имени валилась и
     # живой туннель считался мёртвым (27.10 09:52)
-    local cmd="$CURL_BIN -s -m 5 --interface $WARP_IF --capath $WARP_CA https://1.1.1.1/cdn-cgi/trace" out
+    # -k: в Android 8 нет корня сертификата 1.1.1.1, а запрос и так идёт в туннель
+    local cmd="$CURL_BIN -s -k -m 5 --interface $WARP_IF https://1.1.1.1/cdn-cgi/trace" out
     if [ -z "$WARP_SU_G" ]; then
         WARP_SU_G=0
         su -g "$DNSPROXY_GID" -c true >/dev/null 2>&1 && WARP_SU_G=1

@@ -23,6 +23,11 @@
 MODDIR="${0%/*}"; MODDIR="${MODDIR%/warp}"
 [ -f "$MODDIR/service.sh" ] || MODDIR=/data/adb/modules/vpn-to-hotspot-usb
 PATH="$PATH:$MODDIR/bin"; export PATH   # curl: нет системного — свой из модуля
+BB=/data/adb/ksu/bin/busybox
+[ -x "$BB" ] || BB=/data/adb/magisk/busybox
+[ -x "$BB" ] || BB=/data/adb/ap/bin/busybox
+# в Android 8 нет awk (MT6580, 04.11): этот скрипт идёт под mksh, не под busybox
+command -v awk >/dev/null 2>&1 || awk() { "$BB" awk "$@"; }
 WARP_DIR=/data/adb/vpn_tether_warp
 STATUS_FILE="$MODDIR/status"
 ZSCAN=/data/local/tmp/vpn_tether_zscan
