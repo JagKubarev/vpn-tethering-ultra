@@ -13,6 +13,8 @@ on:
 env:
   CURL_VER: 8.23.0
   OPENSSL_VER: 3.6.5
+  CURL_SHA256: 8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5
+  OPENSSL_SHA256: a2157c2830efdec3788939b00c9b0638306d3f0bbb76dc4832ee503bb397df98
   NDK_MAJOR: 30
   API: 21
 
@@ -26,7 +28,7 @@ jobs:
           u=$(echo "$CURL_VER" | tr . _)
           curl -fsSL -o "curl-$CURL_VER.tar.xz" "https://github.com/curl/curl/releases/download/curl-$u/curl-$CURL_VER.tar.xz"
           curl -fsSL -o "openssl-$OPENSSL_VER.tar.gz" "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VER/openssl-$OPENSSL_VER.tar.gz"
-          sha256sum "curl-$CURL_VER.tar.xz" "openssl-$OPENSSL_VER.tar.gz" | tee out/SOURCES.sha256
+          printf '%s  %s\n' "$CURL_SHA256" "curl-$CURL_VER.tar.xz" "$OPENSSL_SHA256" "openssl-$OPENSSL_VER.tar.gz" | tee out/SOURCES.sha256 | sha256sum -c -
 
       - name: curl + OpenSSL (Android NDK)
         run: |
@@ -49,6 +51,11 @@ jobs:
               # а --capath в OpenSSL ищет по новому: все сертификаты «не найдены»
               sed -i 's/h = X509_NAME_hash_ex(name, libctx, propq, &i);/h = X509_NAME_hash_old(name); i = 1;/' crypto/x509/by_dir.c
               grep -q 'h = X509_NAME_hash_old(name);' crypto/x509/by_dir.c || { echo "by_dir.c не пропатчен"; exit 1; }
+              # ClientHello по умолчанию — обычный, как у системного curl: в OpenSSL
+              # 3.5+ он с ключом MLKEM (два сегмента), а проверки идут мимо обхода.
+              # Большой — только там, где его просит подбор (--curves в scan.sh)
+              sed -i 's|"?\*X25519MLKEM768 / ?\*X25519:?secp256r1 / ?X448:?secp384r1:?secp521r1 / ?ffdhe2048:?ffdhe3072"|"?X25519:?secp256r1:?X448:?secp384r1:?secp521r1:?ffdhe2048:?ffdhe3072"|' ssl/t1_lib.c
+              grep -q '"?X25519:?secp256r1' ssl/t1_lib.c || { echo "t1_lib.c не пропатчен"; exit 1; }
               ./Configure "$o" -D__ANDROID_API__="$API" -Os --prefix="$inst" --libdir=lib \
                 no-shared no-tests no-docs no-legacy no-engine no-comp no-dtls no-ssl3 no-srp no-apps
               make -j4 build_libs
