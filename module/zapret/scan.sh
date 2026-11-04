@@ -378,7 +378,8 @@ best() { # best N [этап]
 }
 
 POS_A="1 2 midsld sniext+1 1,midsld host+1 1,host+1,midsld"
-FOOL_ALL="md5sig badseq badsum ts datanoack ttl3 ttl5 autottl"
+# ts нет: у клиентов Windows TCP timestamps выключены, фейк дойдёт до сервера
+FOOL_ALL="md5sig badseq badsum datanoack ttl3 ttl5 autottl"
 fool_arg() {
     case "$1" in
         ttl*)    echo "--dpi-desync-ttl=${1#ttl}" ;;
@@ -463,10 +464,9 @@ if [ "$MODE" = "sites" ]; then
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld $FAKE
 --dpi-desync=multisplit --dpi-desync-split-seqovl=652 --dpi-desync-split-pos=2 --dpi-desync-split-seqovl-pattern=@G
 --dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=@G $FAKE
---dpi-desync=syndata,multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1
 --dpi-desync=fakedsplit --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=badseq
 EOF
-        } | G="$GEN_X" awk 'NF && $0 != ENVIRON["G"] && !s[$0]++' | head -n 10 > "$TMP/cands"
+        } | G="$GEN_X" awk 'NF && $0 != ENVIRON["G"] && !/--wssize|syndata/ && !s[$0]++' | head -n 10 > "$TMP/cands"
         S_total=$((S_done + $(wc -l < "$TMP/cands") * 2))
         NUSED=0
         while IFS= read -r a <&3; do
@@ -639,7 +639,7 @@ if [ "$MODE" = "check" ]; then
     [ -n "$KEYS" ] || KEYS="${NETID%%"|"*}"
     # строка истории: "общая|youtube" (youtube пусто — одна на всё)
     KS=" $KEYS " awk -F'|' 'index(ENVIRON["KS"], " " $1 " ") && $2 == "custom" && $3 != "" { l[++n] = $3 "|" $6 } END { for (i = n; i >= 1; i--) if (!(l[i] in s)) { s[l[i]] = 1; print l[i] } }' \
-        "$HIST" 2>/dev/null > "$TMP/hist"
+        "$HIST" 2>/dev/null | grep -vE -e '--wssize|syndata' > "$TMP/hist"
     S_total=$((S_done + $(wc -l < "$TMP/hist")))
     st stage="пробую прежние стратегии"
     while IFS= read -r h; do
@@ -670,8 +670,8 @@ fi
 
 if [ "$MODE" = "quick" ]; then
     # проверенные шаблоны (autottl убран: ломал обычные сайты во всех 6 проверенных сетях)
-    # + S_done: после сторожа (check) прогоны уже были — иначе «30 из 23»
-    S_total=$((S_done + 23))
+    # + S_done: после сторожа (check) прогоны уже были — иначе «30 из 20»
+    S_total=$((S_done + 20))
     st stage="быстрый подбор"
     while IFS= read -r a; do
         [ -n "$a" ] && run_strat "$a" "быстрый"
@@ -689,19 +689,16 @@ if [ "$MODE" = "quick" ]; then
 --dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=sberbank.ru --dpi-desync-fooling=md5sig
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=badseq --dpi-desync-split-pos=1,midsld $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=badsum --dpi-desync-split-pos=midsld $FAKE
---dpi-desync=fake,multidisorder --dpi-desync-fooling=ts --dpi-desync-split-pos=midsld $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=datanoack --dpi-desync-split-pos=midsld $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=datanoack --dpi-desync-split-pos=midsld --dpi-desync-fake-tls-mod=rnd,rndsni,padencap
 --dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=@G $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
 --dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld
 --dpi-desync=multisplit --dpi-desync-split-seqovl=652 --dpi-desync-split-pos=2 --dpi-desync-split-seqovl-pattern=@G
---dpi-desync=syndata,multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1
 --dpi-desync=multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1 --dup=2 --dup-cutoff=n3 --dup-fooling=md5sig
---dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=www.google.com --dpi-desync-fooling=md5sig --wssize=1:6
 EOF
 else
-    S_total=$(( 14 + 8 + 36 + 4 + 5 + 12 + 10 ))
+    S_total=$(( 14 + 7 + 32 + 4 + 5 + 12 + 6 ))
     # A: только разрез, без подделок
     st stage="1/4 разрез без подделок"
     for m in multisplit multidisorder; do
@@ -719,6 +716,8 @@ else
     for f in $F2; do
         for m in multisplit multidisorder fakedsplit fakeddisorder; do
             for p in 1 midsld 1,midsld 1,host+1,midsld; do
+                # fakedsplit/fakeddisorder режут в одном месте: 1,midsld = midsld (замер 04.11)
+                case "$m:$p" in faked*:1,midsld) continue ;; esac
                 run_strat "--dpi-desync=fake,$m $(fool_arg $f) --dpi-desync-split-pos=$p $FAKE" "3"
             done
         done
@@ -729,7 +728,7 @@ else
     # а при белых списках это может оказаться единственным, что проходит
     st stage="3/4 приманки с российским SNI"
     run_strat "--dpi-desync=fake,hostfakesplit --dpi-desync-split-pos=host+1 --dpi-desync-hostfakesplit-midhost=midsld --dpi-desync-hostfakesplit-mod=host=www.google.com --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=sberbank.ru --dpi-desync-fooling=datanoack --dpi-desync-repeats=6 --dpi-desync-cutoff=n6" "3"
-    run_strat "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,sld+1 --dpi-desync-split-seqovl=2 --dpi-desync-split-seqovl-pattern=@G --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=max.ru --dpi-desync-fooling=datanoack --dpi-desync-repeats=6 --dpi-desync-cutoff=n5" "3"
+    run_strat "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=3,sld+1 --dpi-desync-split-seqovl=2 --dpi-desync-split-seqovl-pattern=@G --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=max.ru --dpi-desync-fooling=datanoack --dpi-desync-repeats=6 --dpi-desync-cutoff=n5" "3"
     run_strat "--dpi-desync=fake,multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1 --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=gosuslugi.ru --dpi-desync-fooling=datanoack --dpi-desync-cutoff=n5" "3"
     # подставное имя в hostfakesplit — VK (есть во всех белых списках; фейки
     # с ним — у magisk-zapret2)
@@ -753,8 +752,11 @@ else
         run_strat "$b --dpi-desync-fake-tls-mod=rnd,rndsni,padencap" "4"
         run_strat "$a --dpi-desync-repeats=6" "4"
     done < "$TMP/top3"
-    # E (3.6): новые приёмы nfqws к двум лучшим — дубли пакетов с порчей,
-    # TTL настоящих пакетов, маленькое окно сервера, данные в SYN
+    # E (3.6): новые приёмы nfqws к двум лучшим — дубли пакетов с порчей и
+    # TTL настоящих пакетов. n3 — только SYN и ACK; d2 ClientHello тоже не
+    # дублирует, если его режет desync (замер 04.11), а цепляет ACK после него.
+    # --wssize и syndata здесь нет: они работают на SYN, когда имени ещё нет, —
+    # подбор их мерил, а профиль со списком не применял (03.11 выиграла с --wssize).
     st stage="5/5 новые приёмы"
     best 2 > "$TMP/top2e"
     while IFS= read -r a; do
@@ -762,8 +764,6 @@ else
         run_strat "$a --dup=2 --dup-cutoff=n3 --dup-fooling=md5sig" "5"
         run_strat "$a --dup=1 --dup-cutoff=n3 --dup-autottl" "5"
         run_strat "$a --orig-autottl=+5 --orig-mod-cutoff=n3" "5"
-        run_strat "$a --wssize=1:6" "5"
-        run_strat "$(echo "$a" | sed 's/--dpi-desync=/--dpi-desync=syndata,/')" "5"
     done < "$TMP/top2e"
 fi
 

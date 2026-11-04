@@ -187,7 +187,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 Нумерация `X.Y.Z`: **X** — этап, **Y** — заметная функция, **Z** — исправления.
 `versionCode` = X·10000 + Y·100 + Z (3.8.1 → 30801). До 23.10.2026 у модуля было две
 нумерации (внешняя 2.x и внутренняя 3.x-hybrid) — таблица соответствия в [`CHANGELOG.md`](CHANGELOG.md).
-Теги `v1.0` … `v3.22.3`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
+Теги `v1.0` … `v3.22.4`; подробности — в начале `module/service.sh` и в `CHANGELOG.md`.
 
 <details>
 <summary>Кратко по версиям</summary>
@@ -249,6 +249,7 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 | 3.22.1 | DoH по умолчанию — not-a-dns, Wlrus — первый запасной: Wlrus не отдавал адрес github.com (GitHub «не найден»). |
 | 3.22.2 | YouTube: отбой мёртвых видеосерверов — список до 64 на 30 мин (был 16 и переполнялся), серверы без TLS-ответа — за 3 с, выгрузки не трогаются, лавина — 12 за минуту, перепроверка по 4 одновременно. |
 | 3.22.3 | WARP не выключается без VPN на OnePlus с Android 17: служебный интерфейс `vgate0` больше не принимается за VPN и за раздачу. |
+| 3.22.4 | Подбор: убраны приёмы, которые в бою не работают (`--wssize`, syndata) или опасны для клиентов Windows (`ts`), меньше лишних прогонов; запасной bootstrap DoH 8.8.4.4; импорт WARP не теряет ключи AmneziaWG 3 |
 
 </details>
 
