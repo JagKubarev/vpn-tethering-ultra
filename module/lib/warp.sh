@@ -157,6 +157,14 @@ warp_ep_kick() {   # адрес — пробуем его с этого моме
     ping -c 1 -W 1 -I $WARP_IF 1.1.1.1 >/dev/null 2>&1 &
 }
 
+# для журнала: сервер молчит или отвечает, но трафик не идёт (свой сервер так
+# не проверяется при подъёме — без этого «нет трафика» значило и то, и другое)
+warp_hs_note() {
+    local hs
+    hs=$("$AWG_BIN" show $WARP_IF latest-handshakes 2>/dev/null | awk '{print $2; exit}')
+    if [ "${hs:-0}" -gt 0 ]; then echo "рукопожатие есть"; else echo "рукопожатия нет"; fi
+}
+
 warp_ep_step() {   # 0 — ждём или дождались (WARP_HS=1), 1 — адреса кончились
     local hs e was
     hs=$("$AWG_BIN" show $WARP_IF latest-handshakes 2>/dev/null | awk '{print $2; exit}')
@@ -486,10 +494,10 @@ warp_reconcile() {
                     log "WARP: $WARP_CUR — через $WARP_EP_CUR нет трафика, беру $WARP_EP_Q (российская)"
                     warp_ep_next
                 elif [ $WARP_FAILS -ge 3 ] && ! warp_uplink; then
-                    log "WARP: $WARP_CUR — нет трафика, но и напрямую сети нет — конфиг не бракую, повтор через ${WARP_NONET_RETRY} с"
+                    log "WARP: $WARP_CUR — нет трафика ($(warp_hs_note)), но и напрямую сети нет — конфиг не бракую, повтор через ${WARP_NONET_RETRY} с"
                     warp_down; WARP_RETRY_TS=$((now + WARP_NONET_RETRY)); warp_set_state fail "нет сети"
                 elif [ $WARP_FAILS -ge 3 ]; then
-                    log "WARP: $WARP_CUR — нет трафика через туннель, беру следующий"
+                    log "WARP: $WARP_CUR — нет трафика через туннель ($(warp_hs_note)), беру следующий"
                     warp_mark_bad "$WARP_CUR"; warp_down; warp_set_state off ""
                 fi
             fi ;;
