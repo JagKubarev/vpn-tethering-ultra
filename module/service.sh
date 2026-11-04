@@ -613,6 +613,9 @@
 #   снимался через секунды; поиск раздачи вешал на него kill-switch и DNAT.
 # v3.22.4 — подбор: без --wssize, syndata и ts, меньше лишних прогонов, seqovl в
 #   шаблоне с pos=3; bootstrap DoH 8.8.4.4; импорт WARP не теряет ключи AWG 3.
+# v3.22.5 — свой curl на прошивках без системного, предупреждение, если curl нет;
+#   подбор: hostfakesplit с повторами, сторож до первой рабочей; WebUI: состояние
+#   на главной, поиск в журнале; рукопожатие в логе WARP; DoH без /apex на Android 8.
 # ============================================================================
 # ============================================================================
 
@@ -1475,9 +1478,24 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.22.4 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.22.5 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
+# curl: системный, если есть, иначе свой из модуля (PATH — в конце, системный
+# первым). 04.11 Xiaomi: системного нет — WARP, подбор и проверки падали молча
+PATH="$PATH:$MODULE_DIR/bin"; export PATH
+CURL_BIN=$(command -v curl); CURL_SRC=system
+case "$CURL_BIN" in "$MODULE_DIR"/*) CURL_SRC=module ;; esac
+if ! "${CURL_BIN:-curl}" --version >/dev/null 2>&1; then
+    CURL_SRC=none; CURL_BIN=""
+    "$MODULE_DIR/bin/curl" --version >/dev/null 2>&1 && { CURL_BIN="$MODULE_DIR/bin/curl"; CURL_SRC=module; }
+fi
+if [ "$CURL_SRC" = none ]; then
+    log "WARNING: нет рабочего curl — WARP, подбор и проверки сайтов работать не будут"
+elif [ "$CURL_SRC" = module ]; then
+    log "curl: системного нет или он не запускается, использую свой из модуля"
+fi
+: "${CURL_BIN:=curl}"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
 [ "$STATUS_IN_DESCRIPTION" = "1" ] || set_description "$MODULE_DESC_DEFAULT"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"

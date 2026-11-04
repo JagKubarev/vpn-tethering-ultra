@@ -128,6 +128,7 @@ update_status() {
         echo "quic_fake=$QUIC_FAKE_UIDS"
         echo "zapret=$ZAPRET_STATE"
         echo "zapret_caps=$ZAPRET_CAPS"
+        echo "curl_src=$CURL_SRC"
         echo "zapret_auto=$(cat "$ZAPRET_LIST_AUTO" 2>/dev/null | grep -c '[a-z0-9]')"
         echo "zapret_per_net=$ZAPRET_PER_NET"
         echo "zapret_strategy=$ZAPRET_EFF_STRATEGY"

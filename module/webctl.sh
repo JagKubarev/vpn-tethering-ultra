@@ -42,6 +42,7 @@
 
 MODDIR="${0%/*}"
 [ -f "$MODDIR/service.sh" ] || MODDIR=/data/adb/modules/vpn-to-hotspot-usb
+PATH="$PATH:$MODDIR/bin"; export PATH   # curl: нет системного — свой из модуля
 
 CONF="${VPN_TETHER_CONF:-/data/adb/vpn_tether.conf}"   # переменная — только для тестов
 STATUS_FILE="$MODDIR/status"
@@ -290,7 +291,7 @@ case "$1" in
         fi
         ;;
     log-prev)   # лог прошлого запуска демона (до ребута/перезапуска)
-        tail -n 400 "$LOG_FILE.prev" 2>/dev/null
+        tail -n 1000 "$LOG_FILE.prev" 2>/dev/null
         ;;
 
     apps)
@@ -709,7 +710,7 @@ case "$1" in
         CA=/apex/com.android.conscrypt/cacerts
         [ -d "$CA" ] || CA=/system/etc/security/cacerts
         G=3999
-        dcurl() { su 0 -g $G -c "curl -s --interface $wan --capath $CA $*" 2>/dev/null; }
+        dcurl() { su 0 -g $G -c "$(command -v curl) -s --interface $wan --capath $CA $*" 2>/dev/null; }
         doh_a() { dcurl "-m 6 -H 'accept: application/dns-json' 'https://dns.google/resolve?name=$1&type=A'" | grep -oE '"data":"[0-9.]+"' | grep -oE '[0-9.]+' | head -1; }
         plain_a() { su 0 -g $G -c "$BB nslookup $1 $2" 2>/dev/null | awk '/^Name:/ {n = 1} n && /^Address/ {print $NF; exit}' | grep -E '^[0-9.]+$'; }
 

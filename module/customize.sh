@@ -8,7 +8,7 @@ case "$ARCH" in
         set_perm "$MODPATH/bin/nfqws-arm64"     0 0 0755
         set_perm "$MODPATH/bin/amneziawg-go-arm64" 0 0 0755
         set_perm "$MODPATH/bin/awg-arm64"       0 0 0755
-        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG, arm64"
+        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG + curl 8.23.0, arm64"
         ;;
     arm)
         rm -f "$MODPATH/bin/conntrack-arm64" "$MODPATH/bin/dnsproxy-arm64" "$MODPATH/bin/nfqws-arm64"               "$MODPATH/bin/amneziawg-go-arm64" "$MODPATH/bin/awg-arm64"
@@ -17,7 +17,7 @@ case "$ARCH" in
         set_perm "$MODPATH/bin/nfqws-arm"     0 0 0755
         set_perm "$MODPATH/bin/amneziawg-go-arm" 0 0 0755
         set_perm "$MODPATH/bin/awg-arm"       0 0 0755
-        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG, armv7"
+        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG + curl 8.23.0, armv7"
         ;;
     *)
         # неизвестная арх — оставляем оба, service.sh выберет по uname -m
@@ -31,9 +31,18 @@ case "$ARCH" in
         set_perm "$MODPATH/bin/amneziawg-go-arm"   0 0 0755
         set_perm "$MODPATH/bin/awg-arm64"       0 0 0755
         set_perm "$MODPATH/bin/awg-arm"         0 0 0755
-        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG, arm64+armv7"
+        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG + curl 8.23.0, arm64+armv7"
         ;;
 esac
+# свой curl — на прошивках без системного (Xiaomi): модуль находит его по PATH
+case "$ARCH" in
+    arm64) c=arm64 ;;
+    arm) c=arm ;;
+    *) case "$(uname -m)" in aarch64|arm64) c=arm64 ;; *) c=arm ;; esac ;;
+esac
+mv -f "$MODPATH/bin/curl-$c" "$MODPATH/bin/curl"
+rm -f "$MODPATH/bin/curl-arm64" "$MODPATH/bin/curl-arm"
+set_perm "$MODPATH/bin/curl" 0 0 0755
 set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/action.sh"  0 0 0755
 set_perm "$MODPATH/webctl.sh"  0 0 0755

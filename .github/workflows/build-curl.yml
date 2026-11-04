@@ -1,0 +1,91 @@
+# Сборка curl (лицензия curl, MIT-подобная) с OpenSSL (Apache-2.0) под Android
+# (arm64 и armv7): на части прошивок (Xiaomi, 04.11) системного curl нет, а без
+# него не работают WARP, подбор и проверки. Исходники — официальные релизы.
+# OpenSSL 3.5+: X25519MLKEM768 — большой ClientHello для подбора (scan.sh).
+name: build-curl
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [curl-bundle]
+    paths: ['.github/workflows/build-curl.yml']
+
+env:
+  CURL_VER: 8.23.0
+  OPENSSL_VER: 3.6.5
+  CURL_SHA256: 8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5
+  OPENSSL_SHA256: a2157c2830efdec3788939b00c9b0638306d3f0bbb76dc4832ee503bb397df98
+  NDK_MAJOR: 30
+  API: 21
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Исходники
+        run: |
+          mkdir -p out
+          u=$(echo "$CURL_VER" | tr . _)
+          curl -fsSL -o "curl-$CURL_VER.tar.xz" "https://github.com/curl/curl/releases/download/curl-$u/curl-$CURL_VER.tar.xz"
+          curl -fsSL -o "openssl-$OPENSSL_VER.tar.gz" "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VER/openssl-$OPENSSL_VER.tar.gz"
+          printf '%s  %s\n' "$CURL_SHA256" "curl-$CURL_VER.tar.xz" "$OPENSSL_SHA256" "openssl-$OPENSSL_VER.tar.gz" | tee out/SOURCES.sha256 | sha256sum -c -
+
+      - name: curl + OpenSSL (Android NDK)
+        run: |
+          NDK=$(ls -d "$ANDROID_HOME"/ndk/"$NDK_MAJOR".* 2>/dev/null | sort -V | tail -1)
+          [ -n "$NDK" ] || { echo "нет NDK r$NDK_MAJOR в образе: $(ls "$ANDROID_HOME"/ndk)"; exit 1; }
+          grep Pkg.Revision "$NDK/source.properties"
+          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export ANDROID_NDK_ROOT="$NDK" PATH="$TC:$PATH"
+          # Динамически, с системной libc, API 21 (как awg): статическая libc.a NDK
+          # на старых ядрах падает, и имена резолвит штатный netd. OpenSSL — внутрь.
+          for a in aarch64-linux-android:android-arm64:arm64 armv7a-linux-androideabi:android-arm:arm; do
+            t=${a%%:*}; r=${a#*:}; o=${r%%:*}; n=${r##*:}
+            inst="$PWD/inst-$n"
+            rm -rf "openssl-$OPENSSL_VER" "curl-$CURL_VER"
+            tar xzf "openssl-$OPENSSL_VER.tar.gz"
+            tar xJf "curl-$CURL_VER.tar.xz"
+            (
+              cd "openssl-$OPENSSL_VER"
+              # в cacerts Android файлы названы по старому хешу (subject_hash_old),
+              # а --capath в OpenSSL ищет по новому: все сертификаты «не найдены»
+              sed -i 's/h = X509_NAME_hash_ex(name, libctx, propq, &i);/h = X509_NAME_hash_old(name); i = 1;/' crypto/x509/by_dir.c
+              grep -q 'h = X509_NAME_hash_old(name);' crypto/x509/by_dir.c || { echo "by_dir.c не пропатчен"; exit 1; }
+              # ClientHello по умолчанию — обычный, как у системного curl: в OpenSSL
+              # 3.5+ он с ключом MLKEM (два сегмента), а проверки идут мимо обхода.
+              # Большой — только там, где его просит подбор (--curves в scan.sh)
+              sed -i 's|"?\*X25519MLKEM768 / ?\*X25519:?secp256r1 / ?X448:?secp384r1:?secp521r1 / ?ffdhe2048:?ffdhe3072"|"?X25519:?secp256r1:?X448:?secp384r1:?secp521r1:?ffdhe2048:?ffdhe3072"|' ssl/t1_lib.c
+              grep -q '"?X25519:?secp256r1' ssl/t1_lib.c || { echo "t1_lib.c не пропатчен"; exit 1; }
+              ./Configure "$o" -D__ANDROID_API__="$API" -Os --prefix="$inst" --libdir=lib \
+                no-shared no-tests no-docs no-legacy no-engine no-comp no-dtls no-ssl3 no-srp no-apps
+              make -j4 build_libs
+              make install_dev
+            )
+            (
+              cd "curl-$CURL_VER"
+              ./configure --host="$t" CC="$TC/$t$API-clang" AR="$TC/llvm-ar" RANLIB="$TC/llvm-ranlib" \
+                CFLAGS=-Os --with-openssl="$inst" --disable-shared --enable-static \
+                --with-ca-path=/system/etc/security/cacerts --without-ca-bundle --without-ca-fallback \
+                --without-libpsl --without-zlib --without-brotli --without-zstd --without-nghttp2 \
+                --without-libidn2 --disable-ldap --disable-ldaps --disable-rtsp --disable-dict \
+                --disable-telnet --disable-tftp --disable-pop3 --disable-imap --disable-smb \
+                --disable-smtp --disable-gopher --disable-mqtt --disable-ftp --disable-file \
+                --disable-manual --disable-docs --disable-ntlm --disable-tls-srp
+              make -j4
+              "$TC/llvm-strip" src/curl
+              cp src/curl "../out/curl-$n"
+              cp COPYING ../out/curl.LICENSE
+            )
+            cp "openssl-$OPENSSL_VER/LICENSE.txt" out/openssl.LICENSE
+          done
+
+      - name: Проверка
+        run: |
+          file out/curl-*
+          ls -la out
+          sha256sum out/curl-* | tee -a out/SOURCES.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: curl-android
+          path: out/

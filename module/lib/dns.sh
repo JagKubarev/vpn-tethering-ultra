@@ -838,14 +838,17 @@ dns_primary_alive() {
     command -v curl >/dev/null 2>&1 || return 1
     case "$u" in *\?*) u="$u&" ;; *) u="$u?" ;; esac
     u="${u}dns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"
+    # /apex — с Android 10; на 8.1 (MT6580) его нет, и curl не проверил бы сертификат
+    local ca=/apex/com.android.conscrypt/cacerts
+    [ -d "$ca" ] || ca=/system/etc/security/cacerts
     # --no-alpn: curl без HTTP/2, а серверы только с HTTP/2 с ALPN «http/1.1»
     # рвут TLS (DNS4EU) — без ALPN пускают. Жив: 200; 505 (Quad9: HTTP/1.1 не
     # поддерживает) и «HTTP/0.9» (DNS4EU: сразу кадры HTTP/2) — TLS с этим именем
     # прошёл, сервер на месте. Подмена ТСПУ и тишина TLS не проходят (02.11, 13T)
     if [ "$DNSPROXY_SU_G" = "1" ]; then
-        code=$(su -g "$DNSPROXY_GID" -c "curl -s -o /dev/null -m 4 --no-alpn --capath /apex/com.android.conscrypt/cacerts -H 'accept: application/dns-message' -w '%{http_code} %{errormsg}' '$u'" 2>/dev/null)
+        code=$(su -g "$DNSPROXY_GID" -c "$CURL_BIN -s -o /dev/null -m 4 --no-alpn --capath $ca -H 'accept: application/dns-message' -w '%{http_code} %{errormsg}' '$u'" 2>/dev/null)
     else
-        code=$(curl -s -o /dev/null -m 4 --no-alpn --capath /apex/com.android.conscrypt/cacerts -H 'accept: application/dns-message' -w '%{http_code} %{errormsg}' "$u" 2>/dev/null)
+        code=$(curl -s -o /dev/null -m 4 --no-alpn --capath $ca -H 'accept: application/dns-message' -w '%{http_code} %{errormsg}' "$u" 2>/dev/null)
     fi
     case "$code" in 200*|505*|*"HTTP/0.9"*) return 0 ;; esac
     return 1

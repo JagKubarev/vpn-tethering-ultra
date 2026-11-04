@@ -80,6 +80,11 @@ h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacin
 .hero-title { font-size: 18px; font-weight: 600; }
 .hero > div { min-width: 0; overflow-wrap: anywhere; }
 .hero-sub { color: var(--muted); font-size: 14px; margin-top: 2px; }
+.health { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; font-size: 13.5px; color: var(--muted); }
+.health:empty { display: none; }
+.health .hi { display: inline-flex; align-items: center; gap: 6px; }
+.health .hint { flex-basis: 100%; color: var(--amber-text); overflow-wrap: anywhere; }
+.health .hint.red { color: var(--red); }
 
 .kv { display: grid; grid-template-columns: fit-content(40%) minmax(0, 1fr); gap: 8px 14px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; }
 .kv .k { color: var(--muted); overflow-wrap: break-word; }
@@ -247,6 +252,7 @@ details.more > summary { color: var(--muted); }
     </div>
   </div>
   <button class="btn primary wide" id="toggleBtn" disabled>Переключить</button>
+  <div class="health" id="health"></div>
   <details class="kvbox" id="kvBox">
     <summary>Подробнее</summary>
     <div class="kv" id="kv"></div>
@@ -734,6 +740,10 @@ details.more > summary { color: var(--muted); }
       <button class="btn small" id="logCopy">Скопировать</button>
       <button class="btn small" id="logPrev">Прошлый запуск</button>
     </div>
+    <div class="row btn-row fill" style="border-top:0;padding-top:0">
+      <input type="search" id="logQ" placeholder="Поиск в журнале" aria-label="Поиск в журнале">
+      <button class="btn small" id="logWarn" aria-pressed="false">Только проблемы</button>
+    </div>
     <pre class="log" id="log"></pre>
   </details>
 </div>
@@ -853,13 +863,13 @@ function renderStatus(s) {
   if (s.daemon !== '1' && +s.uptime < 180) {
     dot.className = 'dot big amber'; title.textContent = 'Модуль запускается';
     sub.textContent = 'Телефон ещё загружается, это до минуты.';
-    $('#kv').innerHTML = ''; btn.disabled = true; btn.textContent = 'Переключить';
+    $('#kv').innerHTML = ''; $('#health').innerHTML = ''; btn.disabled = true; btn.textContent = 'Переключить';
     return;
   }
   if (s.daemon !== '1') {
     dot.className = 'dot big red'; title.textContent = 'Модуль не запущен';
     sub.textContent = 'Перезагрузите телефон. Если не поможет — отправьте логи (вкладка «Сервис»).';
-    $('#kv').innerHTML = ''; btn.disabled = true; btn.textContent = 'Переключить';
+    $('#kv').innerHTML = ''; $('#health').innerHTML = ''; btn.disabled = true; btn.textContent = 'Переключить';
     return;
   }
   btn.disabled = false;
@@ -956,6 +966,32 @@ function renderStatus(s) {
   if (bad.length) h += kvRow('Конфиг', 'пропущено: ' + esc(bad.join(', ')), 'amber');
   if (s.updated) h += kvRow('Обновлено', esc(s.updated));
   $('#kv').innerHTML = h;
+  renderHealth(s, w, bad.length > 0);
+}
+
+// Главное одной строкой: зелёное не расписываем, у проблем — подсказка, что делать
+function renderHealth(s, w, confBad) {
+  const it = [], hints = [];
+  const add = (name, d, hint) => {
+    it.push('<span class="hi"><span class="dot ' + d + '"></span>' + name + '</span>');
+    if (hint) hints.push('<span class="hint' + (d === 'red' ? ' red' : '') + '">' + esc(hint) + '</span>');
+  };
+  if (s.zapret === 'on') add('Обход', 'green');
+  else if (s.zapret === 'fail') add('Обход', 'red', 'Обход не запустился, повтор через минуту. Не поможет — отправьте логи (вкладка «Сервис»).');
+  else if (s.zapret === 'nokernel') add('Обход', 'red', 'Ядро телефона не поддерживает обход.');
+  else if (s.zapret === 'wl') add('Обход', 'amber', 'Обход на паузе: похоже, включены белые списки оператора.');
+  if (s.dnsproxy_enable === '1') {
+    if (s.dns_state === 'DNAT (dnsproxy упал)') add('DNS', 'red', 'dnsproxy не запустился, DNS обычный. Если не пройдёт — отправьте логи (вкладка «Сервис»).');
+    else if (s.dns_degraded === '1') add('DNS', 'amber', 'DoH не отвечает, пока работает ' + (s.mode === 'vpn' ? 'DNS VPN' : 'обычный DNS') + '. Модуль проверяет сам.');
+    else if (s.dns_alt === '1') add('DNS', 'amber', 'Основной DoH не отвечает, работает запасной.');
+    else add('DNS', 'green');
+  }
+  // пауза и подъём — не проблема: подсказка только у красного и у жёлтого с пояснением
+  if (s.warp && s.warp !== 'disabled') add('WARP', w.d, w.d === 'red' || (w.d === 'amber' && w.s) ? w.t + (w.s ? '. ' + w.s : '') : '');
+  if (s.curl_src === 'none') add('curl', 'red', 'Нет curl: WARP, подбор и проверки сайтов не работают. Отправьте логи (вкладка «Сервис»).');
+  if (s.stealth_rivals) add('Лишний модуль', 'amber', s.stealth_rivals + ': подробности в «Подробнее».');
+  if (confBad) add('Настройки', 'amber', 'Часть настроек пропущена: подробности в «Подробнее».');
+  $('#health').innerHTML = it.join('') + hints.join('');
 }
 
 // Опрос раз в 3 с: пока прошлый запрос не вернулся, новый не шлём (медленный
@@ -1607,11 +1643,27 @@ $('#warpPasteOk').addEventListener('click', async () => {
   $('#warpPaste').setAttribute('aria-expanded', 'false');
 });
 
-async function loadLog() {
-  const r = await ctl('log 200');
-  const pre = $('#log'); pre.textContent = r.out || 'Журнал пуст';
+// Журнал хранится целиком, поиск и «Только проблемы» фильтруют показанное
+let LOG_RAW = '', LOG_HEAD = '', LOG_NONE = 'Журнал пуст';
+const LOG_BAD = /WARNING|ERR |ошибк|не удалось|не запустил|сорвал|не отвечает|нет трафика|нет рабочего/i;
+function showLog() {
+  const q = $('#logQ').value.trim().toLowerCase(), only = $('#logWarn').getAttribute('aria-pressed') === 'true';
+  const l = LOG_RAW.split('\n').filter((x) => (!only || LOG_BAD.test(x)) && (!q || x.toLowerCase().includes(q)));
+  const pre = $('#log');
+  pre.textContent = LOG_HEAD + (!LOG_RAW ? LOG_NONE : l.join('\n').trim() || 'Ничего не найдено');
   pre.scrollTop = pre.scrollHeight;
 }
+async function loadLog() {
+  const r = await ctl('log 1000');
+  LOG_RAW = r.out || ''; LOG_HEAD = ''; LOG_NONE = 'Журнал пуст';
+  showLog();
+}
+$('#logQ').addEventListener('input', showLog);
+$('#logWarn').addEventListener('click', () => {
+  const b = $('#logWarn'), on = b.getAttribute('aria-pressed') !== 'true';
+  b.setAttribute('aria-pressed', on); b.classList.toggle('primary', on);
+  showLog();
+});
 $('#logBox').addEventListener('toggle', () => { if ($('#logBox').open) loadLog(); });
 async function loadZev() {
   const r = await ctl('zevents 40');
@@ -1647,8 +1699,9 @@ $('#logSend').addEventListener('click', async () => {
 });
 $('#logPrev').addEventListener('click', async () => {
   const r = await ctl('log-prev');
-  const pre = $('#log'); pre.textContent = r.out ? '— прошлый запуск (до перезагрузки/перезапуска) —\n' + r.out : 'Лога прошлого запуска нет';
-  pre.scrollTop = pre.scrollHeight;
+  LOG_RAW = r.out || ''; LOG_NONE = 'Лога прошлого запуска нет';
+  LOG_HEAD = r.out ? '— прошлый запуск (до перезагрузки/перезапуска) —\n' : '';
+  showLog();
 });
 $('#logCopy').addEventListener('click', async () => {
   const text = $('#log').textContent;

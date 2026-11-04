@@ -21,6 +21,7 @@
 # ============================================================================
 MODDIR="${0%/*}/.."
 [ -f "$MODDIR/service.sh" ] || MODDIR=/data/adb/modules/vpn-to-hotspot-usb
+PATH="$PATH:$MODDIR/bin"; export PATH   # curl: нет системного — свой из модуля
 ZDIR="$MODDIR/zapret"
 OUT=/data/local/tmp/vpn_tether_zscan
 Q=203
@@ -254,9 +255,10 @@ NS=$(wc -l < "$TMP/ips")
 # таких. Сайт засчитывается, только если открылся обоими. Не умеет curl —
 # проверяем только обычным.
 BIG=""
-if curl -s -o /dev/null -m 6 --curves X25519Kyber768Draft00:X25519 --interface "$WAN" --capath "$CA" https://ya.ru/ 2>/dev/null; then
-    BIG="X25519Kyber768Draft00:X25519"
-fi
+# Kyber — системный curl (BoringSSL), MLKEM — свой из модуля (OpenSSL)
+for g in X25519Kyber768Draft00:X25519 X25519MLKEM768:X25519; do
+    curl -s -o /dev/null -m 6 --curves "$g" --interface "$WAN" --capath "$CA" https://ya.ru/ 2>/dev/null && { BIG="$g"; break; }
+done
 
 # test_sites -> "ok_count avg_ms" и $TMP/res (h ok|rc)
 TPAR=16; [ "$MODE" = sites ] && TPAR=4
@@ -378,7 +380,8 @@ best() { # best N [этап]
 }
 
 POS_A="1 2 midsld sniext+1 1,midsld host+1 1,host+1,midsld"
-# ts нет: у клиентов Windows TCP timestamps выключены, фейк дойдёт до сервера
+# ts один нельзя: у клиентов Windows TCP timestamps выключены, фейк дойдёт до
+# сервера. В паре с md5sig (быстрый подбор) можно: фейк отбросит и там
 FOOL_ALL="md5sig badseq badsum datanoack ttl3 ttl5 autottl"
 fool_arg() {
     case "$1" in
@@ -670,11 +673,14 @@ fi
 
 if [ "$MODE" = "quick" ]; then
     # проверенные шаблоны (autottl убран: ломал обычные сайты во всех 6 проверенных сетях)
-    # + S_done: после сторожа (check) прогоны уже были — иначе «30 из 20»
-    S_total=$((S_done + 20))
+    # + S_done: после сторожа (check) прогоны уже были — иначе «30 из 22»
+    S_total=$((S_done + 22))
     st stage="быстрый подбор"
     while IFS= read -r a; do
         [ -n "$a" ] && run_strat "$a" "быстрый"
+        # от сторожа — до первой, открывшей всё без поломок: меньше залп (31.10);
+        # по кнопке — все, там нужна таблица и самая быстрая
+        [ "$MODE0" = check ] && tail -n 1 "$OUT.results" | awk -F'|' '{ exit !($2 > 0 && $1 == $2 && $3 == 0) }' && break
     done <<EOF
 --dpi-desync=multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1
 --dpi-desync=multidisorder --dpi-desync-split-pos=1,host+1,midsld
@@ -687,6 +693,8 @@ if [ "$MODE" = "quick" ]; then
 --dpi-desync=fake,fakedsplit --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1 $FAKE
 --dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=www.google.com --dpi-desync-fooling=md5sig
 --dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=sberbank.ru --dpi-desync-fooling=md5sig
+--dpi-desync=hostfakesplit --dpi-desync-repeats=4 --dpi-desync-fooling=ts,md5sig --dpi-desync-hostfakesplit-mod=host=ozon.ru
+--dpi-desync=hostfakesplit --dpi-desync-repeats=4 --dpi-desync-fooling=ts,md5sig --dpi-desync-hostfakesplit-mod=host=www.google.com
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=badseq --dpi-desync-split-pos=1,midsld $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=badsum --dpi-desync-split-pos=midsld $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=datanoack --dpi-desync-split-pos=midsld $FAKE

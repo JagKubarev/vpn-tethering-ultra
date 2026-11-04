@@ -157,6 +157,14 @@ warp_ep_kick() {   # адрес — пробуем его с этого моме
     ping -c 1 -W 1 -I $WARP_IF 1.1.1.1 >/dev/null 2>&1 &
 }
 
+# для журнала: сервер молчит или отвечает, но трафик не идёт (свой сервер так
+# не проверяется при подъёме — без этого «нет трафика» значило и то, и другое)
+warp_hs_note() {
+    local hs
+    hs=$("$AWG_BIN" show $WARP_IF latest-handshakes 2>/dev/null | awk '{print $2; exit}')
+    if [ "${hs:-0}" -gt 0 ]; then echo "рукопожатие есть"; else echo "рукопожатия нет"; fi
+}
+
 warp_ep_step() {   # 0 — ждём или дождались (WARP_HS=1), 1 — адреса кончились
     local hs e was
     hs=$("$AWG_BIN" show $WARP_IF latest-handshakes 2>/dev/null | awk '{print $2; exit}')
@@ -267,7 +275,7 @@ warp_start() {   # имя конфига
 warp_probe() {
     # по IP: при отказе DNS (DoH не отвечает) проверка по имени валилась и
     # живой туннель считался мёртвым (27.10 09:52)
-    local cmd="curl -s -m 5 --interface $WARP_IF --capath $WARP_CA https://1.1.1.1/cdn-cgi/trace" out
+    local cmd="$CURL_BIN -s -m 5 --interface $WARP_IF --capath $WARP_CA https://1.1.1.1/cdn-cgi/trace" out
     if [ -z "$WARP_SU_G" ]; then
         WARP_SU_G=0
         su -g "$DNSPROXY_GID" -c true >/dev/null 2>&1 && WARP_SU_G=1
@@ -291,7 +299,7 @@ warp_tg_dead() {
     local a c
     for a in 149.154.167.51 149.154.167.91 149.154.175.50; do
         if [ "$WARP_SU_G" = "1" ]; then
-            c=$(su -g "$DNSPROXY_GID" -c "curl -s -o /dev/null -m 3 --interface $WARP_IF -w %{http_code} http://$a/api" 2>/dev/null)
+            c=$(su -g "$DNSPROXY_GID" -c "$CURL_BIN -s -o /dev/null -m 3 --interface $WARP_IF -w %{http_code} http://$a/api" 2>/dev/null)
         else
             c=$(curl -s -o /dev/null -m 3 --interface $WARP_IF -w %{http_code} "http://$a/api" 2>/dev/null)
         fi
@@ -317,7 +325,7 @@ warp_uplink() {
     fi
     for u in https://1.1.1.1/cdn-cgi/trace https://8.8.8.8/; do
         if [ "$WARP_SU_G" = "1" ]; then
-            su -g "$DNSPROXY_GID" -c "curl -s -k -m 3 -o /dev/null $u" >/dev/null 2>&1 && return 0
+            su -g "$DNSPROXY_GID" -c "$CURL_BIN -s -k -m 3 -o /dev/null $u" >/dev/null 2>&1 && return 0
         else
             curl -s -k -m 3 -o /dev/null "$u" >/dev/null 2>&1 && return 0
         fi
@@ -486,10 +494,10 @@ warp_reconcile() {
                     log "WARP: $WARP_CUR — через $WARP_EP_CUR нет трафика, беру $WARP_EP_Q (российская)"
                     warp_ep_next
                 elif [ $WARP_FAILS -ge 3 ] && ! warp_uplink; then
-                    log "WARP: $WARP_CUR — нет трафика, но и напрямую сети нет — конфиг не бракую, повтор через ${WARP_NONET_RETRY} с"
+                    log "WARP: $WARP_CUR — нет трафика ($(warp_hs_note)), но и напрямую сети нет — конфиг не бракую, повтор через ${WARP_NONET_RETRY} с"
                     warp_down; WARP_RETRY_TS=$((now + WARP_NONET_RETRY)); warp_set_state fail "нет сети"
                 elif [ $WARP_FAILS -ge 3 ]; then
-                    log "WARP: $WARP_CUR — нет трафика через туннель, беру следующий"
+                    log "WARP: $WARP_CUR — нет трафика через туннель ($(warp_hs_note)), беру следующий"
                     warp_mark_bad "$WARP_CUR"; warp_down; warp_set_state off ""
                 fi
             fi ;;

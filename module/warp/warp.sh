@@ -22,6 +22,7 @@
 
 MODDIR="${0%/*}"; MODDIR="${MODDIR%/warp}"
 [ -f "$MODDIR/service.sh" ] || MODDIR=/data/adb/modules/vpn-to-hotspot-usb
+PATH="$PATH:$MODDIR/bin"; export PATH   # curl: нет системного — свой из модуля
 WARP_DIR=/data/adb/vpn_tether_warp
 STATUS_FILE="$MODDIR/status"
 ZSCAN=/data/local/tmp/vpn_tether_zscan

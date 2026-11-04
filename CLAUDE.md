@@ -30,7 +30,7 @@ KernelSU/Magisk-модуль (id `vpn-to-hotspot-usb`, автор Kubarev, те�
 - `module/zapret/` — `scan.sh` (подбор / сторож / сайты), `ytslow.sh`, `netid.sh`, списки.
 - `module/warp/` — `warp.sh` (хранилище конфигов WARP: создать, импорт, экспорт), списки
   сетей групп (Telegram, Google без GCP, общие CDN), `endpoints.txt` — пул адресов Cloudflare.
-- `module/bin/` — `nfqws`, `dnsproxy`, `conntrack`, `amneziawg-go`, `awg` (arm64 + armv7).
+- `module/bin/` — `nfqws`, `dnsproxy`, `conntrack`, `amneziawg-go`, `awg`, `curl` (arm64 + armv7; `curl` — запасной, если нет системного: `customize.sh` оставляет `bin/curl`, демон и скрипты ищут его по `PATH`).
 - `third_party/conntrack/`, `third_party/amneziawg/` — тарболы исходников `bin/conntrack-*` и
   AmneziaWG (GPL), в zip не входят. awg/amneziawg-go собираются в Actions (`build-awg.yml`).
 - `tools/` — стенды и замеры для разработки (`zt_harness.sh`, `leakmon.py`,
@@ -47,7 +47,7 @@ KernelSU/Magisk-модуль (id `vpn-to-hotspot-usb`, автор Kubarev, те�
 
 На каждый релиз меняются **три места** и ставится тег `vX.Y.Z`:
 1. `module/module.prop`: `version=vX.Y.Z` и `versionCode` = X·10000 + Y·100 + Z
-   (сейчас 31900 у v3.19.0).
+   (сейчас 32205 у v3.22.5).
 2. Баннер в `service.sh`: `=== VPN Tether vX.Y.Z Started ...`.
 3. Запись в шапке `service.sh` (по хронологии: новая — в конец журнала, перед строкой `# ====`) **и** в `CHANGELOG.md`.
 4. Обновление через менеджер: `update.json` (version, versionCode, zipUrl) и
