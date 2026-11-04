@@ -3,7 +3,8 @@ https://github.com/curl/curl/releases/tag/curl-8_23_0
 https://github.com/openssl/openssl/releases/tag/openssl-3.6.5
 Сборка: .github/workflows/build-curl.yml. Правка OpenSSL: --capath ищет файлы по
 старому хешу (X509_NAME_hash_old), как названы сертификаты в cacerts Android.
+Группы по умолчанию — без MLKEM: обычный ClientHello, как у системного curl.
 sha256 curl-8.23.0.tar.xz 8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5
 sha256 openssl-3.6.5.tar.gz a2157c2830efdec3788939b00c9b0638306d3f0bbb76dc4832ee503bb397df98
-sha256 *curl-arm64 5327cda316576af8c3f6f61b015aad30b27bc8c9c5f8281ded603c5978fec5d4
-sha256 *curl-arm 7c44dabd6ee6556a3f1264cf86f3153f7b4a729a58948895a0eb20234208269e
+sha256 curl-arm64 d391da6304e9dff62d6e280c74e1e70be20e8da0cd12c450b6a7f5ee4435e285
+sha256 curl-arm cf98ca226ef44f2798bca0379d45a48832a16cabcffaa51703536e3e348060d4
