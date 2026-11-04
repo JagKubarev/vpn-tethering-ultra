@@ -677,6 +677,9 @@ if [ "$MODE" = "quick" ]; then
     st stage="быстрый подбор"
     while IFS= read -r a; do
         [ -n "$a" ] && run_strat "$a" "быстрый"
+        # от сторожа — до первой, открывшей всё без поломок: меньше залп (31.10);
+        # по кнопке — все, там нужна таблица и самая быстрая
+        [ "$MODE0" = check ] && tail -n 1 "$OUT.results" | awk -F'|' '{ exit !($2 > 0 && $1 == $2 && $3 == 0) }' && break
     done <<EOF
 --dpi-desync=multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1
 --dpi-desync=multidisorder --dpi-desync-split-pos=1,host+1,midsld
