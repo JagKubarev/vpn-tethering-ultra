@@ -672,8 +672,8 @@ fi
 
 if [ "$MODE" = "quick" ]; then
     # проверенные шаблоны (autottl убран: ломал обычные сайты во всех 6 проверенных сетях)
-    # + S_done: после сторожа (check) прогоны уже были — иначе «30 из 20»
-    S_total=$((S_done + 20))
+    # + S_done: после сторожа (check) прогоны уже были — иначе «30 из 22»
+    S_total=$((S_done + 22))
     st stage="быстрый подбор"
     while IFS= read -r a; do
         [ -n "$a" ] && run_strat "$a" "быстрый"
@@ -689,6 +689,8 @@ if [ "$MODE" = "quick" ]; then
 --dpi-desync=fake,fakedsplit --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1 $FAKE
 --dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=www.google.com --dpi-desync-fooling=md5sig
 --dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=sberbank.ru --dpi-desync-fooling=md5sig
+--dpi-desync=hostfakesplit --dpi-desync-repeats=4 --dpi-desync-fooling=ts,md5sig --dpi-desync-hostfakesplit-mod=host=ozon.ru
+--dpi-desync=hostfakesplit --dpi-desync-repeats=4 --dpi-desync-fooling=ts,md5sig --dpi-desync-hostfakesplit-mod=host=www.google.com
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=badseq --dpi-desync-split-pos=1,midsld $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=badsum --dpi-desync-split-pos=midsld $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=datanoack --dpi-desync-split-pos=midsld $FAKE
