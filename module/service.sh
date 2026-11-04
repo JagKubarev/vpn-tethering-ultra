@@ -1484,10 +1484,13 @@ PATH="$PATH:$MODULE_DIR/bin"; export PATH
 CURL_BIN=$(command -v curl); CURL_SRC=system
 case "$CURL_BIN" in "$MODULE_DIR"/*) CURL_SRC=module ;; esac
 if ! "${CURL_BIN:-curl}" --version >/dev/null 2>&1; then
-    CURL_SRC=none
+    CURL_SRC=none; CURL_BIN=""
+    "$MODULE_DIR/bin/curl" --version >/dev/null 2>&1 && { CURL_BIN="$MODULE_DIR/bin/curl"; CURL_SRC=module; }
+fi
+if [ "$CURL_SRC" = none ]; then
     log "WARNING: нет рабочего curl — WARP, подбор и проверки сайтов работать не будут"
 elif [ "$CURL_SRC" = module ]; then
-    log "curl: системного нет, использую свой из модуля"
+    log "curl: системного нет или он не запускается, использую свой из модуля"
 fi
 : "${CURL_BIN:=curl}"
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
