@@ -45,6 +45,10 @@ jobs:
             tar xJf "curl-$CURL_VER.tar.xz"
             (
               cd "openssl-$OPENSSL_VER"
+              # в cacerts Android файлы названы по старому хешу (subject_hash_old),
+              # а --capath в OpenSSL ищет по новому: все сертификаты «не найдены»
+              sed -i 's/h = X509_NAME_hash_ex(name, libctx, propq, &i);/h = X509_NAME_hash_old(name); i = 1;/' crypto/x509/by_dir.c
+              grep -q 'h = X509_NAME_hash_old(name);' crypto/x509/by_dir.c || { echo "by_dir.c не пропатчен"; exit 1; }
               ./Configure "$o" -D__ANDROID_API__="$API" -Os --prefix="$inst" --libdir=lib \
                 no-shared no-tests no-docs no-legacy no-engine no-comp no-dtls no-ssl3 no-srp no-apps
               make -j4 build_libs
