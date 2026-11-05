@@ -46,7 +46,7 @@ jobs:
           export ANDROID_NDK_ROOT="$NDK" PATH="$TC:$PATH"
           # Динамически, с системной libc, API 21 (как awg): статическая libc.a NDK
           # на старых ядрах падает, и имена резолвит штатный netd. OpenSSL — внутрь.
-          for a in aarch64-linux-android:android-arm64:arm64; do
+          for a in aarch64-linux-android:android-arm64:arm64 armv7a-linux-androideabi:android-arm:arm; do
             t=${a%%:*}; r=${a#*:}; o=${r%%:*}; n=${r##*:}
             inst="$PWD/inst-$n"
             rm -rf "openssl-$OPENSSL_VER" "curl-$CURL_VER"
@@ -69,6 +69,7 @@ jobs:
               make install_dev
             )
             export PKG_CONFIG_LIBDIR="$inst/lib/pkgconfig" PKG_CONFIG_PATH=
+            rm -rf "nghttp3-$NGHTTP3_VER" "ngtcp2-$NGTCP2_VER"
             tar xzf "nghttp3-$NGHTTP3_VER.tar.gz"
             (
               cd "nghttp3-$NGHTTP3_VER"
