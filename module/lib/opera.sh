@@ -58,6 +58,8 @@ OPERA_DOM_LAST=""
 OPERA_DOM_FLAST=""
 OPERA_DOM_SKIP=0
 OPERA_NETS=0            # сколько сетей и приложений в правилах (для WebUI)
+OPERA_DOM_RETRY=15      # повтор пустого DNS: 30, 60, 120… 600 с — цикл демона ждёт ответ
+OPERA_V6_OK=""          # 0 = ip6tables не работает, IPv6 не трогать и не проверять
 OPERA_V6_SIG=""         # что стоит в IPv6: сотни вызовов ip6tables — только при смене
 OPERA_RULE_ERR=""       # почему не встали правила
 OPERA_APP_TS=0
@@ -125,6 +127,7 @@ opera_start() {
     if [ -z "$OPERA_SU_G" ]; then
         OPERA_SU_G=0
         su -g "$OPERA_GID" -c true >/dev/null 2>&1 && OPERA_SU_G=1
+        [ "$OPERA_SU_G" = "1" ] || log "WARNING: opera: su -g не работает — opera-proxy без своей группы, HTTPS-фильтр AdGuard ему помешает"
     fi
     opera_exempt
     opera_ca_build || log "WARNING: opera: системные сертификаты не найдены"
@@ -195,6 +198,7 @@ EOF
 opera_domains_refresh() {
     local d f ips forced out k=0 pids="" p
     OPERA_DOM_TS=$(date +%s)
+    [ -n "$OPERA_DOMAINS" ] || { OPERA_DOM_IPS=""; OPERA_DOM_LAST=""; OPERA_DOM_FLAST=""; OPERA_DOM_SKIP=0; return 0; }
     mkdir -p "$OPERA_DQ_DIR" 2>/dev/null; chmod 700 "$OPERA_DQ_DIR" 2>/dev/null
     rm -f "$OPERA_DQ_DIR"/.dq* "$OPERA_DQ_DIR"/.fq*
     for d in $OPERA_DOMAINS; do
@@ -218,8 +222,14 @@ $(echo $forced $OPERA_DOM_FLAST | tr ' ' '\n')"
     OPERA_DOM_SKIP=$(echo "$out" | sed -n 's/^skip //p')
     OPERA_DOM_IPS=$(echo "$out" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -u | tr '\n' ' ')
     OPERA_DOM_IPS=${OPERA_DOM_IPS% }
-    # DNS ещё не поднялся (после загрузки) — не ждать 10 минут
-    [ -n "$OPERA_DOM_IPS" ] || [ "${OPERA_DOM_SKIP:-0}" -gt 0 ] || OPERA_DOM_TS=$((OPERA_DOM_TS - OPERA_DOM_SECS + 30))
+    # DNS ещё не поднялся (после загрузки) — не ждать 10 минут, но и не держать цикл
+    if [ -z "$OPERA_DOM_IPS" ] && [ "${OPERA_DOM_SKIP:-0}" = 0 ]; then
+        OPERA_DOM_RETRY=$((OPERA_DOM_RETRY * 2))
+        [ "$OPERA_DOM_RETRY" -lt "$OPERA_DOM_SECS" ] || OPERA_DOM_RETRY=$OPERA_DOM_SECS
+        OPERA_DOM_TS=$((OPERA_DOM_TS - OPERA_DOM_SECS + OPERA_DOM_RETRY))
+    else
+        OPERA_DOM_RETRY=15
+    fi
 }
 
 # Что идёт через Opera — как у WARP: группы, сайты, приложения. Включённое в обоих:
@@ -305,7 +315,7 @@ opera_rules_on() {
         # в правило -i lo выше — приложение висит в SYN-SENT (05.11). addrtype в ядре нет
         echo "-A $CHAIN_OPERA_OUT -o lo -j MARK --set-xmark 0x0/$OPERA_MARK"
         echo "-A $CHAIN_OPERA_OUT -o lo -j RETURN"
-        echo "-A $CHAIN_OPERA_OUT -d 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10 -j RETURN"
+        echo "-A $CHAIN_OPERA_OUT -d 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,169.254.0.0/16,224.0.0.0/4 -j RETURN"
         # сам opera-proxy, nfqws и dnsproxy — мимо, иначе петля
         for u in $OPERA_GID $ZAPRET_GID $DNSPROXY_GID; do echo "-A $CHAIN_OPERA_OUT -m owner --gid-owner $u -j RETURN"; done
         # root и системные — мимо: проверка сайтов и подбор идут от root и не
@@ -348,7 +358,7 @@ opera_rules_on() {
     s6="$OPERA_TELEGRAM$OPERA_GOOGLE$OPERA_PHONE|$excl|$uids|$*"
     [ "$s6" = "$OPERA_V6_SIG" ] && $ip6tables -C OUTPUT -j "$CHAIN_OPERA_V6" 2>/dev/null && \
         $ip6tables -C FORWARD -j "$CHAIN_OPERA_V6F" 2>/dev/null && s6=""
-    if [ -n "$s6" ]; then
+    if [ -n "$s6" ] && [ "$OPERA_V6_OK" != "0" ]; then
     $ip6tables -N "$CHAIN_OPERA_V6" 2>/dev/null; $ip6tables -F "$CHAIN_OPERA_V6" 2>/dev/null
     $ip6tables -A "$CHAIN_OPERA_V6" -m owner --uid-owner 0-9999 -j RETURN 2>/dev/null
     for u in $excl; do $ip6tables -A "$CHAIN_OPERA_V6" -m owner --uid-owner "$u" -j RETURN 2>/dev/null; done
@@ -369,6 +379,8 @@ opera_rules_on() {
     done
     $ip6tables -C FORWARD -j "$CHAIN_OPERA_V6F" 2>/dev/null || $ip6tables -I FORWARD 1 -j "$CHAIN_OPERA_V6F" 2>/dev/null
     OPERA_V6_SIG="$s6"
+    OPERA_V6_OK=1
+    $ip6tables -C OUTPUT -j "$CHAIN_OPERA_V6" 2>/dev/null || OPERA_V6_OK=0
     fi
 
     # помеченное — доставить локально (в TPROXY)
@@ -384,8 +396,10 @@ opera_rules_ok() {
     $iptables -t mangle -C OUTPUT -j "$CHAIN_OPERA_OUT" 2>/dev/null || return 1
     $iptables -C OUTPUT -j "$CHAIN_OPERA_QO" 2>/dev/null || return 1
     $iptables -C FORWARD -j "$CHAIN_OPERA_QF" 2>/dev/null || return 1
-    $ip6tables -C OUTPUT -j "$CHAIN_OPERA_V6" 2>/dev/null || return 1
-    $ip6tables -C FORWARD -j "$CHAIN_OPERA_V6F" 2>/dev/null || return 1
+    if [ "$OPERA_V6_OK" != "0" ]; then
+        $ip6tables -C OUTPUT -j "$CHAIN_OPERA_V6" 2>/dev/null || return 1
+        $ip6tables -C FORWARD -j "$CHAIN_OPERA_V6F" 2>/dev/null || return 1
+    fi
     $ip rule show 2>/dev/null | grep -q "^$OPERA_PREF:.*lookup $OPERA_TABLE" || return 1
     $ip route show table "$OPERA_TABLE" 2>/dev/null | grep -q . || return 1
 }
