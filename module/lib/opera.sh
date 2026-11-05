@@ -17,6 +17,9 @@
 #    REDIRECT. TPROXY без слушателя дропает пакеты: умер процесс — правила
 #    снимаются сразу.
 #  - Только TCP и IPv4. VPN поднят — правила снимаются, процессы остаются.
+#  - Группы, приложения, телефон и раздача — как у WARP (OPERA_TELEGRAM,
+#    OPERA_GOOGLE, OPERA_APPS, OPERA_PHONE, OPERA_TETHER): кому WARP работает хуже,
+#    выключает группу там и включает здесь. Звонков (UDP) через Opera нет.
 OPERA_PORT=18080            # SOCKS5 opera-proxy
 OPERA_TP_PORT=18088         # hev-socks5-tproxy
 OPERA_MARK=0x04000000       # zapret 0x40000000, WARP 0x20000000, YouTube 0x10000000, scan.sh 0x08000000
@@ -34,6 +37,8 @@ CHAIN_OPERA_OUT="VPN_OPERA_OUT"   # mangle OUTPUT
 CHAIN_OPERA_TP="VPN_OPERA_TP"     # адреса сайтов -> TPROXY
 CHAIN_OPERA_QO="VPN_OPERA_QO"     # filter OUTPUT: QUIC к этим адресам — отказ, браузер уйдёт на TCP
 CHAIN_OPERA_QF="VPN_OPERA_QF"     # filter FORWARD: то же для раздачи
+CHAIN_OPERA_V6="VPN_OPERA_V6"     # ip6 OUTPUT: отбить, уйдёт на v4
+CHAIN_OPERA_V6F="VPN_OPERA_V6F"   # ip6 FORWARD: то же для раздачи
 OPERA_DOM_SECS=600
 OPERA_STATE="off"       # off | starting | on | fail
 OPERA_ENDPOINT=""       # сервер Opera, выбранный opera-proxy
@@ -52,6 +57,10 @@ OPERA_DOM_IPS=""
 OPERA_DOM_LAST=""
 OPERA_DOM_FLAST=""
 OPERA_DOM_SKIP=0
+OPERA_NETS=0            # сколько сетей и приложений в правилах (для WebUI)
+OPERA_APP_TS=0
+OPERA_APP_UIDS=""
+OPERA_EXCL=""
 
 _opera_pids() {
     local f
@@ -209,6 +218,35 @@ $(echo $forced $OPERA_DOM_FLAST | tr ' ' '\n')"
     [ -n "$OPERA_DOM_IPS" ] || [ "${OPERA_DOM_SKIP:-0}" -gt 0 ] || OPERA_DOM_TS=$((OPERA_DOM_TS - OPERA_DOM_SECS + 30))
 }
 
+# Что идёт через Opera — как у WARP: группы, сайты, приложения. Если то же самое
+# включено и в WARP, побеждает WARP (его ip rule раньше), поэтому выбор — выключить там
+opera_wanted() {
+    [ "$OPERA_ENABLE" = "1" ] || return 1
+    [ -n "$OPERA_DOMAINS$OPERA_APPS" ] || [ "$OPERA_TELEGRAM" = "1" ] || [ "$OPERA_GOOGLE" = "1" ]
+}
+opera_dst4() {
+    local a
+    [ "$OPERA_GOOGLE" = "1" ] && tr -d '\r' < "$MODULE_DIR/warp/google-ipv4.txt" 2>/dev/null | grep -E '^[0-9]+\.'
+    [ "$OPERA_TELEGRAM" = "1" ] && tr -d '\r' < "$MODULE_DIR/warp/telegram.txt" 2>/dev/null | grep -E '^[0-9]+\.'
+    for a in $OPERA_DOM_IPS; do echo "$a/32"; done
+}
+opera_dst6() {
+    [ "$OPERA_GOOGLE" = "1" ] && tr -d '\r' < "$MODULE_DIR/warp/google-ipv6.txt" 2>/dev/null | grep -E '^[0-9a-f]+:'
+    [ "$OPERA_TELEGRAM" = "1" ] && tr -d '\r' < "$MODULE_DIR/warp/telegram.txt" 2>/dev/null | grep -E '^[0-9a-f]+:'
+}
+# приложения целиком; клиенты Telegram — как у WARP: их запасные узлы вне сетей Telegram
+opera_app_uids() {
+    local p u out="" tg=""
+    [ "$OPERA_TELEGRAM" = "1" ] && [ "$OPERA_PHONE" = "1" ] && tg="$WARP_TG_PKGS"
+    for p in $OPERA_APPS $tg; do
+        u=$(stat -c %u "/data/data/$p" 2>/dev/null)
+        case "$u" in ''|*[!0-9]*) continue ;; esac
+        [ "$u" -ge 10000 ] || continue
+        case " $out " in *" $u "*) ;; *) out="$out $u" ;; esac
+    done
+    echo "${out# }"
+}
+
 opera_rules_off() {
     local _n
     _n=0; while [ $_n -lt 8 ] && $iptables -t mangle -D PREROUTING -j "$CHAIN_OPERA_IN" 2>/dev/null; do _n=$((_n + 1)); done
@@ -220,63 +258,97 @@ opera_rules_off() {
     _n=0; while [ $_n -lt 8 ] && $iptables -D FORWARD -j "$CHAIN_OPERA_QF" 2>/dev/null; do _n=$((_n + 1)); done
     $iptables -F "$CHAIN_OPERA_QO" 2>/dev/null; $iptables -X "$CHAIN_OPERA_QO" 2>/dev/null
     $iptables -F "$CHAIN_OPERA_QF" 2>/dev/null; $iptables -X "$CHAIN_OPERA_QF" 2>/dev/null
+    $ip6tables -D OUTPUT -j "$CHAIN_OPERA_V6" 2>/dev/null
+    $ip6tables -D FORWARD -j "$CHAIN_OPERA_V6F" 2>/dev/null
+    $ip6tables -F "$CHAIN_OPERA_V6" 2>/dev/null;  $ip6tables -X "$CHAIN_OPERA_V6" 2>/dev/null
+    $ip6tables -F "$CHAIN_OPERA_V6F" 2>/dev/null; $ip6tables -X "$CHAIN_OPERA_V6F" 2>/dev/null
     _n=0; while [ $_n -lt 8 ] && $ip rule del fwmark "$OPERA_MARK/$OPERA_MARK" lookup "$OPERA_TABLE" pref "$OPERA_PREF" 2>/dev/null; do _n=$((_n + 1)); done
     $ip route flush table "$OPERA_TABLE" 2>/dev/null
     OPERA_RULES_SIG=""
+    OPERA_NETS=0
 }
 
-# opera_rules_on <исключённые uid> [интерфейсы раздачи...]
+# есть ли TPROXY в ядре: иначе iptables-restore падает, а повторять незачем
+opera_tproxy_ok() {
+    local c=VPN_OPERA_CHK rc
+    $iptables -t mangle -N "$c" 2>/dev/null
+    $iptables -t mangle -A "$c" -p tcp -j TPROXY --on-ip 127.0.0.1 --on-port "$OPERA_TP_PORT" --tproxy-mark "$OPERA_MARK/$OPERA_MARK" 2>/dev/null; rc=$?
+    $iptables -t mangle -F "$c" 2>/dev/null; $iptables -t mangle -X "$c" 2>/dev/null
+    return $rc
+}
+
+# opera_rules_on <исключённые uid> <uid приложений> [интерфейсы раздачи...]
+# Сети групп — сотни правил: одним iptables-restore, как у WARP. Цепочки
+# перезаполняются на месте, ip rule и таблица стоят
 opera_rules_on() {
-    local excl="$1" a u i; shift
-    $iptables -t mangle -N "$CHAIN_OPERA_TP" 2>/dev/null
-    $iptables -t mangle -F "$CHAIN_OPERA_TP" 2>/dev/null
-    for a in $OPERA_DOM_IPS; do
-        $iptables -t mangle -A "$CHAIN_OPERA_TP" -p tcp -d "$a" -j TPROXY \
-            --on-ip 127.0.0.1 --on-port "$OPERA_TP_PORT" --tproxy-mark "$OPERA_MARK/$OPERA_MARK" 2>/dev/null || return 2
-    done
-    $iptables -t mangle -N "$CHAIN_OPERA_IN" 2>/dev/null
-    $iptables -t mangle -F "$CHAIN_OPERA_IN" 2>/dev/null
-    $iptables -t mangle -A "$CHAIN_OPERA_IN" -i lo -p tcp -m mark --mark "$OPERA_MARK/$OPERA_MARK" -j "$CHAIN_OPERA_TP" 2>/dev/null
-    for i in "$@"; do
-        $iptables -t mangle -A "$CHAIN_OPERA_IN" -i "$i" -p tcp -j "$CHAIN_OPERA_TP" 2>/dev/null
-    done
+    local excl="$1" uids="$2" f="$OPERA_DQ_DIR/.rules" tp m u i; shift 2
+    tp="-j TPROXY --on-ip 127.0.0.1 --on-port $OPERA_TP_PORT --tproxy-mark $OPERA_MARK/$OPERA_MARK"
+    mkdir -p "$OPERA_DQ_DIR" 2>/dev/null
+    {
+        echo "*mangle"
+        for m in "$CHAIN_OPERA_IN" "$CHAIN_OPERA_OUT" "$CHAIN_OPERA_TP"; do echo ":$m - [0:0]"; done
+        # телефон: метка уже выбрала, что идёт в Opera
+        echo "-A $CHAIN_OPERA_IN -i lo -p tcp -m mark --mark $OPERA_MARK/$OPERA_MARK $tp"
+        for i in "$@"; do echo "-A $CHAIN_OPERA_IN -i $i -p tcp -j $CHAIN_OPERA_TP"; done
+        [ -n "$*" ] && opera_dst4 | while read -r m; do echo "-A $CHAIN_OPERA_TP -p tcp -d $m $tp"; done
+        echo "-A $CHAIN_OPERA_OUT -o lo -j RETURN"
+        echo "-A $CHAIN_OPERA_OUT -d 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10 -j RETURN"
+        # сам opera-proxy, nfqws и dnsproxy — мимо, иначе петля
+        for u in $OPERA_GID $ZAPRET_GID $DNSPROXY_GID; do echo "-A $CHAIN_OPERA_OUT -m owner --gid-owner $u -j RETURN"; done
+        # root и системные — мимо: проверка сайтов и подбор идут от root и не
+        # должны «открывать» адреса через Opera, иначе врут
+        echo "-A $CHAIN_OPERA_OUT -m owner --uid-owner 0-9999 -j RETURN"
+        for u in $excl; do echo "-A $CHAIN_OPERA_OUT -m owner --uid-owner $u -j RETURN"; done
+        for u in $uids; do echo "-A $CHAIN_OPERA_OUT -p tcp -m owner --uid-owner $u -j MARK --set-xmark $OPERA_MARK/$OPERA_MARK"; done
+        [ "$OPERA_PHONE" = "1" ] && opera_dst4 | while read -r m; do
+            echo "-A $CHAIN_OPERA_OUT -p tcp -d $m -j MARK --set-xmark $OPERA_MARK/$OPERA_MARK"
+        done
+        echo "COMMIT"
+        # QUIC в TPROXY не попадёт, а сайт увидел бы адрес оператора: отказ,
+        # браузер сразу перейдёт на TCP
+        echo "*filter"
+        for m in "$CHAIN_OPERA_QO" "$CHAIN_OPERA_QF"; do echo ":$m - [0:0]"; done
+        echo "-A $CHAIN_OPERA_QO -m owner --uid-owner 0-9999 -j RETURN"
+        for u in $excl; do echo "-A $CHAIN_OPERA_QO -m owner --uid-owner $u -j RETURN"; done
+        for u in $uids; do echo "-A $CHAIN_OPERA_QO -p udp --dport 443 -m owner --uid-owner $u -j REJECT"; done
+        [ "$OPERA_PHONE" = "1" ] && opera_dst4 | while read -r m; do echo "-A $CHAIN_OPERA_QO -p udp --dport 443 -d $m -j REJECT"; done
+        [ -n "$*" ] && opera_dst4 | while read -r m; do echo "-A $CHAIN_OPERA_QF -p udp --dport 443 -d $m -j REJECT"; done
+        echo "COMMIT"
+    } > "$f"
+    if ! ${iptables%% *}-restore -w 2 --noflush < "$f" 2>/dev/null && \
+       ! ${iptables%% *}-restore --noflush < "$f" 2>/dev/null; then
+        rm -f "$f"
+        opera_tproxy_ok || return 2
+        return 1
+    fi
+    rm -f "$f"
     # в конец: TPROXY завершает обход таблицы, системные цепочки — раньше
-    $iptables -t mangle -C PREROUTING -j "$CHAIN_OPERA_IN" 2>/dev/null || \
-        $iptables -t mangle -A PREROUTING -j "$CHAIN_OPERA_IN" 2>/dev/null
-
-    $iptables -t mangle -N "$CHAIN_OPERA_OUT" 2>/dev/null
-    $iptables -t mangle -F "$CHAIN_OPERA_OUT" 2>/dev/null
-    $iptables -t mangle -A "$CHAIN_OPERA_OUT" -o lo -j RETURN 2>/dev/null
-    # сам opera-proxy, nfqws и dnsproxy — мимо, иначе петля
-    for u in $OPERA_GID $ZAPRET_GID $DNSPROXY_GID; do
-        $iptables -t mangle -A "$CHAIN_OPERA_OUT" -m owner --gid-owner "$u" -j RETURN 2>/dev/null
-    done
-    # root — мимо: проверка сайтов и подбор идут от root и не должны «открывать»
-    # адреса через Opera, иначе врут
-    $iptables -t mangle -A "$CHAIN_OPERA_OUT" -m owner --uid-owner 0 -j RETURN 2>/dev/null
-    for u in $excl; do
-        $iptables -t mangle -A "$CHAIN_OPERA_OUT" -m owner --uid-owner "$u" -j RETURN 2>/dev/null
-    done
-    for a in $OPERA_DOM_IPS; do
-        $iptables -t mangle -A "$CHAIN_OPERA_OUT" -p tcp -d "$a" -j MARK --set-xmark "$OPERA_MARK/$OPERA_MARK" 2>/dev/null
-    done
-    $iptables -t mangle -C OUTPUT -j "$CHAIN_OPERA_OUT" 2>/dev/null || \
-        $iptables -t mangle -A OUTPUT -j "$CHAIN_OPERA_OUT" 2>/dev/null
-
-    # QUIC в TPROXY не попадёт, а сайт увидел бы адрес оператора: отказ, браузер
-    # сразу перейдёт на TCP. FORWARD — вторым: первым должен стоять kill-switch
-    $iptables -N "$CHAIN_OPERA_QO" 2>/dev/null
-    $iptables -F "$CHAIN_OPERA_QO" 2>/dev/null
-    $iptables -A "$CHAIN_OPERA_QO" -m owner --uid-owner 0 -j RETURN 2>/dev/null
-    for u in $excl; do $iptables -A "$CHAIN_OPERA_QO" -m owner --uid-owner "$u" -j RETURN 2>/dev/null; done
-    $iptables -N "$CHAIN_OPERA_QF" 2>/dev/null
-    $iptables -F "$CHAIN_OPERA_QF" 2>/dev/null
-    for a in $OPERA_DOM_IPS; do
-        $iptables -A "$CHAIN_OPERA_QO" -p udp --dport 443 -d "$a" -j REJECT 2>/dev/null
-        [ -n "$*" ] && $iptables -A "$CHAIN_OPERA_QF" -p udp --dport 443 -d "$a" -j REJECT 2>/dev/null
-    done
+    $iptables -t mangle -C PREROUTING -j "$CHAIN_OPERA_IN" 2>/dev/null || $iptables -t mangle -A PREROUTING -j "$CHAIN_OPERA_IN" 2>/dev/null
+    $iptables -t mangle -C OUTPUT -j "$CHAIN_OPERA_OUT" 2>/dev/null || $iptables -t mangle -A OUTPUT -j "$CHAIN_OPERA_OUT" 2>/dev/null
+    # FORWARD — вторым: первым должен стоять kill-switch
     $iptables -C OUTPUT -j "$CHAIN_OPERA_QO" 2>/dev/null || $iptables -I OUTPUT 1 -j "$CHAIN_OPERA_QO" 2>/dev/null
     $iptables -C FORWARD -j "$CHAIN_OPERA_QF" 2>/dev/null || $iptables -I FORWARD 2 -j "$CHAIN_OPERA_QF" 2>/dev/null
+
+    # IPv6 групп и приложений — отбить, уйдёт на v4 (сайты из списка по IPv6 не отбиваются)
+    $ip6tables -N "$CHAIN_OPERA_V6" 2>/dev/null; $ip6tables -F "$CHAIN_OPERA_V6" 2>/dev/null
+    $ip6tables -A "$CHAIN_OPERA_V6" -m owner --uid-owner 0-9999 -j RETURN 2>/dev/null
+    for u in $excl; do $ip6tables -A "$CHAIN_OPERA_V6" -m owner --uid-owner "$u" -j RETURN 2>/dev/null; done
+    {
+        for u in $uids; do echo "-m owner --uid-owner $u"; done
+        [ "$OPERA_PHONE" = "1" ] && opera_dst6 | while read -r m; do echo "-d $m"; done
+    } | while read -r m; do
+        $ip6tables -A "$CHAIN_OPERA_V6" $m -p tcp -j REJECT --reject-with tcp-reset 2>/dev/null
+        $ip6tables -A "$CHAIN_OPERA_V6" $m -j REJECT --reject-with icmp6-adm-prohibited 2>/dev/null
+    done
+    $ip6tables -C OUTPUT -j "$CHAIN_OPERA_V6" 2>/dev/null || $ip6tables -I OUTPUT 1 -j "$CHAIN_OPERA_V6" 2>/dev/null
+    $ip6tables -N "$CHAIN_OPERA_V6F" 2>/dev/null; $ip6tables -F "$CHAIN_OPERA_V6F" 2>/dev/null
+    for i in "$@"; do
+        opera_dst6 | while read -r m; do
+            $ip6tables -A "$CHAIN_OPERA_V6F" -i "$i" -d "$m" -p tcp -j REJECT --reject-with tcp-reset 2>/dev/null
+            $ip6tables -A "$CHAIN_OPERA_V6F" -i "$i" -d "$m" -j REJECT --reject-with icmp6-adm-prohibited 2>/dev/null
+        done
+    done
+    $ip6tables -C FORWARD -j "$CHAIN_OPERA_V6F" 2>/dev/null || $ip6tables -I FORWARD 1 -j "$CHAIN_OPERA_V6F" 2>/dev/null
 
     # помеченное — доставить локально (в TPROXY)
     $ip route replace local 0.0.0.0/0 dev lo table "$OPERA_TABLE" 2>/dev/null || return 1
@@ -351,8 +423,8 @@ opera_log_trim() {
 
 # Каждая итерация цикла (после phone_dns_reconcile: он считает PHONE_VPN_STABLE)
 opera_reconcile() {
-    local want=0 sig rc excl now ifaces=""
-    if [ "$OPERA_ENABLE" != "1" ] || [ -z "$OPERA_DOMAINS" ]; then
+    local want=0 sig rc now ifaces="" n
+    if ! opera_wanted; then
         [ "$OPERA_STATE" != "off" ] && opera_down
         return 0
     fi
@@ -420,19 +492,27 @@ opera_reconcile() {
     fi
     now=$(date +%s)
     [ $((now - OPERA_DOM_TS)) -ge $OPERA_DOM_SECS ] && opera_domains_refresh
-    [ -n "$OPERA_DOM_IPS" ] || { [ -n "$OPERA_RULES_SIG" ] && opera_rules_off; return 0; }
-    excl=$(zapret_vpn_uids)
+    if [ $((now - OPERA_APP_TS)) -ge 30 ]; then
+        OPERA_APP_UIDS=$(opera_app_uids); OPERA_EXCL=$(zapret_vpn_uids); OPERA_APP_TS=$now
+    fi
+    if [ -z "$OPERA_DOM_IPS$OPERA_APP_UIDS" ] && [ "$OPERA_TELEGRAM$OPERA_GOOGLE" = "00" ]; then
+        [ -n "$OPERA_RULES_SIG" ] && opera_rules_off
+        return 0
+    fi
     # раздача — только в режиме «напрямую»: TPROXY забирает пакет до FORWARD, и
     # в blocked клиенты вышли бы мимо kill-switch
-    [ "$VPN_TETHER_MODE" = "off" ] && ifaces="$LAST_TETHER_IFACES"
-    sig="$ifaces|$excl|$OPERA_DOM_IPS"
+    [ "$VPN_TETHER_MODE" = "off" ] && [ "$OPERA_TETHER" = "1" ] && ifaces="$LAST_TETHER_IFACES"
+    sig="$OPERA_TELEGRAM$OPERA_GOOGLE$OPERA_PHONE|$ifaces|$OPERA_EXCL|$OPERA_APP_UIDS|$OPERA_DOM_IPS"
     [ "$sig" = "$OPERA_RULES_SIG" ] && { [ "$OPERA_TICK" != 0 ] || opera_rules_ok; } && return 0
     # без opera_rules_off: цепочки перезаполняются на месте, ip rule и таблица стоят —
     # новый адрес одного сайта не рвёт соединения других
-    opera_rules_on "$excl" $ifaces; rc=$?
+    opera_rules_on "$OPERA_EXCL" "$OPERA_APP_UIDS" $ifaces; rc=$?
     if [ "$rc" = 0 ]; then
         OPERA_RULES_SIG="$sig"
-        log "opera: через Opera ${OPERA_ENDPOINT:-?}: адресов $(echo $OPERA_DOM_IPS | wc -w | tr -d ' '), общих CDN мимо: ${OPERA_DOM_SKIP:-0}, раздача: ${ifaces:-нет}"
+        n=$(opera_dst4 | grep -c .)
+        OPERA_NETS=$((n + $(echo $OPERA_APP_UIDS | wc -w)))
+        log "opera: через Opera ${OPERA_ENDPOINT:-?}: сетей $n, приложений $(echo $OPERA_APP_UIDS | wc -w | tr -d ' '), общих CDN мимо: ${OPERA_DOM_SKIP:-0}, телефон: $OPERA_PHONE, раздача: ${ifaces:-нет}"
+        phone_status_refresh
     elif [ "$rc" = 2 ]; then
         opera_rules_off
         OPERA_NOSUPPORT=1; OPERA_STATE="fail"; OPERA_ERR="ядро без TPROXY"

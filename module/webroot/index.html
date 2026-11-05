@@ -627,15 +627,39 @@ details.more > summary { color: var(--muted); }
 <div class="card">
   <div class="row">
     <div class="txt"><div class="t">Прокси Opera</div>
-      <div class="s">Для сайтов, которым нужен иностранный адрес, а обход и WARP не помогают. Выход в Европе, только TCP и IPv4, скорость зависит от сети. Opera видит, куда вы ходите. Регистрация идёт через бесплатные прокси, сам трафик через них не идёт.</div></div>
+      <div class="s">Другой маршрут рядом с WARP: для того, что обход и WARP не открывают или открывают плохо. Выход в Европе, только TCP и IPv4, скорость зависит от сети. Opera видит, куда вы ходите. Регистрация идёт через бесплатные прокси, сам трафик через них не идёт.</div></div>
     <label class="sw"><input type="checkbox" data-key="OPERA_ENABLE"><span></span></label>
   </div>
   <div class="row" data-dep="OPERA_ENABLE" style="gap:10px"><span class="dot" id="operaDot"></span>
     <div class="txt"><div class="t" id="operaTitle">—</div><div class="s" id="operaSub"></div></div></div>
+  <div class="row" data-dep="OPERA_ENABLE">
+    <div class="txt"><div class="t">Telegram</div>
+      <div class="s">Сети и клиенты Telegram. Звонки через Opera не идут. Если Telegram включён и в WARP, он пойдёт через WARP.</div></div>
+    <label class="sw"><input type="checkbox" data-key="OPERA_TELEGRAM"><span></span></label>
+  </div>
+  <div class="row" data-dep="OPERA_ENABLE">
+    <div class="txt"><div class="t">Google</div>
+      <div class="s">Поиск, YouTube, Play. Скорость сильно зависит от сети: на части сетей это единицы Мбит/с.</div></div>
+    <label class="sw"><input type="checkbox" data-key="OPERA_GOOGLE"><span></span></label>
+  </div>
   <div class="row col" data-dep="OPERA_ENABLE">
     <div class="txt"><div class="t">Сайты</div>
       <div class="s">Точные имена через пробел, поддомены сами не добавляются. Сайт на общем CDN пропускается; чтобы отправить его всё равно, поставьте перед именем «!»: например, !4pda.to. Тогда через Opera пойдут и другие сайты на этом адресе. Приложения из списка WARP идут через WARP.</div></div>
     <input type="text" data-key="OPERA_DOMAINS" placeholder="!4pda.to app.4pda.to" autocapitalize="off" autocorrect="off" spellcheck="false">
+  </div>
+  <div class="row col" data-dep="OPERA_ENABLE">
+    <div class="txt"><div class="t">Приложения целиком</div>
+      <div class="s">Только TCP. Приложения из списка WARP идут через WARP.</div></div>
+    <div class="chips" id="operaChips"></div>
+    <div class="mt8"><button class="btn small" id="operaAdd">Добавить приложение</button></div>
+  </div>
+  <div class="row" data-dep="OPERA_ENABLE">
+    <div class="txt"><div class="t">Для самого телефона</div><div class="s">Группы и сайты выше — у приложений телефона.</div></div>
+    <label class="sw"><input type="checkbox" data-key="OPERA_PHONE"><span></span></label>
+  </div>
+  <div class="row" data-dep="OPERA_ENABLE">
+    <div class="txt"><div class="t">Для раздачи</div><div class="s">Группы и сайты выше — у устройств на раздаче.</div></div>
+    <label class="sw"><input type="checkbox" data-key="OPERA_TETHER"><span></span></label>
   </div>
 </div>
 
@@ -1031,7 +1055,7 @@ const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAM
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE','ZAPRET_EXCL_APPS',
   'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK','YT_DEAD_FAILFAST','ZAPRET_WATCHDOG','ZAPRET_WATCHDOG_MIN',
   'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','YT_SLOW_RETRY','ZAPRET_AUTO_FAIL',
-  'WARP_ENABLE','WARP_CONF','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_DOMAINS'];   // = CONF_KEYS в service.sh
+  'WARP_ENABLE','WARP_CONF','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
 // интервал в минутах человеческим языком: 15 -> «15 минут», 180 -> «3 часа»
 function fmtMin(v, def) {
   const m = +v || def;
@@ -1200,6 +1224,7 @@ const appKeyList = (k) => (CUR[k] || '').split(/\s+/).filter(Boolean);
 const quicList = () => appKeyList(SHEET_KEY);
 const CHIPS = { QUIC_BLOCK_APPS: ['#quicChips', 'Нет приложений — QUIC ни у кого не закрыт.'],
   WARP_APPS: ['#warpChips', 'Нет — только Telegram, Google и сайты выше.'],
+  OPERA_APPS: ['#operaChips', 'Нет — только группы и сайты выше.'],
   ZAPRET_EXCL_APPS: ['#zexChips', 'Нет — обход для всех приложений телефона.'] };
 
 function renderChips() {
@@ -1210,7 +1235,7 @@ function renderChips() {
       : '<div class="empty">' + CHIPS[k][1] + '</div>';
   });
 }
-['#quicChips', '#warpChips', '#zexChips'].forEach((id) => $(id).addEventListener('click', (e) => {
+['#quicChips', '#warpChips', '#operaChips', '#zexChips'].forEach((id) => $(id).addEventListener('click', (e) => {
   const p = e.target.dataset && e.target.dataset.rm, k = e.target.dataset && e.target.dataset.rk;
   if (!p || !k) return;
   setCur(k, appKeyList(k).filter((x) => x !== p).join(' '));
@@ -1270,10 +1295,11 @@ function openSheet(on) {
   $('#sheet').classList.toggle('show', on); $('#sheetBg').classList.toggle('show', on);
 }
 $('#warpAdd').addEventListener('click', () => { SHEET_KEY = 'WARP_APPS'; $('#quicAdd').click(); });
+$('#operaAdd').addEventListener('click', () => { SHEET_KEY = 'OPERA_APPS'; $('#quicAdd').click(); });
 $('#zexAdd').addEventListener('click', () => { SHEET_KEY = 'ZAPRET_EXCL_APPS'; $('#quicAdd').click(); });
 $('#quicAdd').addEventListener('click', async (e) => {
   if (e.isTrusted) SHEET_KEY = 'QUIC_BLOCK_APPS';
-  $('#sheetTitle').textContent = { WARP_APPS: 'Приложения через WARP', ZAPRET_EXCL_APPS: 'Исключения из обхода' }[SHEET_KEY] || 'Приложения без QUIC';
+  $('#sheetTitle').textContent = { WARP_APPS: 'Приложения через WARP', OPERA_APPS: 'Приложения через Opera', ZAPRET_EXCL_APPS: 'Исключения из обхода' }[SHEET_KEY] || 'Приложения без QUIC';
   $('#appSearch').value = ''; $('#appList').innerHTML = '<div class="empty" style="padding:0 16px">Загружаю список…</div>';
   openSheet(true);
   await loadApps(); renderAppList(); renderChips();

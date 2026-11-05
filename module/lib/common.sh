@@ -145,7 +145,7 @@ update_status() {
         echo "opera=$([ "$OPERA_ENABLE" = 1 ] && echo "$OPERA_STATE" || echo disabled)"
         echo "opera_endpoint=$OPERA_ENDPOINT"
         echo "opera_err=$OPERA_ERR"
-        echo "opera_ips=$(echo $OPERA_DOM_IPS | wc -w | tr -d ' ')"
+        echo "opera_ips=$OPERA_NETS"
         echo "opera_skip=${OPERA_DOM_SKIP:-0}"
         echo "warp=$([ "$WARP_ENABLE" = 1 ] && echo "$WARP_STATE" || echo disabled)"
         echo "warp_conf=$WARP_CUR"
