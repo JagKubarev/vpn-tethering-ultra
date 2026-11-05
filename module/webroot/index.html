@@ -634,7 +634,7 @@ details.more > summary { color: var(--muted); }
     <div class="txt"><div class="t" id="operaTitle">—</div><div class="s" id="operaSub"></div></div></div>
   <div class="row col" data-dep="OPERA_ENABLE">
     <div class="txt"><div class="t">Сайты</div>
-      <div class="s">Точные имена через пробел, поддомены сами не добавляются. Сайт на общем CDN пропускается; чтобы отправить его всё равно, поставьте перед именем «!»: например, !4pda.to. Тогда через Opera пойдут и другие сайты на этом адресе.</div></div>
+      <div class="s">Точные имена через пробел, поддомены сами не добавляются. Сайт на общем CDN пропускается; чтобы отправить его всё равно, поставьте перед именем «!»: например, !4pda.to. Тогда через Opera пойдут и другие сайты на этом адресе. Приложения из списка WARP идут через WARP.</div></div>
     <input type="text" data-key="OPERA_DOMAINS" placeholder="!4pda.to app.4pda.to" autocapitalize="off" autocorrect="off" spellcheck="false">
   </div>
 </div>
@@ -1484,8 +1484,11 @@ function renderOpera(s) {
   const e = $('#operaTitle');
   if (!e) return;
   const a = (s.opera_endpoint || '').replace(/:\d+$/, '');
+  const pause = s.vpn_up === '1', none = s.opera_ips === '0';
   const m = {
-    on: ['green', 'Работает', a ? 'Сервер ' + a : ''],
+    on: pause ? ['', 'Пауза: включён VPN', 'Без VPN включится сам']
+      : none ? ['amber', 'Сайты не направлены', s.opera_skip !== '0' ? 'Они на общих CDN: поставьте «!» перед именем' : 'Адреса ещё не получены']
+      : ['green', 'Работает', a ? 'Сервер ' + a : ''],
     starting: ['amber', 'Подключается', 'Обычно несколько секунд'],
     fail: ['red', 'Не запустился', s.opera_err || 'Повтор идёт сам'],
     off: s.vpn_up === '1' ? ['', 'Пауза: включён VPN', 'Без VPN включится сам'] : ['', 'Ждёт список сайтов или сеть', ''],

@@ -32,6 +32,8 @@ OPERA_DQ_DIR="/data/adb/vpn_tether_op_dq"
 CHAIN_OPERA_IN="VPN_OPERA_IN"     # mangle PREROUTING
 CHAIN_OPERA_OUT="VPN_OPERA_OUT"   # mangle OUTPUT
 CHAIN_OPERA_TP="VPN_OPERA_TP"     # адреса сайтов -> TPROXY
+CHAIN_OPERA_QO="VPN_OPERA_QO"     # filter OUTPUT: QUIC к этим адресам — отказ, браузер уйдёт на TCP
+CHAIN_OPERA_QF="VPN_OPERA_QF"     # filter FORWARD: то же для раздачи
 OPERA_DOM_SECS=600
 OPERA_STATE="off"       # off | starting | on | fail
 OPERA_ENDPOINT=""       # сервер Opera, выбранный opera-proxy
@@ -203,6 +205,8 @@ $(echo $forced $OPERA_DOM_FLAST | tr ' ' '\n')"
     OPERA_DOM_SKIP=$(echo "$out" | sed -n 's/^skip //p')
     OPERA_DOM_IPS=$(echo "$out" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -u | tr '\n' ' ')
     OPERA_DOM_IPS=${OPERA_DOM_IPS% }
+    # DNS ещё не поднялся (после загрузки) — не ждать 10 минут
+    [ -n "$OPERA_DOM_IPS" ] || [ "${OPERA_DOM_SKIP:-0}" -gt 0 ] || OPERA_DOM_TS=$((OPERA_DOM_TS - OPERA_DOM_SECS + 30))
 }
 
 opera_rules_off() {
@@ -212,6 +216,10 @@ opera_rules_off() {
     $iptables -t mangle -F "$CHAIN_OPERA_IN" 2>/dev/null;  $iptables -t mangle -X "$CHAIN_OPERA_IN" 2>/dev/null
     $iptables -t mangle -F "$CHAIN_OPERA_OUT" 2>/dev/null; $iptables -t mangle -X "$CHAIN_OPERA_OUT" 2>/dev/null
     $iptables -t mangle -F "$CHAIN_OPERA_TP" 2>/dev/null;  $iptables -t mangle -X "$CHAIN_OPERA_TP" 2>/dev/null
+    _n=0; while [ $_n -lt 8 ] && $iptables -D OUTPUT -j "$CHAIN_OPERA_QO" 2>/dev/null; do _n=$((_n + 1)); done
+    _n=0; while [ $_n -lt 8 ] && $iptables -D FORWARD -j "$CHAIN_OPERA_QF" 2>/dev/null; do _n=$((_n + 1)); done
+    $iptables -F "$CHAIN_OPERA_QO" 2>/dev/null; $iptables -X "$CHAIN_OPERA_QO" 2>/dev/null
+    $iptables -F "$CHAIN_OPERA_QF" 2>/dev/null; $iptables -X "$CHAIN_OPERA_QF" 2>/dev/null
     _n=0; while [ $_n -lt 8 ] && $ip rule del fwmark "$OPERA_MARK/$OPERA_MARK" lookup "$OPERA_TABLE" pref "$OPERA_PREF" 2>/dev/null; do _n=$((_n + 1)); done
     $ip route flush table "$OPERA_TABLE" 2>/dev/null
     OPERA_RULES_SIG=""
@@ -255,6 +263,21 @@ opera_rules_on() {
     $iptables -t mangle -C OUTPUT -j "$CHAIN_OPERA_OUT" 2>/dev/null || \
         $iptables -t mangle -A OUTPUT -j "$CHAIN_OPERA_OUT" 2>/dev/null
 
+    # QUIC в TPROXY не попадёт, а сайт увидел бы адрес оператора: отказ, браузер
+    # сразу перейдёт на TCP. FORWARD — вторым: первым должен стоять kill-switch
+    $iptables -N "$CHAIN_OPERA_QO" 2>/dev/null
+    $iptables -F "$CHAIN_OPERA_QO" 2>/dev/null
+    $iptables -A "$CHAIN_OPERA_QO" -m owner --uid-owner 0 -j RETURN 2>/dev/null
+    for u in $excl; do $iptables -A "$CHAIN_OPERA_QO" -m owner --uid-owner "$u" -j RETURN 2>/dev/null; done
+    $iptables -N "$CHAIN_OPERA_QF" 2>/dev/null
+    $iptables -F "$CHAIN_OPERA_QF" 2>/dev/null
+    for a in $OPERA_DOM_IPS; do
+        $iptables -A "$CHAIN_OPERA_QO" -p udp --dport 443 -d "$a" -j REJECT 2>/dev/null
+        [ -n "$*" ] && $iptables -A "$CHAIN_OPERA_QF" -p udp --dport 443 -d "$a" -j REJECT 2>/dev/null
+    done
+    $iptables -C OUTPUT -j "$CHAIN_OPERA_QO" 2>/dev/null || $iptables -I OUTPUT 1 -j "$CHAIN_OPERA_QO" 2>/dev/null
+    $iptables -C FORWARD -j "$CHAIN_OPERA_QF" 2>/dev/null || $iptables -I FORWARD 2 -j "$CHAIN_OPERA_QF" 2>/dev/null
+
     # помеченное — доставить локально (в TPROXY)
     $ip route replace local 0.0.0.0/0 dev lo table "$OPERA_TABLE" 2>/dev/null || return 1
     $ip rule show 2>/dev/null | grep -q "^$OPERA_PREF:.*lookup $OPERA_TABLE" || \
@@ -266,6 +289,7 @@ opera_rules_on() {
 opera_rules_ok() {
     $iptables -t mangle -C PREROUTING -j "$CHAIN_OPERA_IN" 2>/dev/null || return 1
     $iptables -t mangle -C OUTPUT -j "$CHAIN_OPERA_OUT" 2>/dev/null || return 1
+    $iptables -C OUTPUT -j "$CHAIN_OPERA_QO" 2>/dev/null || return 1
     $ip rule show 2>/dev/null | grep -q "^$OPERA_PREF:.*lookup $OPERA_TABLE" || return 1
     $ip route show table "$OPERA_TABLE" 2>/dev/null | grep -q . || return 1
 }
@@ -273,6 +297,7 @@ opera_rules_ok() {
 # Прокси пропускает? Через SOCKS opera-proxy, от его группы: мимо перенаправления
 opera_probe() {
     local code g="sh -c"
+    [ -n "$CURL_BIN" ] || return 0      # нечем проверить — не перезапускать рабочий прокси
     [ "$OPERA_SU_G" = "1" ] && g="su -g $OPERA_GID -c"
     code=$($g "$CURL_BIN -s -o /dev/null -m 6 --socks5-hostname 127.0.0.1:$OPERA_PORT -w %{http_code} http://www.example.com/" 2>/dev/null)
     [ -n "$code" ] && [ "$code" != "000" ]
@@ -286,7 +311,7 @@ opera_fail() {   # причина
     OPERA_FAILS=$((OPERA_FAILS + 1))
     # первые повторы быстрые: discover отдаёт случайный набор, и бывает, что все
     # его адреса закрыты (код 12, 05.11: 4 старта из 8) — другой старт даёт другой
-    case "$OPERA_FAILS" in 1|2|3) p=3 ;; 4) p=15 ;; 5) p=60 ;; *) p=150 ;; esac   # итераций по ~2с
+    case "$OPERA_FAILS" in 1|2|3) p=3 ;; 4) p=15 ;; *) p=60 ;; esac   # итераций по ~2с
     OPERA_RETRY=$p
     OPERA_STATE="fail"
     OPERA_ERR="$1"
@@ -326,7 +351,7 @@ opera_log_trim() {
 
 # Каждая итерация цикла (после phone_dns_reconcile: он считает PHONE_VPN_STABLE)
 opera_reconcile() {
-    local want=0 sig rc excl now
+    local want=0 sig rc excl now ifaces=""
     if [ "$OPERA_ENABLE" != "1" ] || [ -z "$OPERA_DOMAINS" ]; then
         [ "$OPERA_STATE" != "off" ] && opera_down
         return 0
@@ -343,6 +368,8 @@ opera_reconcile() {
     case "$OPERA_STATE" in
         off|fail)
             [ "$want" = "1" ] && [ -n "$LAST_WAN_IFACE" ] || return 0
+            # другая сеть — прошлые неудачи не в счёт
+            [ "$LAST_WAN_IFACE" != "$OPERA_WAN" ] && { OPERA_WAN="$LAST_WAN_IFACE"; OPERA_RETRY=0; OPERA_FAILS=0; }
             if [ "$OPERA_RETRY" -gt 0 ]; then OPERA_RETRY=$((OPERA_RETRY - 1)); return 0; fi
             opera_start
             return 0 ;;
@@ -395,13 +422,17 @@ opera_reconcile() {
     [ $((now - OPERA_DOM_TS)) -ge $OPERA_DOM_SECS ] && opera_domains_refresh
     [ -n "$OPERA_DOM_IPS" ] || { [ -n "$OPERA_RULES_SIG" ] && opera_rules_off; return 0; }
     excl=$(zapret_vpn_uids)
-    sig="$LAST_TETHER_IFACES|$excl|$OPERA_DOM_IPS"
+    # раздача — только в режиме «напрямую»: TPROXY забирает пакет до FORWARD, и
+    # в blocked клиенты вышли бы мимо kill-switch
+    [ "$VPN_TETHER_MODE" = "off" ] && ifaces="$LAST_TETHER_IFACES"
+    sig="$ifaces|$excl|$OPERA_DOM_IPS"
     [ "$sig" = "$OPERA_RULES_SIG" ] && { [ "$OPERA_TICK" != 0 ] || opera_rules_ok; } && return 0
-    opera_rules_off
-    opera_rules_on "$excl" $LAST_TETHER_IFACES; rc=$?
+    # без opera_rules_off: цепочки перезаполняются на месте, ip rule и таблица стоят —
+    # новый адрес одного сайта не рвёт соединения других
+    opera_rules_on "$excl" $ifaces; rc=$?
     if [ "$rc" = 0 ]; then
         OPERA_RULES_SIG="$sig"
-        log "opera: через Opera ${OPERA_ENDPOINT:-?}: адресов $(echo $OPERA_DOM_IPS | wc -w | tr -d ' '), общих CDN мимо: ${OPERA_DOM_SKIP:-0}, раздача: ${LAST_TETHER_IFACES:-нет}"
+        log "opera: через Opera ${OPERA_ENDPOINT:-?}: адресов $(echo $OPERA_DOM_IPS | wc -w | tr -d ' '), общих CDN мимо: ${OPERA_DOM_SKIP:-0}, раздача: ${ifaces:-нет}"
     elif [ "$rc" = 2 ]; then
         opera_rules_off
         OPERA_NOSUPPORT=1; OPERA_STATE="fail"; OPERA_ERR="ядро без TPROXY"

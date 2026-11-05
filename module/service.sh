@@ -1573,7 +1573,6 @@ quic_block_down            # хвосты от убитого демона
 zapret_rules_off
 zapret_kill_all
 opera_down quiet           # opera-proxy, hev и правила от убитого демона
-opera_leftovers_cleanup    # обновились с 3.13–3.15.1 без перезагрузки
 quic_block_apply
 sleep 2
 
