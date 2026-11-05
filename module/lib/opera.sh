@@ -297,6 +297,9 @@ opera_rules_on() {
         echo "-A $CHAIN_OPERA_IN -i lo -p tcp -m mark --mark $OPERA_MARK/$OPERA_MARK $tp"
         for i in "$@"; do echo "-A $CHAIN_OPERA_IN -i $i -p tcp -j $CHAIN_OPERA_TP"; done
         [ -n "$*" ] && opera_dst4 | while read -r m; do echo "-A $CHAIN_OPERA_TP -p tcp -d $m $tp"; done
+        # ответы hev телефону: сокет наследует метку TPROXY, и SYN-ACK снова попал бы
+        # в правило -i lo выше — приложение висит в SYN-SENT (05.11). addrtype в ядре нет
+        echo "-A $CHAIN_OPERA_OUT -o lo -j MARK --set-xmark 0x0/$OPERA_MARK"
         echo "-A $CHAIN_OPERA_OUT -o lo -j RETURN"
         echo "-A $CHAIN_OPERA_OUT -d 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10 -j RETURN"
         # сам opera-proxy, nfqws и dnsproxy — мимо, иначе петля
