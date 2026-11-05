@@ -842,7 +842,7 @@ WARP_GOOGLE=0           # сети Google (goog.json) — в «волны» ТС
 WARP_TELEGRAM=1         # сети Telegram (заблокирован по IP)
 WARP_APPS=""            # приложения телефона целиком (пакеты через пробел)
 OPERA_ENABLE=0          # запасной выход через прокси Opera (lib/opera.sh)
-OPERA_DOMAINS=""        # домены через пробел, точные имена; общие CDN — мимо
+OPERA_DOMAINS=""        # домены через пробел, точные имена; общие CDN — мимо, «!домен» — и через них
 WARP_DOMAINS=""         # домены; их адреса на Cloudflare/Akamai/Fastly/CloudFront — мимо
 WARP_PHONE=1            # группы — и для приложений телефона, не только раздачи
 WARP_TETHER=1           # группы — и для раздачи (0 — WARP только телефону)
@@ -942,9 +942,13 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
             # bootstrap — только ip:порт: имя в -b dnsproxy не примет и не стартует
             # (tls://1.1.1.1 с IP он принял бы, но ip:порт — проще и хватает)
             [ "$key" = "DNS_BOOTSTRAP" ] && case "$val" in *[!0-9a-fA-F.:\ \[\]]*) ok=0 ;; esac ;;
-        WARP_DOMAINS|OPERA_DOMAINS)
+        WARP_DOMAINS)
             # домены через пробел; пусто — выключить
             case "$val" in *[!a-z0-9.\ -]*) ok=0 ;; esac
+            [ ${#val} -le 2000 ] || ok=0 ;;
+        OPERA_DOMAINS)
+            # как WARP_DOMAINS, плюс «!домен» — и через адреса общих CDN
+            case "$val" in *[!a-z0-9.\ !-]*) ok=0 ;; esac
             [ ${#val} -le 2000 ] || ok=0 ;;
         QUIC_BLOCK_APPS|WARP_APPS|ZAPRET_EXCL_APPS)
             # имена пакетов; пусто — допустимо (выключить)

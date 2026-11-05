@@ -10,7 +10,9 @@
 #    своего пула и замеров больше нет. С тестом по умолчанию (Google) он
 #    завершался на YOTA.
 #  - Только список доменов, адреса общих CDN — мимо: в 3.15 через общие адреса
-#    Cloudflare в Opera уехали чужие сервисы (API Claude).
+#    Cloudflare в Opera уехали чужие сервисы (API Claude). «!домен» — и через
+#    CDN (4pda.to на Cloudflare): чужие сайты на этом адресе пойдут туда же,
+#    TPROXY видит только адрес. По умолчанию такого нет.
 #  - hev-socks5-tproxy берёт адрес назначения из сокета, поэтому TPROXY, а не
 #    REDIRECT. TPROXY без слушателя дропает пакеты: умер процесс — правила
 #    снимаются сразу.
@@ -46,6 +48,7 @@ OPERA_WAN=""
 OPERA_DOM_TS=0
 OPERA_DOM_IPS=""
 OPERA_DOM_LAST=""
+OPERA_DOM_FLAST=""
 OPERA_DOM_SKIP=0
 
 _opera_pids() {
@@ -171,22 +174,30 @@ EOF
 # Адреса OPERA_DOMAINS без общих CDN -> OPERA_DOM_IPS (вместе с прошлым набором:
 # ответы DNS скачут, открытое соединение не должно терять маршрут)
 opera_domains_refresh() {
-    local d ips out k=0 pids="" p
+    local d f ips forced out k=0 pids="" p
     OPERA_DOM_TS=$(date +%s)
     mkdir -p "$OPERA_DQ_DIR" 2>/dev/null; chmod 700 "$OPERA_DQ_DIR" 2>/dev/null
-    rm -f "$OPERA_DQ_DIR"/.dq*
-    for d in $OPERA_DOMAINS; do warp_dq "$d" > "$OPERA_DQ_DIR/.dq$k" 2>/dev/null & pids="$pids $!"; k=$((k + 1)); done
+    rm -f "$OPERA_DQ_DIR"/.dq* "$OPERA_DQ_DIR"/.fq*
+    for d in $OPERA_DOMAINS; do
+        case "$d" in '!'*) f=.fq; d="${d#?}" ;; *) f=.dq ;; esac
+        warp_dq "$d" > "$OPERA_DQ_DIR/$f$k" 2>/dev/null & pids="$pids $!"; k=$((k + 1))
+    done
     # wait — по своим pid и до конца: USR1 прерывает wait (см. warp_domains_refresh)
     for p in $pids; do while kill -0 "$p" 2>/dev/null; do wait "$p" 2>/dev/null; done; done
-    ips=$(cat "$OPERA_DQ_DIR"/.dq* 2>/dev/null | tr '\n' ' '); rm -f "$OPERA_DQ_DIR"/.dq*
+    ips=$(cat "$OPERA_DQ_DIR"/.dq* 2>/dev/null | tr '\n' ' ')
+    forced=$(cat "$OPERA_DQ_DIR"/.fq* 2>/dev/null | tr '\n' ' ')
+    rm -f "$OPERA_DQ_DIR"/.dq* "$OPERA_DQ_DIR"/.fq*
     out=$(echo $ips $OPERA_DOM_LAST | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -u | \
         awk 'function n(s,  a) { split(s, a, "."); return ((a[1] * 256 + a[2]) * 256 + a[3]) * 256 + a[4] }
              FNR == NR { if ($1 ~ /^[0-9]/) { split($1, c, "/"); lo[k] = n(c[1]); sz[k] = 2 ^ (32 - c[2]); k++ } next }
              { v = n($1); for (j = 0; j < k; j++) if (v >= lo[j] && v < lo[j] + sz[j]) { skip++; next }; print }
              END { print "skip " skip + 0 }' k=0 "$MODULE_DIR/warp/cdn-ipv4.txt" -)
     OPERA_DOM_LAST="$ips"
+    out="$out
+$(echo $forced $OPERA_DOM_FLAST | tr ' ' '\n')"
+    OPERA_DOM_FLAST="$forced"
     OPERA_DOM_SKIP=$(echo "$out" | sed -n 's/^skip //p')
-    OPERA_DOM_IPS=$(echo "$out" | grep -v '^skip ' | tr '\n' ' ')
+    OPERA_DOM_IPS=$(echo "$out" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -u | tr '\n' ' ')
     OPERA_DOM_IPS=${OPERA_DOM_IPS% }
 }
 
@@ -294,6 +305,7 @@ opera_down() {   # [quiet]
     OPERA_DOM_TS=0
     OPERA_DOM_IPS=""
     OPERA_DOM_LAST=""
+    OPERA_DOM_FLAST=""
     phone_status_refresh
 }
 
