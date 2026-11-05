@@ -98,6 +98,8 @@ opera_ca_build() {
         done
         [ "$n" -gt 0 ] && break
     done
+    # серверы Opera на цепочке ISRG Root X2, в Android 8 её нет: x509, 500 на всё
+    cat "$MODULE_DIR/warp/isrg-root-x2.pem" >> "$OPERA_CA.tmp" 2>/dev/null
     mv -f "$OPERA_CA.tmp" "$OPERA_CA"
     [ "$n" -gt 0 ]
 }
