@@ -632,13 +632,13 @@ WARP_APP_TS=0
 # Домен -> IPv4 через наш dnsproxy (те же ответы, что у клиентов); его нет —
 # через 1.1.1.1. Свой разбор ответа: у busybox nslookup нет -port, dig нет.
 warp_dq() {
-    local d="${1%.}" q="" l srv=127.0.0.1 port="$DNSPROXY_PORT"
+    local d="${1%.}" q="" l srv=127.0.0.1 port="$DNSPROXY_PORT" r
     # жив, а не «бинарь есть»: остановленный (DNS_PHONE=0 без раздачи, не
     # поднялся) давал пустой ответ на все WARP_DOMAINS на 10 мин (ревью PR #19)
     [ -n "$port" ] && dnsproxy_alive || { srv=1.1.1.1; port=53; }
     for l in $(echo "$d" | tr '.' ' '); do q="$q$(printf '\\%03o' ${#l})$l"; done
     # shellcheck disable=SC2059
-    printf "\\022\\064\\001\\000\\000\\001\\000\\000\\000\\000\\000\\000$q\\000\\000\\001\\000\\001" | \
+    r=$(printf "\\022\\064\\001\\000\\000\\001\\000\\000\\000\\000\\000\\000$q\\000\\000\\001\\000\\001" | \
         timeout 3 toybox nc -u -q 1 "$srv" "$port" 2>/dev/null | od -An -tu1 -v | \
         awk -v skip=$((12 + ${#d} + 2 + 4)) '{ for (i = 1; i <= NF; i++) b[n++] = $i }
             END { if (n < 12 || b[3] % 16 != 0) exit
@@ -651,7 +651,11 @@ warp_dq() {
                       t = b[i] * 256 + b[i+1]; len = b[i+8] * 256 + b[i+9]; i += 10
                       if (t == 1 && len == 4) print b[i] "." b[i+1] "." b[i+2] "." b[i+3]
                       i += len
-                  } }'
+                  } }')
+    [ -n "$r" ] && { echo "$r"; return 0; }
+    # Android 8: toybox nc не принимает эти ключи, у busybox nc нет UDP
+    [ -n "$BUSYBOX" ] && "$BUSYBOX" nslookup "$d" 8.8.8.8 2>/dev/null | \
+        sed -n 's/^Address[ 0-9]*: *\([0-9.]*\).*/\1/p' | grep -v '^8\.8\.8\.8$'
 }
 
 # Адреса WARP_DOMAINS без общих CDN -> WARP_DOM_IPS (вместе с прошлым набором:
