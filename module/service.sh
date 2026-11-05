@@ -621,6 +621,9 @@
 #   owner (ядро 3.18: обход не видел трафик); WARP: свой сервер проверяется и по 8.8.8.8.
 # v3.22.7 — WARP: свой сервер проверяется ещё по ya.ru и GitHub (сервисы закрывают
 #   публичные DNS), в логе «нет трафика» код ошибки и счётчики; импорт на Android 8.
+# v3.23.0 — запасной выход Opera (lib/opera.sh): opera-proxy и hev-socks5-tproxy,
+#   группы, сайты и приложения как у WARP, по умолчанию выключено; DNS для
+#   WARP_DOMAINS на Android 8; подсказки при установке.
 # ============================================================================
 # ============================================================================
 
@@ -714,6 +717,7 @@ DNSPROXY_PORT=5354
 # исключается из перехвата AdGuard и прочих transparent-proxy (nat OUTPUT).
 # Пусто = без исключения (DoH сломается, если HTTPS-фильтр AdGuard включён).
 DNSPROXY_GID=3999
+OPERA_GID=3997
 # DNS самого телефона. 1 = когда VPN не поднят, DNS-запросы приложений
 # телефона (:53) тоже идут через dnsproxy (DNS_UPSTREAMS). VPN поднят — не
 # трогаем, DNS идёт как настроено в VPN-клиенте. Только IPv4, если в ядре
@@ -842,6 +846,13 @@ WARP_CONF=""            # предпочтительный конфиг (имя)
 WARP_GOOGLE=0           # сети Google (goog.json) — в «волны» ТСПУ
 WARP_TELEGRAM=1         # сети Telegram (заблокирован по IP)
 WARP_APPS=""            # приложения телефона целиком (пакеты через пробел)
+OPERA_ENABLE=0          # запасной выход через прокси Opera (lib/opera.sh)
+OPERA_TELEGRAM=0        # сети и клиенты Telegram через Opera
+OPERA_GOOGLE=0          # сети Google через Opera
+OPERA_APPS=""           # приложения телефона целиком (только TCP)
+OPERA_PHONE=1           # группы и сайты — для телефона
+OPERA_TETHER=1          # группы и сайты — для раздачи
+OPERA_DOMAINS="!4pda.to app.4pda.to"   # домены через пробел, точные имена; общие CDN — мимо, «!домен» — и через них
 WARP_DOMAINS=""         # домены; их адреса на Cloudflare/Akamai/Fastly/CloudFront — мимо
 WARP_PHONE=1            # группы — и для приложений телефона, не только раздачи
 WARP_TETHER=1           # группы — и для раздачи (0 — WARP только телефону)
@@ -914,7 +925,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_QUIC_FAKE|QUIC_BLOCK_YT|QUIC_YT_FAKE|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
+        OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
@@ -945,7 +956,11 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
             # домены через пробел; пусто — выключить
             case "$val" in *[!a-z0-9.\ -]*) ok=0 ;; esac
             [ ${#val} -le 2000 ] || ok=0 ;;
-        QUIC_BLOCK_APPS|WARP_APPS|ZAPRET_EXCL_APPS)
+        OPERA_DOMAINS)
+            # как WARP_DOMAINS, плюс «!домен» — и через адреса общих CDN
+            case "$val" in *[!a-z0-9.\ !-]*) ok=0 ;; esac
+            [ ${#val} -le 2000 ] || ok=0 ;;
+        QUIC_BLOCK_APPS|WARP_APPS|OPERA_APPS|ZAPRET_EXCL_APPS)
             # имена пакетов; пусто — допустимо (выключить)
             case "$val" in *[!A-Za-z0-9._\ ]*) ok=0 ;; esac ;;
         *) ok=0 ;;
@@ -976,7 +991,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -1291,6 +1306,12 @@ for _c in $_WG_ARCH; do
     [ -x "$MODULE_DIR/bin/awg-$_c" ] && [ -x "$MODULE_DIR/bin/amneziawg-go-$_c" ] && {
         AWG_BIN="$MODULE_DIR/bin/awg-$_c"; AWG_GO_BIN="$MODULE_DIR/bin/amneziawg-go-$_c"; break; }
 done
+# --- Opera ---
+OPERA_BIN=""; OPERA_HEV_BIN=""
+for _c in $_WG_ARCH; do
+    [ -x "$MODULE_DIR/bin/opera-proxy-$_c" ] && [ -x "$MODULE_DIR/bin/hev-socks5-tproxy-$_c" ] && {
+        OPERA_BIN="$MODULE_DIR/bin/opera-proxy-$_c"; OPERA_HEV_BIN="$MODULE_DIR/bin/hev-socks5-tproxy-$_c"; break; }
+done
 ZAPRET_DIR="$MODULE_DIR/zapret"
 ZAPRET_LIST_DEFAULT="$ZAPRET_DIR/list-default.txt"
 ZAPRET_LIST_YT="$ZAPRET_DIR/list-youtube.txt"        # своя стратегия YouTube (3.4)
@@ -1471,6 +1492,7 @@ LOG_REPEAT_THRESHOLD=5
 # shellcheck source=lib/warp.sh
 . "$MODULE_DIR/lib/warp.sh"
 # shellcheck source=lib/loop.sh
+. "$MODULE_DIR/lib/opera.sh"
 . "$MODULE_DIR/lib/loop.sh"
 
 # Сигналы — СРАЗУ, до долгого старта (ожидание rt_tables, sleep, первая
@@ -1483,7 +1505,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.22.7 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.23.0 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # curl: системный, если есть, иначе свой из модуля (PATH — в конце, системный
@@ -1558,7 +1580,7 @@ clear_rules_file
 quic_block_down            # хвосты от убитого демона
 zapret_rules_off
 zapret_kill_all
-opera_leftovers_cleanup    # обновились с 3.13–3.15.1 без перезагрузки
+opera_down quiet           # opera-proxy, hev и правила от убитого демона
 quic_block_apply
 sleep 2
 

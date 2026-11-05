@@ -205,6 +205,7 @@ CONF_GRP_KS="KILL_SWITCH KILL_SWITCH_STRICT"
 CONF_GRP_QUIC="QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE"
 CONF_GRP_STEALTH="TETHER_STEALTH TETHER_TTL_STRICT"
 CONF_GRP_WARP="WARP_ENABLE WARP_CONF"
+CONF_GRP_OPERA="OPERA_ENABLE OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 CONF_GRP_WARPR="WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER"
 CONF_GRP_ZAPRET="ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_EXCL_APPS ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_PER_NET YT_GGC_BLOCK YT_DEAD_FAILFAST"
 _conf_grp_sig() {   # $1 = имя переменной-результата, дальше ключи
@@ -215,12 +216,13 @@ _conf_grp_sig() {   # $1 = имя переменной-результата, д�
 RELOAD_NEED_REBUILD=1
 
 reload_config() {
-    local old_ks="$KILL_SWITCH" s_dns0 s_ks0 s_quic0 s_zap0 s_dns1 s_ks1 s_quic1 s_zap1 s_st0 s_st1 s_wp0 s_wp1 s_wr0 s_wr1 what=""
+    local old_ks="$KILL_SWITCH" s_dns0 s_ks0 s_quic0 s_zap0 s_dns1 s_ks1 s_quic1 s_zap1 s_st0 s_st1 s_wp0 s_wp1 s_op0 s_op1 s_wr0 s_wr1 what=""
     _conf_grp_sig s_dns0 $CONF_GRP_DNS
     _conf_grp_sig s_ks0 $CONF_GRP_KS
     _conf_grp_sig s_quic0 $CONF_GRP_QUIC
     _conf_grp_sig s_zap0 $CONF_GRP_ZAPRET
     _conf_grp_sig s_st0 $CONF_GRP_STEALTH
+    _conf_grp_sig s_op0 $CONF_GRP_OPERA
     _conf_grp_sig s_wp0 $CONF_GRP_WARP
     _conf_grp_sig s_wr0 $CONF_GRP_WARPR
     local s_tgw0="$WARP_ENABLE$WARP_TELEGRAM"
@@ -235,6 +237,10 @@ reload_config() {
     _conf_grp_sig s_quic1 $CONF_GRP_QUIC
     _conf_grp_sig s_zap1 $CONF_GRP_ZAPRET
     _conf_grp_sig s_st1 $CONF_GRP_STEALTH
+    _conf_grp_sig s_op1 $CONF_GRP_OPERA
+    # прокси не трогаем: выключение и новые правила — в opera_reconcile
+    # прошлые адреса — тоже: иначе убранный сайт шёл бы через Opera ещё 10 минут
+    [ "$s_op0" != "$s_op1" ] && { OPERA_DOM_TS=0; OPERA_APP_TS=0; OPERA_NOSUPPORT=0; OPERA_DOM_LAST=""; OPERA_DOM_FLAST=""; }
     _conf_grp_sig s_wp1 $CONF_GRP_WARP
     _conf_grp_sig s_wr1 $CONF_GRP_WARPR
     RELOAD_NEED_REBUILD=0
@@ -331,6 +337,7 @@ cleanup_on_exit() {
     restore_hw_offload
     block_down
     warp_down "выход"
+    opera_down quiet
     # в конце: zapret_down -> phone_status_refresh -> update_status писал
     # описание заново («Раздача через VPN…» после выхода демона)
     [ "$STATUS_IN_DESCRIPTION" = "1" ] && set_description "$MODULE_DESC_DEFAULT"
@@ -386,6 +393,7 @@ monitor_loop() {
         zapret_watchdog
         zapret_sites_check
         warp_reconcile
+        opera_reconcile
         # WebUI «Переподключить» (webctl warp-reconnect ждёт, пока файл исчезнет).
         # После warp_reconcile: если VPN поднялся в этом круге, туннель уже снят и
         # переподключать нечего (до — поднимали бы его на секунды через tun)

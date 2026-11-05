@@ -2,22 +2,26 @@
 # Оставляем бинари под архитектуру устройства ($ARCH ставит Magisk/KSU/Apatch)
 case "$ARCH" in
     arm64)
-        rm -f "$MODPATH/bin/conntrack-arm" "$MODPATH/bin/dnsproxy-arm" "$MODPATH/bin/nfqws-arm"               "$MODPATH/bin/amneziawg-go-arm" "$MODPATH/bin/awg-arm"
+        rm -f "$MODPATH/bin/conntrack-arm" "$MODPATH/bin/dnsproxy-arm" "$MODPATH/bin/nfqws-arm" "$MODPATH/bin/opera-proxy-arm" "$MODPATH/bin/hev-socks5-tproxy-arm"               "$MODPATH/bin/amneziawg-go-arm" "$MODPATH/bin/awg-arm"
         set_perm "$MODPATH/bin/conntrack-arm64" 0 0 0755
         set_perm "$MODPATH/bin/dnsproxy-arm64"  0 0 0755
         set_perm "$MODPATH/bin/nfqws-arm64"     0 0 0755
         set_perm "$MODPATH/bin/amneziawg-go-arm64" 0 0 0755
         set_perm "$MODPATH/bin/awg-arm64"       0 0 0755
-        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG + curl 8.23.0, arm64"
+        set_perm "$MODPATH/bin/opera-proxy-arm64" 0 0 0755
+        set_perm "$MODPATH/bin/hev-socks5-tproxy-arm64" 0 0 0755
+        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG + curl 8.23.0 + opera-proxy v1.31.0 + hev-socks5-tproxy 2.13.1, arm64"
         ;;
     arm)
-        rm -f "$MODPATH/bin/conntrack-arm64" "$MODPATH/bin/dnsproxy-arm64" "$MODPATH/bin/nfqws-arm64"               "$MODPATH/bin/amneziawg-go-arm64" "$MODPATH/bin/awg-arm64"
+        rm -f "$MODPATH/bin/conntrack-arm64" "$MODPATH/bin/dnsproxy-arm64" "$MODPATH/bin/nfqws-arm64" "$MODPATH/bin/opera-proxy-arm64" "$MODPATH/bin/hev-socks5-tproxy-arm64"               "$MODPATH/bin/amneziawg-go-arm64" "$MODPATH/bin/awg-arm64"
         set_perm "$MODPATH/bin/conntrack-arm" 0 0 0755
         set_perm "$MODPATH/bin/dnsproxy-arm"  0 0 0755
         set_perm "$MODPATH/bin/nfqws-arm"     0 0 0755
         set_perm "$MODPATH/bin/amneziawg-go-arm" 0 0 0755
         set_perm "$MODPATH/bin/awg-arm"       0 0 0755
-        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG + curl 8.23.0, armv7"
+        set_perm "$MODPATH/bin/opera-proxy-arm" 0 0 0755
+        set_perm "$MODPATH/bin/hev-socks5-tproxy-arm" 0 0 0755
+        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG + curl 8.23.0 + opera-proxy v1.31.0 + hev-socks5-tproxy 2.13.1, armv7"
         ;;
     *)
         # неизвестная арх — оставляем оба, service.sh выберет по uname -m
@@ -30,8 +34,12 @@ case "$ARCH" in
         set_perm "$MODPATH/bin/amneziawg-go-arm64" 0 0 0755
         set_perm "$MODPATH/bin/amneziawg-go-arm"   0 0 0755
         set_perm "$MODPATH/bin/awg-arm64"       0 0 0755
+        set_perm "$MODPATH/bin/opera-proxy-arm64" 0 0 0755
+        set_perm "$MODPATH/bin/hev-socks5-tproxy-arm64" 0 0 0755
         set_perm "$MODPATH/bin/awg-arm"         0 0 0755
-        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG + curl 8.23.0, arm64+armv7"
+        set_perm "$MODPATH/bin/opera-proxy-arm" 0 0 0755
+        set_perm "$MODPATH/bin/hev-socks5-tproxy-arm" 0 0 0755
+        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG + curl 8.23.0 + opera-proxy v1.31.0 + hev-socks5-tproxy 2.13.1, arm64+armv7"
         ;;
 esac
 # свой curl — на прошивках без системного (Xiaomi): модуль находит его по PATH
@@ -104,9 +112,10 @@ EOF
     ui_print "- Создан файл настроек: $CONF"
 else
     ui_print "- Настройки: $CONF (оставлены как были)"
-    # Opera убрана в 3.16: ключи OPERA_* (и блок-подсказка 3.13) иначе висят
+    # Ключи Opera 3.13–3.15.1 (и блок-подсказка 3.13): новые так называть нельзя,
+    # удалятся при установке. Иначе висят
     # в WebUI как «Конфиг: пропущено: ?OPERA_TG». Остальное не трогаем.
-    if grep -q 'OPERA_' "$CONF" 2>/dev/null; then
+    if grep -qE '^[[:space:]]*#?[[:space:]]*OPERA_(TG|COUNTRY|SITES|API_LIST)[[:space:]]*=|^# --- Telegram без VPN' "$CONF" 2>/dev/null; then
         awk '
             /^# --- Telegram без VPN \(прокси Opera\)/ { skip = 1 }
             skip { if ($0 ~ /^[ \t\r]*$/) skip = 0; next }
@@ -117,4 +126,13 @@ else
         ui_print "- Настройки Opera убраны из $CONF"
     fi
 fi
-ui_print "- DNSPROXY_ENABLE=0 в этом файле выключает dnsproxy"
+ui_print " "
+ui_print "VPN Tethering Ultra — что дальше:"
+ui_print "- Настройки: значок модуля в KernelSU/APatch, в Magisk — приложение WebUI X"
+ui_print "- Кнопка Action: переключить раздачу VPN / напрямую"
+ui_print "- Сайты не открываются: вкладка Обход, подбор стратегии"
+ui_print "- Telegram и то, что обход не берёт: вкладка WARP, «Создать»"
+ui_print "- Закрытые разделы 4PDA: вкладка WARP, «Прокси Opera»"
+ui_print "- Что-то сломалось: вкладка Сервис, «Отправить логи»"
+ui_print "- Новости и помощь: t.me/kubarev_mods, тема на 4PDA"
+ui_print " "
