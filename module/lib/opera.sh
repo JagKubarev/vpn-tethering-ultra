@@ -58,6 +58,8 @@ OPERA_DOM_LAST=""
 OPERA_DOM_FLAST=""
 OPERA_DOM_SKIP=0
 OPERA_NETS=0            # сколько сетей и приложений в правилах (для WebUI)
+OPERA_V6_SIG=""         # что стоит в IPv6: сотни вызовов ip6tables — только при смене
+OPERA_RULE_ERR=""       # почему не встали правила
 OPERA_APP_TS=0
 OPERA_APP_UIDS=""
 OPERA_EXCL=""
@@ -258,6 +260,7 @@ opera_rules_off() {
     _n=0; while [ $_n -lt 8 ] && $iptables -D FORWARD -j "$CHAIN_OPERA_QF" 2>/dev/null; do _n=$((_n + 1)); done
     $iptables -F "$CHAIN_OPERA_QO" 2>/dev/null; $iptables -X "$CHAIN_OPERA_QO" 2>/dev/null
     $iptables -F "$CHAIN_OPERA_QF" 2>/dev/null; $iptables -X "$CHAIN_OPERA_QF" 2>/dev/null
+    OPERA_V6_SIG=""
     $ip6tables -D OUTPUT -j "$CHAIN_OPERA_V6" 2>/dev/null
     $ip6tables -D FORWARD -j "$CHAIN_OPERA_V6F" 2>/dev/null
     $ip6tables -F "$CHAIN_OPERA_V6" 2>/dev/null;  $ip6tables -X "$CHAIN_OPERA_V6" 2>/dev/null
@@ -281,12 +284,15 @@ opera_tproxy_ok() {
 # Сети групп — сотни правил: одним iptables-restore, как у WARP. Цепочки
 # перезаполняются на месте, ip rule и таблица стоят
 opera_rules_on() {
-    local excl="$1" uids="$2" f="$OPERA_DQ_DIR/.rules" tp m u i; shift 2
+    local excl="$1" uids="$2" f="$OPERA_DQ_DIR/.rules" tp m u i s6; shift 2
     tp="-j TPROXY --on-ip 127.0.0.1 --on-port $OPERA_TP_PORT --tproxy-mark $OPERA_MARK/$OPERA_MARK"
     mkdir -p "$OPERA_DQ_DIR" 2>/dev/null
     {
         echo "*mangle"
         for m in "$CHAIN_OPERA_IN" "$CHAIN_OPERA_OUT" "$CHAIN_OPERA_TP"; do echo ":$m - [0:0]"; done
+        # уже в WARP: TPROXY привязал бы к пакету сокет, а маршрут выбрал бы warp0 —
+        # такой пакет ядро не форвардит, и клиент раздачи остался бы без связи
+        echo "-A $CHAIN_OPERA_IN -m mark --mark $WARP_MARK/$WARP_MARK -j RETURN"
         # телефон: метка уже выбрала, что идёт в Opera
         echo "-A $CHAIN_OPERA_IN -i lo -p tcp -m mark --mark $OPERA_MARK/$OPERA_MARK $tp"
         for i in "$@"; do echo "-A $CHAIN_OPERA_IN -i $i -p tcp -j $CHAIN_OPERA_TP"; done
@@ -315,13 +321,14 @@ opera_rules_on() {
         [ -n "$*" ] && opera_dst4 | while read -r m; do echo "-A $CHAIN_OPERA_QF -p udp --dport 443 -d $m -j REJECT"; done
         echo "COMMIT"
     } > "$f"
-    if ! ${iptables%% *}-restore -w 2 --noflush < "$f" 2>/dev/null && \
-       ! ${iptables%% *}-restore --noflush < "$f" 2>/dev/null; then
-        rm -f "$f"
+    if ! ${iptables%% *}-restore -w 2 --noflush < "$f" 2>"$f.err" && \
+       ! ${iptables%% *}-restore --noflush < "$f" 2>"$f.err"; then
+        OPERA_RULE_ERR=$(tail -n 1 "$f.err" 2>/dev/null | cut -c1-120)
+        rm -f "$f" "$f.err"
         opera_tproxy_ok || return 2
         return 1
     fi
-    rm -f "$f"
+    rm -f "$f" "$f.err"
     # в конец: TPROXY завершает обход таблицы, системные цепочки — раньше
     $iptables -t mangle -C PREROUTING -j "$CHAIN_OPERA_IN" 2>/dev/null || $iptables -t mangle -A PREROUTING -j "$CHAIN_OPERA_IN" 2>/dev/null
     $iptables -t mangle -C OUTPUT -j "$CHAIN_OPERA_OUT" 2>/dev/null || $iptables -t mangle -A OUTPUT -j "$CHAIN_OPERA_OUT" 2>/dev/null
@@ -329,7 +336,12 @@ opera_rules_on() {
     $iptables -C OUTPUT -j "$CHAIN_OPERA_QO" 2>/dev/null || $iptables -I OUTPUT 1 -j "$CHAIN_OPERA_QO" 2>/dev/null
     $iptables -C FORWARD -j "$CHAIN_OPERA_QF" 2>/dev/null || $iptables -I FORWARD 2 -j "$CHAIN_OPERA_QF" 2>/dev/null
 
-    # IPv6 групп и приложений — отбить, уйдёт на v4 (сайты из списка по IPv6 не отбиваются)
+    # IPv6 групп и приложений — отбить, уйдёт на v4 (сайты из списка по IPv6 не
+    # отбиваются). От адресов сайтов не зависит: их смена сюда не доходит
+    s6="$OPERA_TELEGRAM$OPERA_GOOGLE$OPERA_PHONE|$excl|$uids|$*"
+    [ "$s6" = "$OPERA_V6_SIG" ] && $ip6tables -C OUTPUT -j "$CHAIN_OPERA_V6" 2>/dev/null && \
+        $ip6tables -C FORWARD -j "$CHAIN_OPERA_V6F" 2>/dev/null && s6=""
+    if [ -n "$s6" ]; then
     $ip6tables -N "$CHAIN_OPERA_V6" 2>/dev/null; $ip6tables -F "$CHAIN_OPERA_V6" 2>/dev/null
     $ip6tables -A "$CHAIN_OPERA_V6" -m owner --uid-owner 0-9999 -j RETURN 2>/dev/null
     for u in $excl; do $ip6tables -A "$CHAIN_OPERA_V6" -m owner --uid-owner "$u" -j RETURN 2>/dev/null; done
@@ -349,6 +361,8 @@ opera_rules_on() {
         done
     done
     $ip6tables -C FORWARD -j "$CHAIN_OPERA_V6F" 2>/dev/null || $ip6tables -I FORWARD 1 -j "$CHAIN_OPERA_V6F" 2>/dev/null
+    OPERA_V6_SIG="$s6"
+    fi
 
     # помеченное — доставить локально (в TPROXY)
     $ip route replace local 0.0.0.0/0 dev lo table "$OPERA_TABLE" 2>/dev/null || return 1
@@ -362,6 +376,9 @@ opera_rules_ok() {
     $iptables -t mangle -C PREROUTING -j "$CHAIN_OPERA_IN" 2>/dev/null || return 1
     $iptables -t mangle -C OUTPUT -j "$CHAIN_OPERA_OUT" 2>/dev/null || return 1
     $iptables -C OUTPUT -j "$CHAIN_OPERA_QO" 2>/dev/null || return 1
+    $iptables -C FORWARD -j "$CHAIN_OPERA_QF" 2>/dev/null || return 1
+    $ip6tables -C OUTPUT -j "$CHAIN_OPERA_V6" 2>/dev/null || return 1
+    $ip6tables -C FORWARD -j "$CHAIN_OPERA_V6F" 2>/dev/null || return 1
     $ip rule show 2>/dev/null | grep -q "^$OPERA_PREF:.*lookup $OPERA_TABLE" || return 1
     $ip route show table "$OPERA_TABLE" 2>/dev/null | grep -q . || return 1
 }
@@ -482,6 +499,8 @@ opera_reconcile() {
             else
                 OPERA_BAD=$((OPERA_BAD + 1))
                 [ "$OPERA_BAD" -ge 3 ] && { opera_fail "прокси не отвечает"; return 0; }
+                # через Opera могут идти целые группы: следующая проверка — через ~6 с
+                OPERA_TICK=12
             fi
         fi
     fi
@@ -510,7 +529,8 @@ opera_reconcile() {
     if [ "$rc" = 0 ]; then
         OPERA_RULES_SIG="$sig"
         n=$(opera_dst4 | grep -c .)
-        OPERA_NETS=$((n + $(echo $OPERA_APP_UIDS | wc -w)))
+        OPERA_NETS=$(echo $OPERA_APP_UIDS | wc -w)
+        { [ "$OPERA_PHONE" = "1" ] || [ -n "$ifaces" ]; } && OPERA_NETS=$((OPERA_NETS + n))
         log "opera: через Opera ${OPERA_ENDPOINT:-?}: сетей $n, приложений $(echo $OPERA_APP_UIDS | wc -w | tr -d ' '), общих CDN мимо: ${OPERA_DOM_SKIP:-0}, телефон: $OPERA_PHONE, раздача: ${ifaces:-нет}"
         phone_status_refresh
     elif [ "$rc" = 2 ]; then
@@ -519,6 +539,6 @@ opera_reconcile() {
         log "WARNING: opera: $OPERA_ERR"; phone_status_refresh
     else
         opera_rules_off
-        opera_fail "правила не встали"
+        opera_fail "правила не встали: $OPERA_RULE_ERR"
     fi
 }

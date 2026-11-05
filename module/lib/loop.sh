@@ -239,7 +239,8 @@ reload_config() {
     _conf_grp_sig s_st1 $CONF_GRP_STEALTH
     _conf_grp_sig s_op1 $CONF_GRP_OPERA
     # прокси не трогаем: выключение и новые правила — в opera_reconcile
-    [ "$s_op0" != "$s_op1" ] && { OPERA_DOM_TS=0; OPERA_APP_TS=0; OPERA_NOSUPPORT=0; }
+    # прошлые адреса — тоже: иначе убранный сайт шёл бы через Opera ещё 10 минут
+    [ "$s_op0" != "$s_op1" ] && { OPERA_DOM_TS=0; OPERA_APP_TS=0; OPERA_NOSUPPORT=0; OPERA_DOM_LAST=""; OPERA_DOM_FLAST=""; }
     _conf_grp_sig s_wp1 $CONF_GRP_WARP
     _conf_grp_sig s_wr1 $CONF_GRP_WARPR
     RELOAD_NEED_REBUILD=0
