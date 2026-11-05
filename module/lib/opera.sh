@@ -280,8 +280,9 @@ opera_fail() {   # причина
     _opera_kill $(opera_hev_pids)
     _opera_kill $(opera_proxy_pids)
     OPERA_FAILS=$((OPERA_FAILS + 1))
-    # первый повтор быстрый: 05.11 старт упал один раз из четырёх
-    case "$OPERA_FAILS" in 1) p=3 ;; 2) p=15 ;; 3) p=60 ;; *) p=150 ;; esac   # итераций по ~2с
+    # первые повторы быстрые: discover отдаёт случайный набор, и бывает, что все
+    # его адреса закрыты (код 12, 05.11: 4 старта из 8) — другой старт даёт другой
+    case "$OPERA_FAILS" in 1|2|3) p=3 ;; 4) p=15 ;; 5) p=60 ;; *) p=150 ;; esac   # итераций по ~2с
     OPERA_RETRY=$p
     OPERA_STATE="fail"
     OPERA_ERR="$1"
@@ -343,7 +344,8 @@ opera_reconcile() {
             return 0 ;;
         starting)
             if [ -z "$(opera_proxy_pids)" ]; then
-                opera_fail "opera-proxy не запустился: $(grep -iE 'critical|error' "$OPERA_LOG" 2>/dev/null | tail -n 1 | cut -c1-120)"
+                # упал молча — значит, ни один адрес из discover не ответил
+                opera_fail "opera-proxy не запустился: $(grep -E 'CRITICAL|ERROR|Discovered endpoints' "$OPERA_LOG" 2>/dev/null | tail -n 1 | sed 's/.*Discovered endpoints: //; s/\. Starting.*//' | cut -c1-120)"
                 return 0
             fi
             if ! _opera_listening "$OPERA_PORT"; then
