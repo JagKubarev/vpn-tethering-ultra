@@ -220,8 +220,8 @@ $(echo $forced $OPERA_DOM_FLAST | tr ' ' '\n')"
     [ -n "$OPERA_DOM_IPS" ] || [ "${OPERA_DOM_SKIP:-0}" -gt 0 ] || OPERA_DOM_TS=$((OPERA_DOM_TS - OPERA_DOM_SECS + 30))
 }
 
-# Что идёт через Opera — как у WARP: группы, сайты, приложения. Если то же самое
-# включено и в WARP, побеждает WARP (его ip rule раньше), поэтому выбор — выключить там
+# Что идёт через Opera — как у WARP: группы, сайты, приложения. Включённое в обоих:
+# на телефоне WARP (его ip rule раньше), на раздаче — чья цепочка в PREROUTING раньше
 opera_wanted() {
     [ "$OPERA_ENABLE" = "1" ] || return 1
     [ -n "$OPERA_DOMAINS$OPERA_APPS" ] || [ "$OPERA_TELEGRAM" = "1" ] || [ "$OPERA_GOOGLE" = "1" ]
