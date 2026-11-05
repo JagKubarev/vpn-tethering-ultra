@@ -89,11 +89,15 @@ opera_ca_build() {
     [ "$n" -gt 0 ]
 }
 
-# Мимо перехвата AdGuard, как у dnsproxy
+# Мимо перехвата AdGuard, как у dnsproxy. Важно место, а не наличие: AdGuard
+# ставит свой переход выше, и opera-proxy видит сертификат AdGuard — x509, 500 на
+# всё, код 12 (05.11 после перезагрузки). Не строго первым: первое место у dnsproxy_exempt
 opera_exempt() {
     [ "$OPERA_SU_G" = "1" ] || return 0
-    $iptables -t nat -C OUTPUT -m owner --gid-owner "$OPERA_GID" -j RETURN 2>/dev/null || \
-        $iptables -t nat -I OUTPUT 1 -m owner --gid-owner "$OPERA_GID" -j RETURN 2>/dev/null
+    local want="-A OUTPUT -m owner --gid-owner $OPERA_GID -j RETURN"
+    $iptables -t nat -S OUTPUT 2>/dev/null | sed -n '2,3p' | grep -qxF -- "$want" && return 0
+    opera_exempt_down
+    $iptables -t nat -I OUTPUT 1 -m owner --gid-owner "$OPERA_GID" -j RETURN 2>/dev/null
 }
 opera_exempt_down() {
     local _n=0
@@ -371,6 +375,7 @@ opera_reconcile() {
     [ "$LAST_WAN_IFACE" != "$OPERA_WAN" ] && { OPERA_WAN="$LAST_WAN_IFACE"; OPERA_TICK=15; }
     if [ "$OPERA_TICK" -ge 15 ]; then   # ~30 с
         OPERA_TICK=0
+        opera_exempt
         opera_log_trim
         if [ "$want" = "1" ]; then
             if opera_probe; then
