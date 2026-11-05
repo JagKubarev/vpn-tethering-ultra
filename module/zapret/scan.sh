@@ -375,18 +375,24 @@ run_strat() {
     fi
     test_sites
     kill "$NQPID" 2>/dev/null; wait "$NQPID" 2>/dev/null; NQPID=""
+    local ysum=0 yn=0
     while read -r h ip; do
         v=""; t=""; read -r v t < "$TMP/r.$h" 2>/dev/null
         if [ "$v" = ok ]; then
             ok=$((ok + 1))
             sum=$(awk -v s="$sum" -v t="$t" 'BEGIN { printf "%d", s + t * 1000 }')
+            case "$h" in *youtube*|*ytimg*|*ggpht*|*googlevideo*)
+                yn=$((yn + 1)); ysum=$(awk -v s="$ysum" -v t="$t" 'BEGIN { printf "%d", s + t * 1000 }') ;;
+            esac
         else
             case " $BASE_OK " in *" $h "*) brk=$((brk + 1)) ;; esac
             det="$det ${h#www.}:$v"
         fi
     done < "$TMP/ips"
     [ "$ok" -gt 0 ] && sum=$((sum / ok))
-    echo "$ok|$NS|$brk|$sum|$a|$stage|${det# }" >> "$OUT.results"
+    [ "$yn" -gt 0 ] && ysum=$((ysum / yn))
+    # 8-е поле — среднее время только YouTube: его стратегия выбирается отдельно
+    echo "$ok|$NS|$brk|$sum|$a|$stage|${det# }|$ysum" >> "$OUT.results"
     S_done=$((S_done + 1))
     st done=$S_done
 }
@@ -797,7 +803,8 @@ st stage="перепроверяю лучшие"
 best 3 > "$TMP/top"
 # + 2 лучших именно для YouTube (могут не попасть в общие 3)
 if [ "$NBY" -gt 0 ]; then
-    awk -F'|' -v re="$YT_RE" '$3 == 0 && $5 !~ /--new/ && $7 !~ /^nfqws: / { n = split($7, d, " "); f = 0; for (i = 1; i <= n; i++) if (d[i] ~ re) f++; print f "|" $4 "|" $5 }' "$OUT.results" | \
+    # поломки других сайтов не в счёт: стратегия YouTube к ним не применяется
+    awk -F'|' -v re="$YT_RE" '$5 !~ /--new/ && $7 !~ /^nfqws: / { n = split($7, d, " "); f = 0; for (i = 1; i <= n; i++) if (d[i] ~ re) f++; print f "|" $8 + 0 "|" $5 }' "$OUT.results" | \
         sort -t'|' -k1,1n -k2,2n | cut -d'|' -f3 | head -n 2 >> "$TMP/top"
     awk '!s[$0]++' "$TMP/top" > "$TMP/top2" && mv -f "$TMP/top2" "$TMP/top"
 fi
@@ -813,8 +820,8 @@ done < "$TMP/top"
 MSG=""
 NB=$(echo $BLOCKED | wc -w)
 # По группам: остальные сайты (og) и YouTube (oy) — по худшему из прогонов.
-# Общая — лучшая для остальных; для YouTube — своя, только если она открывает
-# больше YouTube, чем общая. Обе строки: "открыла|аргументы".
+# Общая — лучшая для остальных. YouTube выбирается сам по себе: только его сайты
+# и его время, другие сайты эта стратегия не трогает. Строки: "открыла|аргументы".
 pick() { # pick gen|yt
     awk -F'|' -v nb="$NB" -v nby="$NBY" -v re="$YT_RE" -v want="$1" '
     $5 ~ /--new/ { next }
@@ -825,16 +832,17 @@ pick() { # pick gen|yt
       for (i = 1; i <= n; i++) { if (d[i] ~ re) fy++; else fg++ }
       og = (nb - nby) - fg; oy = nby - fy
       if (!(a in runs)) { mg[a] = og; my[a] = oy; mb[a] = brk }
-      runs[a]++; ms[a] += $4
+      runs[a]++; ms[a] += (want == "yt") ? $8 : $4
       if (og < mg[a]) mg[a] = og
       if (oy < my[a]) my[a] = oy
       if (brk > mb[a]) mb[a] = brk }
     END {
       for (a in runs) {
-        if (mb[a] > 0) continue
+        if (mb[a] > 0 && want != "yt") continue
         o = (want == "yt") ? my[a] : mg[a]; o2 = (want == "yt") ? mg[a] : my[a]
         if (o <= 0 && !(want == "gen" && nb == nby && my[a] > 0)) continue
         t = ms[a] / runs[a]
+        if (want == "yt") o2 = 0
         if (b == "" || o > bo || (o == bo && o2 > bo2) || (o == bo && o2 == bo2 && runs[a] > br) || (o == bo && o2 == bo2 && runs[a] == br && t < bt)) { b = a; bo = o; bo2 = o2; br = runs[a]; bt = t; byt = my[a] }
       }
       if (b != "") print bo "|" byt "|" b
@@ -845,8 +853,15 @@ BEST=""; BEST_YT=""
 if [ -n "$BG" ]; then
     BEST="${BG%%"|"*}|${BG#*"|"*"|"}"          # "открыла|аргументы" (остальные сайты)
     gy=$(echo "$BG" | cut -d'|' -f2)               # сколько YouTube открывает общая
-    if [ -n "$BY" ] && [ "$NBY" -gt 0 ] && [ "${BY%%"|"*}" -gt "$gy" ]; then
-        BEST_YT="${BY#*"|"*"|"}"
+    if [ -n "$BY" ] && [ "$NBY" -gt 0 ]; then
+        ya="${BY#*"|"*"|"}"; ga="${BG#*"|"*"|"}"
+        # своя — если открывает больше или при том же счёте быстрее на 20%:
+        # меньше — разброс сети, менять стратегию не за что
+        yt_ms() { awk -F'|' -v a="$1" '$5 == a && $8 > 0 { s += $8; n++ } END { if (n) printf "%d", s / n; else print 0 }' "$OUT.results"; }
+        ym=$(yt_ms "$ya"); gm=$(yt_ms "$ga")
+        if [ "${BY%%"|"*}" -gt "$gy" ] || { [ "${BY%%"|"*}" = "$gy" ] && [ "$ya" != "$ga" ] && [ "$ym" -gt 0 ] && [ $((ym * 5)) -lt $((gm * 4)) ]; }; then
+            BEST_YT="$ya"
+        fi
     fi
 fi
 if [ "$PERNET" = "1" ] && [ -n "$BEST" ]; then
