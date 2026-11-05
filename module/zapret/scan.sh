@@ -32,6 +32,10 @@ OUT=/data/local/tmp/vpn_tether_zscan
 Q=203
 MODE="${1:-quick}"
 MODE0="$MODE"
+# сторож пишет в свои файлы: иначе через 15 минут он стирал таблицу подбора, и в
+# WebUI это выглядело как новый подбор (05.11). Замок и метки — общие
+OUTB=$OUT
+[ "$MODE" = check ] && OUT=/data/local/tmp/vpn_tether_zcheck
 SITES="$2"
 SITES_ARG="$2"
 [ -n "$SITES" ] || [ "$MODE" = sites ] || SITES="www.youtube.com i.ytimg.com youtubei.googleapis.com discord.com gateway.discord.gg x.com www.facebook.com rutracker.org www.linkedin.com ya.ru www.google.com"
@@ -74,7 +78,7 @@ st() { # обновить файл состояния: st key=val ...
 
 # итог последней проверки сторожа — для WebUI: "ЧЧ:ММ|текст"
 wd_last() {
-    printf '%s|%s\n' "$(date '+%H:%M')" "$*" > "$OUT.wd"
+    printf '%s|%s\n' "$(date '+%H:%M')" "$*" > "$OUTB.wd"
 }
 
 # журнал сторожа/подбора: "дата|сеть|событие" (держим последние 300 строк)
@@ -111,7 +115,7 @@ cleanup() {
         $IPT -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
     fi
     rm -rf "$TMP"
-    rm -f "$OUT.pid"
+    rm -f "$OUTB.pid"
 }
 on_exit() {
     cleanup
@@ -126,14 +130,14 @@ on_exit() {
 }
 # уже идёт другой scan.sh (демон и WebUI в один такт): общие $TMP, очередь
 # и pid-файл — второй испортил бы первому данные и удалил его pid
-_p=$(cat "$OUT.pid" 2>/dev/null)
+_p=$(cat "$OUTB.pid" 2>/dev/null)
 if [ -n "$_p" ] && [ "$_p" != "$$" ] && kill -0 "$_p" 2>/dev/null; then
     case "$(tr '\0' ' ' < "/proc/$_p/cmdline" 2>/dev/null)" in *zapret/scan.sh*) exit 0 ;; esac
 fi
 trap on_exit EXIT
 trap 'exit 0' INT TERM
 
-echo $$ > "$OUT.pid"
+echo $$ > "$OUTB.pid"
 # идёт регистрация WARP (warp/warp.sh gen) — подождать. После pid: пока ждём,
 # демон и WebUI видят «подбор идёт» и второй scan.sh не запустят. Замок старше
 # 3 мин — от убитого процесса (gen обновляет его на каждом конфиге)
@@ -152,7 +156,7 @@ st state=running stage="подготовка" msg=""
 # Сторож вскоре после волны Google (метка от прошлого сторожа моложе 15 мин):
 # не проверять и ничего не слать. В волну застревает почти всё видео, демон
 # звал бы сторожа каждые 3 мин, и каждый раз — залп запросов к закрытым сайтам
-if [ "$MODE" = check ] && [ -n "$(find "$OUT.wave" -maxdepth 0 -mmin -15 2>/dev/null)" ]; then
+if [ "$MODE" = check ] && [ -n "$(find "$OUTB.wave" -maxdepth 0 -mmin -15 2>/dev/null)" ]; then
     st state=done stage="готово" msg="недавно была волна Google — проверка отложена"
     exit 0
 fi
@@ -601,7 +605,7 @@ if [ "$MODE" = "check" ]; then
         _g443=$(curl -s -o /dev/null -m 5 --interface "$WAN" --capath "$CA" -w '%{http_code}' https://www.google.com/generate_204 2>/dev/null)
         _g80=$(curl -s -o /dev/null -m 5 --interface "$WAN" -w '%{http_code}' http://www.google.com/generate_204 2>/dev/null)
         [ "$_g443" = 000 ] && [ "$_g80" = 204 ] || return 0
-        touch "$OUT.wave"
+        touch "$OUTB.wave"
         event "автопроверка: Google по HTTPS молчит и без обхода, по HTTP отвечает — волна ТСПУ, стратегию не трогаю ($(last_fail))"
         wd_last "волна Google, отложил"
         st state=done stage="готово" msg="волна Google (HTTPS молчит и без обхода) — стратегию не трогаю"

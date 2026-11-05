@@ -315,7 +315,7 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row col" id="znetBox">
     <div class="txt"><div class="t">Эта сеть: <span id="znetCur">—</span></div>
-      <div class="s" id="znetInfo"></div></div>
+      <div class="s" id="znetInfo"></div><div class="s" id="zSum" style="white-space:pre-line;margin-top:6px"></div></div>
     <select id="znetSel" aria-label="Стратегия для этой сети"></select>
     <div class="s muted" id="znetListHead" style="font-size:13px;margin-top:12px"></div>
     <div id="znetList"></div>
@@ -1002,6 +1002,10 @@ function renderStatus(s) {
   const w = warpState(s);
   renderWarpState(w);
   renderOpera(s);
+  // что и для чего работает сейчас: общая, YouTube, отдельные сайты
+  if ($('#zSum')) $('#zSum').textContent = s.zapret === 'on' ? 'Сейчас работает:\nОбщая: ' + stratName(s.zapret_strategy, s.zapret_eff_args) +
+    '\nYouTube: ' + (s.zapret_eff_yt ? 'своя, ' + stratLabel(s.zapret_eff_yt) : 'та же, что общая') +
+    '\nОтдельные сайты: ' + (+s.zapret_alt_n ? s.zapret_alt_n + ' со своей стратегией' : 'нет') : '';
   if (s.warp && s.warp !== 'disabled') h += kvRow('WARP', esc(w.t + (w.s ? ' · ' + w.s : '')), w.d);
   if (s.quic_uids) h += kvRow('Без QUIC', esc(String(s.quic_uids.split(' ').length)) + ' прил.');
   const bad = (s.conf_note || '').split(' ').filter((x) => x[0] === '!' || x[0] === '?');
@@ -1970,7 +1974,9 @@ async function scRefresh() {
   $('#scQuick').disabled = $('#scFull').disabled = running;
   const blocked = (s.blocked || '').split(/\s+/).filter(Boolean);
   let prog = '';
-  if (s.state === 'running' || running) {
+  if (s.kind === 'check') {
+    prog = '<div class="st-line"><span class="dot amber"></span>Сторож проверяет текущую стратегию. Это не подбор, таблица ниже остаётся</div>';
+  } else if (s.state === 'running' || running) {
     prog = '<div class="st-line"><span class="dot amber"></span>' + esc(s.stage || 'идёт') +
       (+s.total ? ' · ' + esc(s.done) + ' из ' + esc(s.total) : '') + '</div>';
   } else if (s.state === 'done') {

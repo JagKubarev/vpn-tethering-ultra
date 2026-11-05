@@ -522,7 +522,10 @@ case "$1" in
         echo "OK" ;;
     zscan-status)
         cat "$ZSCAN.status" 2>/dev/null
-        if zscan_busy; then echo "alive=1"; else echo "alive=0"; fi ;;
+        if zscan_busy; then
+            echo "alive=1"
+            case "$(tr '\0' ' ' < "/proc/$(cat "$ZSCAN.pid" 2>/dev/null)/cmdline" 2>/dev/null)" in *"scan.sh check"*) echo "kind=check" ;; esac
+        else echo "alive=0"; fi ;;
     zscan-results)
         cat "$ZSCAN.results" 2>/dev/null ;;
 
