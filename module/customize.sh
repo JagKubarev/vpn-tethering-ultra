@@ -2,21 +2,25 @@
 # Оставляем бинари под архитектуру устройства ($ARCH ставит Magisk/KSU/Apatch)
 case "$ARCH" in
     arm64)
-        rm -f "$MODPATH/bin/conntrack-arm" "$MODPATH/bin/dnsproxy-arm" "$MODPATH/bin/nfqws-arm"               "$MODPATH/bin/amneziawg-go-arm" "$MODPATH/bin/awg-arm"
+        rm -f "$MODPATH/bin/conntrack-arm" "$MODPATH/bin/dnsproxy-arm" "$MODPATH/bin/nfqws-arm" "$MODPATH/bin/opera-proxy-arm" "$MODPATH/bin/hev-socks5-tproxy-arm"               "$MODPATH/bin/amneziawg-go-arm" "$MODPATH/bin/awg-arm"
         set_perm "$MODPATH/bin/conntrack-arm64" 0 0 0755
         set_perm "$MODPATH/bin/dnsproxy-arm64"  0 0 0755
         set_perm "$MODPATH/bin/nfqws-arm64"     0 0 0755
         set_perm "$MODPATH/bin/amneziawg-go-arm64" 0 0 0755
         set_perm "$MODPATH/bin/awg-arm64"       0 0 0755
+        set_perm "$MODPATH/bin/opera-proxy-arm64" 0 0 0755
+        set_perm "$MODPATH/bin/hev-socks5-tproxy-arm64" 0 0 0755
         ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG + curl 8.23.0, arm64"
         ;;
     arm)
-        rm -f "$MODPATH/bin/conntrack-arm64" "$MODPATH/bin/dnsproxy-arm64" "$MODPATH/bin/nfqws-arm64"               "$MODPATH/bin/amneziawg-go-arm64" "$MODPATH/bin/awg-arm64"
+        rm -f "$MODPATH/bin/conntrack-arm64" "$MODPATH/bin/dnsproxy-arm64" "$MODPATH/bin/nfqws-arm64" "$MODPATH/bin/opera-proxy-arm64" "$MODPATH/bin/hev-socks5-tproxy-arm64"               "$MODPATH/bin/amneziawg-go-arm64" "$MODPATH/bin/awg-arm64"
         set_perm "$MODPATH/bin/conntrack-arm" 0 0 0755
         set_perm "$MODPATH/bin/dnsproxy-arm"  0 0 0755
         set_perm "$MODPATH/bin/nfqws-arm"     0 0 0755
         set_perm "$MODPATH/bin/amneziawg-go-arm" 0 0 0755
         set_perm "$MODPATH/bin/awg-arm"       0 0 0755
+        set_perm "$MODPATH/bin/opera-proxy-arm" 0 0 0755
+        set_perm "$MODPATH/bin/hev-socks5-tproxy-arm" 0 0 0755
         ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG + curl 8.23.0, armv7"
         ;;
     *)
@@ -30,7 +34,11 @@ case "$ARCH" in
         set_perm "$MODPATH/bin/amneziawg-go-arm64" 0 0 0755
         set_perm "$MODPATH/bin/amneziawg-go-arm"   0 0 0755
         set_perm "$MODPATH/bin/awg-arm64"       0 0 0755
+        set_perm "$MODPATH/bin/opera-proxy-arm64" 0 0 0755
+        set_perm "$MODPATH/bin/hev-socks5-tproxy-arm64" 0 0 0755
         set_perm "$MODPATH/bin/awg-arm"         0 0 0755
+        set_perm "$MODPATH/bin/opera-proxy-arm" 0 0 0755
+        set_perm "$MODPATH/bin/hev-socks5-tproxy-arm" 0 0 0755
         ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + AmneziaWG + curl 8.23.0, arm64+armv7"
         ;;
 esac

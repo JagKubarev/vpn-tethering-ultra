@@ -635,6 +635,8 @@ zapret_rules_on() {
                 done
                 [ -n "$DNSPROXY_GID" ] && \
                     $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$DNSPROXY_GID" -j RETURN 2>/dev/null
+                # opera-proxy: его TLS к серверам Opera обход не трогает
+                $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$OPERA_GID" -j RETURN 2>/dev/null
             fi
         else
             # только раздача: у её пакетов нет локального сокета
