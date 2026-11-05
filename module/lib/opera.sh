@@ -474,6 +474,11 @@ opera_reconcile() {
     fi
     # появление VPN снимает перенаправление сразу, без второго замера
     [ "$PHONE_VPN_STABLE" = "0" ] && [ "$PHONE_VPN_SEEN" = "0" ] && want=1
+    # первые 3 минуты после старта — каждый круг: AdGuard встаёт позже и ставит свой
+    # переход выше, а ждать проверку раз в 30 с — полминуты без сайтов из списка
+    case "$OPERA_STATE" in starting|on)
+        [ $(( $(date +%s) - OPERA_START_TS )) -lt 180 ] && opera_exempt ;;
+    esac
 
     case "$OPERA_STATE" in
         off|fail)
