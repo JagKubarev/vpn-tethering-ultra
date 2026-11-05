@@ -293,8 +293,10 @@ opera_rules_on() {
         # уже в WARP: TPROXY привязал бы к пакету сокет, а маршрут выбрал бы warp0 —
         # такой пакет ядро не форвардит, и клиент раздачи остался бы без связи
         echo "-A $CHAIN_OPERA_IN -m mark --mark $WARP_MARK/$WARP_MARK -j RETURN"
-        # телефон: метка уже выбрала, что идёт в Opera
-        echo "-A $CHAIN_OPERA_IN -i lo -p tcp -m mark --mark $OPERA_MARK/$OPERA_MARK $tp"
+        # телефон: метка уже выбрала, что идёт в Opera. 127.0.0.0/8 — мимо: AdGuard
+        # перенаправляет приложения на свой порт, метка остаётся, и hev получил бы
+        # «127.0.0.1:33611» как адрес сайта (502 на всё, приложение молчит)
+        echo "-A $CHAIN_OPERA_IN -i lo ! -d 127.0.0.0/8 -p tcp -m mark --mark $OPERA_MARK/$OPERA_MARK $tp"
         for i in "$@"; do echo "-A $CHAIN_OPERA_IN -i $i -p tcp -j $CHAIN_OPERA_TP"; done
         [ -n "$*" ] && opera_dst4 | while read -r m; do echo "-A $CHAIN_OPERA_TP -p tcp -d $m $tp"; done
         # ответы hev телефону: сокет наследует метку TPROXY, и SYN-ACK снова попал бы
