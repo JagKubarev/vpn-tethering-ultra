@@ -61,7 +61,7 @@ normalize() {
         NR == 1 && substr($0, 1, 3) == bom { $0 = substr($0, 4) }
         /^[ \t]*($|#|;)/ { next }
         /^[ \t]*\[[A-Za-z]+\][ \t]*$/ {
-            s = $0; gsub(/[ \t\[\]]/, "", s)
+            s = $0; gsub(/[][]/, "", s); gsub(/[ \t]/, "", s)   # скобки — отдельно, как ниже: busybox awk (Android 8)
             if (s == "Interface") { ni++; sec = "i" }
             else if (s == "Peer") { np++; sec = "p" }
             else { err = "секция [" s "]"; exit }

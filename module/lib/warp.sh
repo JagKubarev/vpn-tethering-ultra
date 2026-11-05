@@ -158,9 +158,13 @@ warp_ep_kick() {   # адрес — пробуем его с этого моме
 # для журнала: сервер молчит или отвечает, но трафик не идёт (свой сервер так
 # не проверяется при подъёме — без этого «нет трафика» значило и то, и другое)
 warp_hs_note() {
-    local hs
+    local hs tr n="рукопожатия нет"
     hs=$("$AWG_BIN" show $WARP_IF latest-handshakes 2>/dev/null | awk '{print $2; exit}')
-    if [ "${hs:-0}" -gt 0 ]; then echo "рукопожатие есть"; else echo "рукопожатия нет"; fi
+    [ "${hs:-0}" -gt 0 ] && n="рукопожатие есть"
+    # принято больше рукопожатия — сервер отвечает; rc — как упала проверка:
+    # 28 — тайм-аут, 7 и 35 — сброс, 45 — интерфейс без адреса (лог 04.11: отказ за 8 с)
+    tr=$("$AWG_BIN" show $WARP_IF transfer 2>/dev/null | awk '{print "принято " $2 " Б, отправлено " $3 " Б"; exit}')
+    echo "$n${WARP_PROBE_NOTE:+; $WARP_PROBE_NOTE}${tr:+; $tr}"
 }
 
 warp_ep_step() {   # 0 — ждём или дождались (WARP_HS=1), 1 — адреса кончились
@@ -274,22 +278,29 @@ warp_probe() {
     # по IP: при отказе DNS (DoH не отвечает) проверка по имени валилась и
     # живой туннель считался мёртвым (27.10 09:52)
     # -k: в Android 8 нет корня сертификата 1.1.1.1, а запрос и так идёт в туннель
-    local cmd="$CURL_BIN -s -k -m 5 --interface $WARP_IF https://1.1.1.1/cdn-cgi/trace" out
+    local cmd="$CURL_BIN -s -k -m 5 --interface $WARP_IF https://1.1.1.1/cdn-cgi/trace" out rc a
     if [ -z "$WARP_SU_G" ]; then
         WARP_SU_G=0
         su -g "$DNSPROXY_GID" -c true >/dev/null 2>&1 && WARP_SU_G=1
     fi
     if [ "$WARP_SU_G" = "1" ]; then out=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else out=$(eval "$cmd" 2>/dev/null); fi
+    rc=$?
+    WARP_PROBE_NOTE="1.1.1.1 rc=$rc, ответ ${#out} Б"
     WARP_COLO=$(echo "$out" | sed -n 's/^colo=\([A-Z]*\).*/\1/p' | head -1)
     if [ "$WARP_CF" = 1 ]; then
         case "$out" in *warp=on*|*warp=plus*) return 0 ;; esac
     else
         case "$out" in *ip=*) return 0 ;; esac
-        # свой сервер: 1.1.1.1 за ним бывает закрыт (сервер в России, фильтр), а
-        # туннель жив — любой ответ 8.8.8.8 через него тоже трафик. Cloudflare — строго
-        cmd="$CURL_BIN -s -k -m 3 -o /dev/null -w %{http_code} --interface $WARP_IF https://8.8.8.8/"
-        if [ "$WARP_SU_G" = "1" ]; then out=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else out=$(eval "$cmd" 2>/dev/null); fi
-        case "$out" in ''|000) ;; *) return 0 ;; esac
+        # свой сервер: публичные DNS за ним бывают закрыты (конфиги юзера 05.11: шлюз
+        # отвечает Port Unreachable на 1.1.1.1 и 8.8.8.8, ya.ru и GitHub открыты), а
+        # туннель жив — любой ответ по этим адресам тоже трафик. Cloudflare — строго
+        for a in 8.8.8.8 77.88.55.242 140.82.121.3; do
+            cmd="$CURL_BIN -s -k -m 3 -o /dev/null -w %{http_code} --interface $WARP_IF https://$a/"
+            if [ "$WARP_SU_G" = "1" ]; then out=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else out=$(eval "$cmd" 2>/dev/null); fi
+            rc=$?
+            WARP_PROBE_NOTE="$WARP_PROBE_NOTE, $a rc=$rc, код ${out:-нет}"
+            case "$out" in ''|000) ;; *) return 0 ;; esac
+        done
     fi
     return 1
 }
