@@ -653,7 +653,9 @@ warp_dq() {
                       i += len
                   } }')
     [ -n "$r" ] && { echo "$r"; return 0; }
-    # Android 8: toybox nc не принимает эти ключи, у busybox nc нет UDP
+    # Android 8 (нет /apex): toybox nc не принимает эти ключи, у busybox nc нет UDP.
+    # На новых пустой ответ — сбой DNS: обычный DNS мимо dnsproxy дал бы чужие адреса
+    [ -d /apex ] && return 0
     [ -n "$BUSYBOX" ] && "$BUSYBOX" nslookup "$d" 8.8.8.8 2>/dev/null | \
         sed -n 's/^Address[ 0-9]*: *\([0-9.]*\).*/\1/p' | grep -v '^8\.8\.8\.8$'
 }
