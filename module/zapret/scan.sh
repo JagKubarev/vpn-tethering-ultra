@@ -897,8 +897,11 @@ if [ "$MODE" = "quick" ]; then
     # 10 из 10 сайтов и качали с именем видеосервера в обоих кругах (8–27 Мбит/с).
     # Две последних — по мотивам ByeDPI, md5sig вместо его ttl (подделки с ttl на YOTA
     # плохие): там же 10 из 10, 13–24 Мбит/с
+    # Три в самом конце — из пресетов zapret2 (сама стратегия, ts заменён на md5sig, кроме
+    # hostfakesplit: там ts,md5sig, Windows-раздаче не мешает): 06.11 на YOTA 10 из 10 в
+    # обоих кругах, с именем видеосервера 3–15 Мбит/с
     # + S_done: после сторожа (check) прогоны уже были — иначе «30 из 22»
-    S_total=$((S_done + 28))
+    S_total=$((S_done + 31))
     st stage="быстрый подбор${GNAME:+: $GNAME}"
     if [ -n "$GRP" ]; then
         S_total=$((S_total + 2))
@@ -939,6 +942,9 @@ if [ "$MODE" = "quick" ]; then
 --dpi-desync=fake,fakedsplit --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=2 --dpi-desync-repeats=8 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
 --dpi-desync=fake,multisplit --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld+1,host+3,midsld+5 --dpi-desync-fake-tls-mod=rnd $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,host+1,host+3,host+6,host+9,host+12,host+15,host+20,host+25,host+30,host+35 --dpi-desync-fake-tls-mod=rnd,sni=www.google.com $FAKE
+--dpi-desync=fake,multisplit --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 --dpi-desync-fake-tls-mod=rnd $FAKE
+--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 --dpi-desync-fake-tls-mod=rnd $FAKE
+--dpi-desync=hostfakesplit --dpi-desync-repeats=4 --dpi-desync-fooling=ts,md5sig --dpi-desync-ts-increment=-1000 --dpi-desync-hostfakesplit-mod=host=ozon.ru
 EOF
 else
     S_total=$(( 14 + 7 + 32 + 4 + 5 + 12 + 6 ))
