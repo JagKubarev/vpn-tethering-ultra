@@ -834,6 +834,9 @@ YT_SLOW_RETRY=1
 # подбор. Только при своей стратегии для сети и без поднятого VPN.
 ZAPRET_WATCHDOG=1
 ZAPRET_WATCHDOG_MIN=15
+# 0: стратегии сети (общую, YouTube, Discord) меняет только пользователь. Сторож лишь
+# пишет в журнал, что стратегия не открывает, подбор показывает таблицу, но не запоминает
+ZAPRET_AUTOPICK=1
 # Своя стратегия для отдельных сайтов (3.6): раз в ZAPRET_ALT_MIN минут
 # zapret/scan.sh sites проверяет сайты из списков; если основная стратегия
 # какой-то не открывает, подбирает для него другую (до 3 стратегий на сеть).
@@ -854,6 +857,7 @@ WARP_GOOGLE=0           # сети Google (goog.json) — в «волны» ТС
 WARP_TELEGRAM=1         # сети Telegram (заблокирован по IP)
 WARP_APPS=""            # приложения телефона целиком (пакеты через пробел)
 OPERA_ENABLE=0          # запасной выход через прокси Opera (lib/opera.sh)
+OPERA_API_PROXY=""      # свой прокси только для регистрации: socks5://логин:пароль@адрес:порт; пусто — бесплатный список
 OPERA_TELEGRAM=0        # сети и клиенты Telegram через Opera
 OPERA_GOOGLE=0          # сети Google через Opera
 OPERA_APPS=""           # приложения телефона целиком (только TCP)
@@ -932,7 +936,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_QUIC_FAKE|QUIC_BLOCK_YT|QUIC_YT_FAKE|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|YT_DEAD_WARP|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
+        OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|YT_DEAD_WARP|ZAPRET_WATCHDOG|ZAPRET_AUTOPICK|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
@@ -963,6 +967,11 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
             # домены через пробел; пусто — выключить
             case "$val" in *[!a-z0-9.\ -]*) ok=0 ;; esac
             [ ${#val} -le 2000 ] || ok=0 ;;
+        OPERA_API_PROXY)
+            # идёт в команду opera-proxy: только адрес, без пробелов и знаков шелла
+            case "$val" in ''|socks5://?*|socks5h://?*|http://?*|https://?*) ;; *) ok=0 ;; esac
+            case "$val" in *[!A-Za-z0-9._~:/@%+-]*) ok=0 ;; esac
+            [ ${#val} -le 300 ] || ok=0 ;;
         OPERA_DOMAINS)
             # как WARP_DOMAINS, плюс «!домен» — и через адреса общих CDN
             case "$val" in *[!a-z0-9.\ !-]*) ok=0 ;; esac
@@ -998,7 +1007,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST YT_DEAD_WARP ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST YT_DEAD_WARP ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done

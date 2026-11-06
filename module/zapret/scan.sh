@@ -307,6 +307,7 @@ mkdir -p "$TMP"
 # Сеть, в которой подбираем: лучшая стратегия запоминается для неё
 NETID=$(sh "$ZDIR/netid.sh" "$WAN" 2>/dev/null | head -1)
 PERNET=$(sh "$MODDIR/service.sh" --get ZAPRET_PER_NET 2>/dev/null)
+AUTOPICK=$(sh "$MODDIR/service.sh" --get ZAPRET_AUTOPICK 2>/dev/null)   # 0: только показывать, не запоминать
 if [ -n "$GRP" ]; then
     [ "$PERNET" = 1 ] && [ -n "${NETID%%"|"*}" ] || { st state=error msg="своя стратегия YouTube и Discord — только при «своей стратегии для каждой сети» и понятной сети"; exit 1; }
 fi
@@ -855,6 +856,12 @@ if [ "$MODE" = "check" ]; then
     fi
     # волна могла начаться за эту минуту
     wave_google
+    if [ "$AUTOPICK" = 0 ]; then
+        event "автопроверка: стратегия не открывает ($(last_fail)) — автоподбор выключен, не меняю"
+        wd_last "не открывает, автоподбор выключен"
+        st state=done stage="готово" msg="стратегия не открывает сайты, автоподбор выключен"
+        exit 0
+    fi
     event "автопроверка: стратегия не открывает ($(last_fail)) — ищу замену"
     # прежние стратегии этой сети и сетей с тем же названием (YOTA = 25011 и
     # 25002), новые первыми, без повторов (только свои параметры: custom)
@@ -1047,10 +1054,17 @@ if [ -n "$GRP" ]; then
         if (!($5 in w) || f > w[$5]) w[$5] = f } END { for (a in w) print w[a] "|" a }' "$OUT.results" | sort -t'|' -k1,1n > "$TMP/gf"
     GF=$(head -n 1 "$TMP/gf" | cut -d'|' -f1)
     GO=$((NBG - ${GF:-$NBG}))
+    # сейчас своей нет — OWNX совпадает с общей
+    OLD="$OWNX"; [ "$OLD" = "$GENX" ] && OLD=""
     if [ "$GO" -le 0 ]; then
         MSG="$GNAME: ни одна стратегия не открыла заблокированные сайты"
     else
         awk -F'|' -v m="$GF" '$1 == m' "$TMP/gf" | cut -d'|' -f2- > "$TMP/gc"
+        # Нынешней своей хватает одной удачной перепроверки из двух: сбой на застрявшем
+        # адресе (06.11 у соседней стратегии 5 из 6) не повод её менять
+        OB=$(A="$OLD" awk -F'|' -v re="$G_RE" '$5 == ENVIRON["A"] && $6 == "проверка" && $7 !~ /^nfqws: / { n = split($7, d, " "); f = 0; for (i = 1; i <= n; i++) if (d[i] ~ re) f++
+            if (m == "" || f < m) m = f } END { print m }' "$OUT.results")
+        if [ -n "$OB" ] && [ "$OB" -le "$GF" ] && ! grep -qxF -e "$OLD" "$TMP/gc"; then echo "$OLD" >> "$TMP/gc"; fi
         S_total=$((S_done + $(wc -l < "$TMP/gc") * 2))
         st stage="$GNAME: замеряю скорость"
         for _r in 1 2; do
@@ -1062,19 +1076,20 @@ if [ -n "$GRP" ]; then
         NEW=""
         if [ -z "$SG" ]; then NEW="$SA"
         elif [ "$SA" != "$GENX" ] && [ "$SB" -gt 0 ] && [ $((SB * 2)) -ge $((SG * 3)) ]; then NEW="$SA"; fi
-        # сейчас своей нет — OWNX совпадает с общей
-        OLD="$OWNX"; [ "$OLD" = "$GENX" ] && OLD=""
         # Нынешняя своя остаётся, если открыла столько же и лучшая не быстрее её в 1.5 раза:
         # 06.11 разброс 20 против 25 Мбит/с сменил badseq на разрез без подделки.
-        # Открыла меньше — её нет в $TMP/gs, и правило её не держит
-        SO=$(G="$OLD" awk -F'|' '$2 == ENVIRON["G"] { print $1 }' "$TMP/gs")
-        if [ -n "$OLD" ] && [ "${SO:-0}" -gt 0 ] && [ $((SB * 2)) -lt $((SO * 3)) ]; then NEW="$OLD"; SB="$SO"; fi
+        # Её скорость — лучший из двух замеров: один обрыв не повод менять рабочую.
+        # Открыла меньше — её нет в замерах, и правило её не держит
+        SO=$(G="$OLD" awk -F'|' '$2 == ENVIRON["G"] && $1 > m { m = $1 } END { print m + 0 }' "$OUT.speed")
+        if [ -n "$OLD" ] && [ "$SO" -gt 0 ] && [ $((SB * 2)) -lt $((SO * 3)) ]; then NEW="$OLD"; SB="$SO"; fi
         if [ "$SB" -eq 0 ]; then how="скорость не измерилась"
         elif [ -z "$SG" ]; then how="$((SB / 128)) Мбит/с, общая открывает меньше"
         else how="$((SB / 128)) Мбит/с, у общей $((SG / 128))"; fi
-        if [ -n "$SG" ] && [ "$SB" -eq 0 ]; then
+        if { [ -n "$SG" ] || [ -n "$OLD" ]; } && [ "$SB" -eq 0 ]; then
             # все нули: сбой замера или скачивание закрыто для всех. Выбирать не из чего
             MSG="$GNAME: скорость не измерилась, стратегию не меняю"
+        elif [ "$AUTOPICK" = 0 ]; then
+            MSG="$GNAME: автоподбор выключен, стратегию не меняю — выберите в таблице"
         elif [ "$(sh "$ZDIR/netid.sh" "$WAN" 2>/dev/null | head -1)" != "$NETID" ]; then
             MSG="сеть сменилась во время подбора — не запоминаю"
         else
@@ -1161,6 +1176,8 @@ fi
 if [ "$PERNET" = "1" ] && [ -n "$BEST" ]; then
     if [ -z "${NETID%%"|"*}" ]; then
         MSG="не понял, что за сеть — стратегия не запомнена, примени вручную"
+    elif [ "$AUTOPICK" = 0 ]; then
+        MSG="автоподбор выключен, стратегию не меняю — выберите в таблице"
     elif [ "$(sh "$ZDIR/netid.sh" "$WAN" 2>/dev/null | head -1)" != "$NETID" ]; then
         MSG="сеть сменилась во время подбора — не запоминаю"
     else

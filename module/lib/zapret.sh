@@ -705,8 +705,9 @@ zapret_watchdog() {
     due=$((ZWD_LAST + ZAPRET_WATCHDOG_MIN * 60))
     n=$(echo $YT_STUCK | wc -w)
     if [ "$now" -lt "$due" ]; then
-        # видео застревает на ClientHello — раньше срока, но не чаще раза в 3 мин
-        [ "$n" -ge 3 ] && [ $((now - ZWD_LAST)) -ge 180 ] || return 0
+        # видео застревает на ClientHello — раньше срока, но не чаще раза в 3 мин.
+        # Автоподбор выключен — чинить некому, и залп шёл бы каждые 3 мин без конца
+        [ "$ZAPRET_AUTOPICK" = "1" ] && [ "$n" -ge 3 ] && [ $((now - ZWD_LAST)) -ge 180 ] || return 0
         log "zapret: $n соединений YouTube застряли на ClientHello — сторож проверяет стратегию"
     fi
     zscan_running && return 0   # уже идёт подбор/проверка

@@ -43,6 +43,8 @@ OPERA_DOM_SECS=600
 OPERA_STATE="off"       # off | starting | on | fail
 OPERA_ENDPOINT=""       # сервер Opera, выбранный opera-proxy
 OPERA_ERR=""            # почему fail
+OPERA_OWN=0             # этот запуск идёт через свой прокси (OPERA_API_PROXY)
+OPERA_OWN_BAD=0         # свой прокси не ответил: до смены сети или выключения — бесплатный список
 OPERA_RULES_SIG=""      # что стоит: интерфейсы|исключения|адреса, "" = правил нет
 OPERA_RETRY=0           # пропустить N итераций до повтора
 OPERA_FAILS=0           # неудачных стартов подряд
@@ -133,8 +135,16 @@ opera_start() {
     opera_ca_build || log "WARNING: opera: системные сертификаты не найдены"
     args="-bind-address 127.0.0.1:$OPERA_PORT -socks-mode -country EU -verbosity 20 -cafile $OPERA_CA"
     args="$args -server-selection fastest -server-selection-timeout 3s -server-selection-test-url http://www.example.com/"
-    args="$args -api-address api2.sec-tunnel.com -api-proxy-parallel 24 -api-proxy-list-url $OPERA_API_URL"
-    [ -s "$OPERA_API_FILE" ] && args="$args -api-proxy-file $OPERA_API_FILE"
+    args="$args -api-address api2.sec-tunnel.com"
+    OPERA_OWN=0
+    if [ -n "$OPERA_API_PROXY" ] && [ "$OPERA_OWN_BAD" != "1" ]; then
+        # свой прокси вместо списка; в журнал адрес не пишем: в нём может быть пароль
+        OPERA_OWN=1
+        args="$args -api-proxy $OPERA_API_PROXY"
+    else
+        args="$args -api-proxy-parallel 24 -api-proxy-list-url $OPERA_API_URL"
+        [ -s "$OPERA_API_FILE" ] && args="$args -api-proxy-file $OPERA_API_FILE"
+    fi
     : > "$OPERA_LOG"
     # setsid: с nohup opera-proxy умирал вместе с сессией
     if [ "$OPERA_SU_G" = "1" ]; then
@@ -162,7 +172,7 @@ opera_started() {
     OPERA_ENDPOINT=$(sed -n 's/.*Selected endpoint address: \([^ ]*\).*/\1/p' "$OPERA_LOG" 2>/dev/null | tail -n 1)
     OPERA_WAN="$LAST_WAN_IFACE"
     OPERA_FAILS=0; OPERA_BAD=0
-    log "opera: готов за $(( $(date +%s) - OPERA_START_TS )) с (сервер ${OPERA_ENDPOINT:-?}${c:+, API через $c})"
+    log "opera: готов за $(( $(date +%s) - OPERA_START_TS )) с (сервер ${OPERA_ENDPOINT:-?}${c:+, API через $c}$([ "$OPERA_OWN" = "1" ] && echo ', API через свой прокси'))"
 }
 
 opera_hev_start() {
@@ -442,6 +452,7 @@ opera_down() {   # [quiet]
     OPERA_RETRY=0
     OPERA_FAILS=0
     OPERA_BAD=0
+    OPERA_OWN_BAD=0
     OPERA_DOM_TS=0
     OPERA_DOM_IPS=""
     OPERA_DOM_LAST=""
@@ -484,17 +495,23 @@ opera_reconcile() {
         off|fail)
             [ "$want" = "1" ] && [ -n "$LAST_WAN_IFACE" ] || return 0
             # другая сеть — прошлые неудачи не в счёт
-            [ "$LAST_WAN_IFACE" != "$OPERA_WAN" ] && { OPERA_WAN="$LAST_WAN_IFACE"; OPERA_RETRY=0; OPERA_FAILS=0; }
+            [ "$LAST_WAN_IFACE" != "$OPERA_WAN" ] && { OPERA_WAN="$LAST_WAN_IFACE"; OPERA_RETRY=0; OPERA_FAILS=0; OPERA_OWN_BAD=0; }
             if [ "$OPERA_RETRY" -gt 0 ]; then OPERA_RETRY=$((OPERA_RETRY - 1)); return 0; fi
             opera_start
             return 0 ;;
         starting)
             if [ -z "$(opera_proxy_pids)" ]; then
                 # упал молча — значит, ни один адрес из discover не ответил
-                opera_fail "opera-proxy не запустился: $(grep -E 'CRITICAL|ERROR|Discovered endpoints' "$OPERA_LOG" 2>/dev/null | tail -n 1 | sed 's/.*Discovered endpoints: //; s/\. Starting.*//' | cut -c1-120)"
+                opera_fail "opera-proxy не запустился: $(grep -E 'CRITICAL|ERROR|Discovered endpoints' "$OPERA_LOG" 2>/dev/null | tail -n 1 | sed 's/.*Discovered endpoints: //; s/\. Starting.*//; s#://[^ ]*@#://***@#' | cut -c1-120)"
                 return 0
             fi
             if ! _opera_listening "$OPERA_PORT"; then
+                # Живой прокси отвечает за 5–10 с. Адреса получены — прокси ни при чём, ждём выбор сервера
+                if [ "$OPERA_OWN" = "1" ] && [ $(( $(date +%s) - OPERA_START_TS )) -ge 45 ] && ! grep -q 'Discovered endpoints' "$OPERA_LOG" 2>/dev/null; then
+                    OPERA_OWN_BAD=1
+                    opera_fail "свой прокси не ответил за 45 с, регистрирую через бесплатный список"
+                    return 0
+                fi
                 [ $(( $(date +%s) - OPERA_START_TS )) -ge 120 ] && opera_fail "opera-proxy не зарегистрировался за 2 мин"
                 return 0
             fi

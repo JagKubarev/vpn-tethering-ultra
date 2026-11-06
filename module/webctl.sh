@@ -36,7 +36,8 @@
 #   webctl.sh zscan-start sites ['сайты']  подобрать своё сайтам (без списка — из списков zapret)
 #   webctl.sh zscan-start yt|dc       подбор только для YouTube или Discord, с замером скорости
 #   webctl.sh zscan-start quic        проходит ли QUIC YouTube с подделкой в этой сети
-#   webctl.sh znet-own yt|dc [АРГУМЕНТЫ]  своя стратегия YouTube или Discord сети (пусто — как общая)
+#   webctl.sh znet-own yt|dc [АРГУМЕНТЫ] [manual]  своя стратегия YouTube или Discord сети (пусто — как общая)
+#   webctl.sh zquick                  стратегии быстрого подбора (для ручного выбора)
 #   webctl.sh warp-list|warp-gen [N]|warp-import ИМЯ BASE64|warp-del ИМЯ|warp-export ИМЯ|warp-save ИМЯ|warp-saveall
 #   webctl.sh warp-stats              туннель: последнее рукопожатие и трафик (awg show)
 #   webctl.sh warp-reconnect          тот же конфиг заново (новая сессия Cloudflare)
@@ -272,7 +273,7 @@ case "$1" in
             sed -n 's/^version=/модуль: /p' "$MODDIR/module.prop"
             echo "телефон: $(getprop ro.product.manufacturer) $(getprop ro.product.model), Android $(getprop ro.build.version.release), ядро $(uname -r)"
             echo; echo "=== состояние"; sed '1,2d' "$STATUS_FILE" 2>/dev/null
-            echo; echo "=== настройки (vpn_tether.conf, без комментариев)"; grep -v '^[[:space:]]*#' "$CONF" 2>/dev/null | grep .
+            echo; echo "=== настройки (vpn_tether.conf, без комментариев)"; grep -v '^[[:space:]]*#' "$CONF" 2>/dev/null | grep . | sed 's#://[^ ]*@#://***@#'
             echo; echo "=== журнал модуля (последние 3000 строк)"; tail -n 3000 "$LOG_FILE" 2>/dev/null
             echo; echo "=== журнал прошлого запуска (последние 500 строк)"; tail -n 500 "$LOG_FILE.prev" 2>/dev/null
             echo; echo "=== сторож и подбор (последние 100)"; tail -n 100 "$ZEVENTS" 2>/dev/null
@@ -280,7 +281,7 @@ case "$1" in
             echo; echo "=== свои стратегии сайтов"; cat "$ZALT" 2>/dev/null
             echo; echo "=== автосписок: домен|когда|сбросы/зависания/редиректы|кто"; sh "$MODDIR/webctl.sh" zauto-info 2>/dev/null
             echo; echo "=== nfqws (последние 50 строк)"; tail -n 50 /data/local/tmp/vpn_tether_nfqws.log 2>/dev/null
-            echo; echo "=== opera-proxy (последние 60 строк)"; tail -n 60 /data/local/tmp/vpn_tether_op.log 2>/dev/null
+            echo; echo "=== opera-proxy (последние 60 строк)"; tail -n 60 /data/local/tmp/vpn_tether_op.log 2>/dev/null | sed 's#://[^ ]*@#://***@#'
             echo; echo "=== hev-socks5-tproxy (последние 20 строк)"; tail -n 20 /data/local/tmp/vpn_tether_ophev.log 2>/dev/null
             echo; echo "=== ip rule"; ip rule 2>/dev/null
             echo; echo "=== цепочки модуля (filter / nat / mangle)"
@@ -669,6 +670,12 @@ case "$1" in
         keep_yt=0; { [ $# -lt 5 ] || [ "$yt" = "=" ]; } && { keep_yt=1; yt=""; }
         keep_dc=0; { [ $# -lt 6 ] || [ "$dc" = "=" ]; } && { keep_dc=1; dc=""; }
         note=$(printf '%s' "$4" | tr -d '\r\n|' | cut -c1-120)
+        # Ручной выбор: не посреди подбора (перезапуск nfqws сбил бы замеры, а итог подбора
+        # перезаписал бы выбор) и не в историю: её 8 записей — проверенные, сторож пробует их
+        # znet-own говорит сам (0 или 1): он передаёт старую заметку сети, по ней судить нельзя
+        manual="$ZNET_MANUAL"
+        [ -n "$manual" ] || { manual=0; case "$note" in *вручную*) manual=1 ;; esac; }
+        [ "$manual" = 1 ] && zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
         [ -z "$yt" ] || sh "$MODDIR/service.sh" --check ZAPRET_ARGS "$yt" 2>/dev/null || { echo "ERR недопустимые параметры YouTube"; exit 1; }
         [ -z "$dc" ] || sh "$MODDIR/service.sh" --check ZAPRET_ARGS "$dc" 2>/dev/null || { echo "ERR недопустимые параметры Discord"; exit 1; }
         [ "$yt" = "$a" ] && yt=""
@@ -679,11 +686,12 @@ case "$1" in
         d=$(cur_net); k=${d%%"|"*}; l=${d#*"|"}
         [ -n "$k" ] || { echo "ERR не понял, что за сеть (нет Wi-Fi/мобильной сети или модуль её ещё не видел)"; exit 1; }
         if [ "$keep_yt" = 1 ] && [ -f "$ZNETS" ]; then
-            yt=$(K="$k" awk -F'|' '$1 == ENVIRON["K"] { y = $7 } END { print y }' "$ZNETS")
+            # своей записи нет — как у демона, запись с тем же названием
+            yt=$(K="$k" L="$l" awk -F'|' '$1 == ENVIRON["K"] { x = $7; f = 1 } ENVIRON["L"] != "" && $4 == ENVIRON["L"] { y = $7 } END { print (f ? x : y) }' "$ZNETS")
             [ "$yt" = "$a" ] && yt=""
         fi
         if [ "$keep_dc" = 1 ] && [ -f "$ZNETS" ]; then
-            dc=$(K="$k" awk -F'|' '$1 == ENVIRON["K"] { y = $8 } END { print y }' "$ZNETS")
+            dc=$(K="$k" L="$l" awk -F'|' '$1 == ENVIRON["K"] { x = $8; f = 1 } ENVIRON["L"] != "" && $4 == ENVIRON["L"] { y = $8 } END { print (f ? x : y) }' "$ZNETS")
             [ "$dc" = "$a" ] && dc=""
         fi
         {
@@ -692,12 +700,17 @@ case "$1" in
         } > "$ZNETS.tmp" && chmod 600 "$ZNETS.tmp" && mv -f "$ZNETS.tmp" "$ZNETS"
         # история сети: сторож при поломке сначала пробует прежние стратегии
         # (та же запись — переносим в конец, держим 8 последних на сеть)
-        {
+        if [ "$manual" != 1 ]; then {
             [ -f "$ZHIST" ] && K="$k" S="$st" A="$a" Y="$yt" D="$dc" awk -F'|' '!($1 == ENVIRON["K"] && $2 == ENVIRON["S"] && $3 == ENVIRON["A"] && $6 == ENVIRON["Y"] && $7 == ENVIRON["D"])' "$ZHIST"
             printf '%s|%s|%s|%s|%s|%s|%s\n' "$k" "$st" "$a" "$(date '+%Y-%m-%d %H:%M')" "$note" "$yt" "$dc"
         } | K="$k" awk -F'|' '{ l[NR] = $0; key[NR] = $1 } END { for (i = NR; i >= 1; i--) if (key[i] != ENVIRON["K"] || ++n <= 8) keep[i] = 1; for (i = 1; i <= NR; i++) if (keep[i]) print l[i] }' > "$ZHIST.tmp" && \
             chmod 600 "$ZHIST.tmp" && mv -f "$ZHIST.tmp" "$ZHIST"
+        fi
         echo "OK $l"
+        ;;
+    zquick)
+        # список один — в scan.sh; FAKE там задан так же
+        awk '/^    done <<EOF$/ { f = 1; next } /^EOF$/ { f = 0 } f { gsub(/\$FAKE/, "--dpi-desync-fake-tls=@G"); print }' "$MODDIR/zapret/scan.sh"
         ;;
     znet-own)
         # меняет только своё поле: общая и вторая своя стратегия сети остаются.
@@ -713,7 +726,7 @@ case "$1" in
             st=$(sh "$MODDIR/service.sh" --get ZAPRET_STRATEGY 2>/dev/null); a=$(sh "$MODDIR/service.sh" --get ZAPRET_ARGS 2>/dev/null); note=""; yt=""; dc=""
         fi
         if [ "$g" = yt ]; then yt="$3"; else dc="$3"; fi
-        r=$(sh "$MODDIR/webctl.sh" znet-set "$st" "$a" "$note" "$yt" "$dc")
+        r=$(ZNET_MANUAL=$([ "$4" = manual ] && echo 1 || echo 0) sh "$MODDIR/webctl.sh" znet-set "$st" "$a" "$note" "$yt" "$dc")
         echo "$r"
         # записи сайтов Discord в ZALT идут раньше его профиля и перекрыли бы новую
         case "$r" in OK*)
@@ -750,6 +763,7 @@ case "$1" in
         ;;
     znet-del)
         [ -n "$2" ] || { echo "ERR ключ"; exit 1; }
+        zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
         [ -f "$ZNETS" ] || { echo "OK"; exit 0; }
         K="$2" awk -F'|' '$1 != ENVIRON["K"]' "$ZNETS" > "$ZNETS.tmp" && chmod 600 "$ZNETS.tmp" && mv -f "$ZNETS.tmp" "$ZNETS"
         echo "OK"

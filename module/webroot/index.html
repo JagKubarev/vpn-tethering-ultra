@@ -316,7 +316,16 @@ details.more > summary { color: var(--muted); }
   <div class="row col" id="znetBox">
     <div class="txt"><div class="t">Эта сеть: <span id="znetCur">—</span></div>
       <div class="s" id="znetInfo"></div><div class="s" id="zSum" style="white-space:pre-line;margin-top:6px"></div></div>
+    <div class="s muted" style="margin-top:8px">Общая</div>
     <select id="znetSel" aria-label="Стратегия для этой сети"></select>
+    <div class="s muted" style="margin-top:8px">YouTube</div>
+    <select id="znetYt" aria-label="Стратегия YouTube для этой сети"></select>
+    <div class="s muted" style="margin-top:8px">Discord</div>
+    <select id="znetDc" aria-label="Стратегия Discord для этой сети"></select>
+    <div id="znetMan" style="display:none;margin-top:8px">
+      <input type="text" id="znetManIn" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="--dpi-desync=..." aria-label="Параметры стратегии">
+      <button class="btn small" id="znetManOk" style="margin-top:6px">Сохранить</button>
+    </div>
     <div class="s muted" id="znetListHead" style="font-size:13px;margin-top:12px"></div>
     <div id="znetList"></div>
   </div>
@@ -339,8 +348,13 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Автопроверка обхода</div>
-      <div class="s">Раз в <span id="zwdMin">15 минут</span> (и сразу при зависании видео) проверяет, открываются ли заблокированные сайты; если нет — возвращает рабочую стратегию или подбирает новую. Нужна «Стратегия для каждой сети»; при включённом VPN не работает.</div></div>
+      <div class="s">Раз в <span id="zwdMin">15 минут</span> (и сразу при зависании видео) проверяет, открываются ли заблокированные сайты; если нет — возвращает рабочую стратегию или подбирает новую, а при выключенном автоподборе только пишет в журнал. Нужна «Стратегия для каждой сети»; при включённом VPN не работает.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_WATCHDOG"><span></span></label>
+  </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Автоподбор</div>
+      <div class="s">Сам меняет общую стратегию, YouTube и Discord: автопроверка возвращает прежнюю или подбирает новую, кнопки подбора запоминают лучшую. Выключено: стратегии меняете только вы, подбор показывает таблицу, автопроверка пишет в журнал. Свои стратегии отдельных сайтов подбираются всё равно.</div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_AUTOPICK"><span></span></label>
   </div>
 </div>
 
@@ -654,6 +668,11 @@ details.more > summary { color: var(--muted); }
     <div class="txt"><div class="t">Google</div>
       <div class="s">Поиск, YouTube, Play. Скорость сильно зависит от сети: на части сетей это единицы Мбит/с.</div></div>
     <label class="sw"><input type="checkbox" data-key="OPERA_GOOGLE"><span></span></label>
+  </div>
+  <div class="row col" data-dep="OPERA_ENABLE">
+    <div class="txt"><div class="t">Свой прокси для регистрации</div>
+      <div class="s">Вместо бесплатного списка: через него opera-proxy только получает адреса серверов, трафик сайтов через него не идёт. Пусто или прокси не отвечает — бесплатный список. Логин и пароль попадут в файл экспорта настроек, в логи — нет.</div></div>
+    <input type="text" data-key="OPERA_API_PROXY" placeholder="socks5://логин:пароль@адрес:порт" autocapitalize="off" autocorrect="off" spellcheck="false">
   </div>
   <div class="row col" data-dep="OPERA_ENABLE">
     <div class="txt"><div class="t">Сайты</div>
@@ -1023,6 +1042,7 @@ function renderStatus(s) {
     '\nQUIC YouTube: ' + (s.quic_net === '1' ? 'подделка проходит' : s.quic_net === '0' ? 'подделка не проходит' : 'не проверялся') + (s.quic_fake ? ', подделка включена' : ', закрыт') +
     '\nОтдельные сайты: ' + (+s.zapret_alt_n ? s.zapret_alt_n + ' со своей стратегией' : 'нет') : '';
   if (s.warp && s.warp !== 'disabled') h += kvRow('WARP', esc(w.t + (w.s ? ' · ' + w.s : '')), w.d);
+  if (s.opera && s.opera !== 'disabled') { const o = operaState(s); h += kvRow('Opera', esc(o[1] + (o[2] ? ' · ' + o[2] : '')), o[0]); }
   if (s.quic_uids) h += kvRow('Без QUIC', esc(String(s.quic_uids.split(' ').length)) + ' прил.');
   const bad = (s.conf_note || '').split(' ').filter((x) => x[0] === '!' || x[0] === '?');
   if (bad.length) h += kvRow('Конфиг', 'пропущено: ' + esc(bad.join(', ')), 'amber');
@@ -1073,9 +1093,9 @@ let DEF = {}, USR = {}, CUR = {};   // умолчания, из файла, те
 const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAMS','DNS_FALLBACKS','DNS_VPN_UPSTREAMS',
   'DNS_BOOTSTRAP','DNS_HEALTH_INTERVAL','DNS_HEALTH_RECOVER','KILL_SWITCH','KILL_SWITCH_STRICT','NET_PROFILE_ADAPTIVE',
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE','ZAPRET_EXCL_APPS',
-  'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK','YT_DEAD_FAILFAST','YT_DEAD_WARP','ZAPRET_WATCHDOG','ZAPRET_WATCHDOG_MIN',
+  'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK','YT_DEAD_FAILFAST','YT_DEAD_WARP','ZAPRET_WATCHDOG','ZAPRET_AUTOPICK','ZAPRET_WATCHDOG_MIN',
   'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','YT_SLOW_RETRY','ZAPRET_AUTO_FAIL',
-  'WARP_ENABLE','WARP_CONF','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
+  'WARP_ENABLE','WARP_CONF','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
 // интервал в минутах человеческим языком: 15 -> «15 минут», 180 -> «3 часа»
 function fmtMin(v, def) {
   const m = +v || def;
@@ -1526,12 +1546,11 @@ function warpState(s) {
     default: return { d: '', t: 'Выключен', s: '' };
   }
 }
-function renderOpera(s) {
-  const e = $('#operaTitle');
-  if (!e) return;
+// [цвет, заголовок, подпись]: карточка на вкладке WARP и строка на Главной
+function operaState(s) {
   const a = (s.opera_endpoint || '').replace(/:\d+$/, '');
   const pause = s.vpn_up === '1', none = s.opera_ips === '0';
-  const m = {
+  return {
     on: pause ? ['', 'Пауза: включён VPN', 'Без VPN включится сам']
       : none ? ['amber', 'Сайты не направлены', s.opera_skip !== '0' ? 'Они на общих CDN: поставьте «!» перед именем' : 'Проверьте список и выключатели «телефон» и «раздача»']
       : ['green', 'Работает', a ? 'Сервер ' + a : ''],
@@ -1539,6 +1558,11 @@ function renderOpera(s) {
     fail: ['red', 'Не запустился', s.opera_err || 'Повтор идёт сам'],
     off: s.vpn_up === '1' ? ['', 'Пауза: включён VPN', 'Без VPN включится сам'] : ['', 'Ждёт список сайтов или сеть', ''],
   }[s.opera] || ['', 'Выключен', ''];
+}
+function renderOpera(s) {
+  const e = $('#operaTitle');
+  if (!e) return;
+  const m = operaState(s);
   $('#operaDot').className = 'dot' + (m[0] ? ' ' + m[0] : '');
   e.textContent = m[1];
   $('#operaSub').textContent = m[2];
@@ -2094,6 +2118,15 @@ function presetName(v) {
 }
 function stratName(st, a) { return st === 'custom' ? (a ? stratLabel(a) : 'своя') : presetName(st); }
 
+let ZQ = [];        // стратегии быстрого подбора: ручной выбор
+let znetManG = '';  // для чего открыт ввод вручную: gen, yt, dc
+let znetManNet = ''; // и в какой сети
+// как у демона: запись этой сети, иначе последняя с тем же названием (YOTA: 25011 и 25002)
+const znetEntry = () => ZN.list.find((x) => x.key === ZN.cur) || (ZN.curLabel ? ZN.list.filter((x) => x.label === ZN.curLabel).pop() : undefined);
+const quickOpts = (val, skip) => '<optgroup label="Быстрый подбор">' + ZQ.map((a, i) => skip.indexOf(a) >= 0 ? '' :
+  '<option value="' + esc(val(a, i)) + '">' + esc((i + 1) + ' · ' + stratLabel(a)) + '</option>').join('') + '</optgroup>' +
+  '<option value="input">Ввести вручную…</option>';
+
 async function loadZnet() {
   znetLoading = true;
   try {
@@ -2107,12 +2140,14 @@ async function loadZnet() {
       else if (l.indexOf('H ') === 0 && f[1]) z.hist.unshift({ st: f[1], args: f[2] || '', date: f[3] || '', note: f[4] || '', yt: f[5] || '', dc: f[6] || '' });
     });
     ZN = z;
+    if (!ZQ.length) ZQ = ((await ctl('zquick')).out || '').split('\n').filter((l) => l.indexOf('--') === 0);
     renderZnet();
   } finally { znetLoading = false; }
 }
 
 function renderZnet() {
-  const e = ZN.list.find((x) => x.key === ZN.cur);
+  if (znetManNet !== ZN.cur) $('#znetMan').style.display = 'none';   // сеть сменилась: ввод был для прежней
+  const e = znetEntry();
   const def = stratName(saved('ZAPRET_STRATEGY'), saved('ZAPRET_ARGS'));
   $('#znetCur').textContent = ZN.cur ? ZN.curLabel + ' · ' + netKind(ZN.cur) : 'не определена';
   $('#znetInfo').textContent = !ZN.cur
@@ -2128,8 +2163,19 @@ function renderZnet() {
   const hist = ZN.hist.map((h, i) => ({ h, i })).filter(({ h }) => !(e && h.st === e.st && h.args === (e.args || '') && h.yt === (e.yt || '') && h.dc === (e.dc || '')));
   if (hist.length) sel.innerHTML += '<optgroup label="Прежние рабочие для этой сети">' + hist.map(({ h, i }) =>
     '<option value="h:' + i + '">' + esc(stratName(h.st, h.args) + (h.yt ? ' · YouTube своя' : '') + (h.dc ? ' · Discord своя' : '') + ' · ' + h.date.slice(5, 10).split('-').reverse().join('.')) + '</option>').join('') + '</optgroup>';
+  sel.innerHTML += quickOpts((a, i) => 'a:' + i, []);
   sel.value = e ? e.st : '';
   sel.disabled = !ZN.cur;
+  [['yt', '#znetYt'], ['dc', '#znetDc']].forEach(([g, id]) => {
+    const s = $(id), cur = e ? e[g] : '';
+    const hist = ZN.hist.map((h) => h[g]).filter((a, i, l) => a && a !== cur && l.indexOf(a) === i);
+    s.innerHTML = '<option value="">Как общая</option>' +
+      (cur ? '<option value="' + esc(cur) + '">' + esc('Сейчас: ' + stratLabel(cur)) + '</option>' : '') +
+      (hist.length ? '<optgroup label="Прежние для этой сети">' + hist.map((a) => '<option value="' + esc(a) + '">' + esc(stratLabel(a)) + '</option>').join('') + '</optgroup>' : '') +
+      quickOpts((a) => a, hist.concat(cur));
+    s.value = cur;
+    s.disabled = !ZN.cur;
+  });
   $('#znetListHead').textContent = ZN.list.length ? 'Запомненные сети: ' + ZN.list.length : 'Запомненных сетей пока нет.';
   $('#znetList').innerHTML = ZN.list.map((x) =>
     '<div class="row wrap" style="padding:10px 0;border-top:1px solid var(--line)">' +
@@ -2141,13 +2187,53 @@ function renderZnet() {
 
 $('#znetSel').addEventListener('change', async () => {
   const v = $('#znetSel').value;
+  if (v === 'input') { znetManOpen('gen'); return; }
+  $('#znetMan').style.display = 'none';
   if (v === 'custom') return;
   const h = v.indexOf('h:') === 0 ? ZN.hist[+v.slice(2)] : null;
-  const r = h ? await ctl('znet-set ' + q(h.st) + ' ' + q(h.args) + ' ' + q('прежняя рабочая, выбрана вручную') + ' ' + q(h.yt) + ' ' + q(h.dc))
-    : v ? await ctl('znet-set ' + q(v) + " '' " + q('выбрана вручную')) : await ctl('znet-del ' + q(ZN.cur));
+  const qa = v.indexOf('a:') === 0 ? ZQ[+v.slice(2)] : '';
+  $('#znetSel').disabled = true;   // запись идёт несколько секунд
+  const r = h ? await ctlBg('znet-set ' + q(h.st) + ' ' + q(h.args) + ' ' + q('прежняя рабочая, выбрана вручную') + ' ' + q(h.yt) + ' ' + q(h.dc))
+    : qa ? await ctlBg('znet-set custom ' + q(qa) + ' ' + q('выбрана вручную'))
+    : v ? await ctlBg('znet-set ' + q(v) + " '' " + q('выбрана вручную')) : await ctlBg('znet-del ' + q((znetEntry() || { key: ZN.cur }).key));
   if (!isOk(r)) toast(errText(r, 'Не получилось'));
   else toast(v ? 'Запомнено для сети «' + ZN.curLabel + '»' : 'Сеть «' + ZN.curLabel + '» — по умолчанию');
   await loadZnet();
+});
+function znetManOpen(g) {
+  const e = znetEntry();
+  znetManG = g; znetManNet = ZN.cur;
+  $('#znetManIn').value = e ? (g === 'gen' ? e.args : e[g]) || '' : '';
+  $('#znetMan').style.display = '';
+  $('#znetManIn').focus();
+}
+// YouTube и Discord: запись идёт несколько секунд, поэтому в фоне (как «Применить» в таблице)
+async function znetOwn(g, a) {
+  const r = await ctlBg('znet-own ' + g + ' ' + q(a) + ' manual');
+  toast(isOk(r) ? 'Запомнено для сети «' + ZN.curLabel + '»' : errText(r, 'Не получилось'));
+  await loadZnet();
+  return isOk(r);
+}
+[['yt', '#znetYt'], ['dc', '#znetDc']].forEach(([g, id]) => $(id).addEventListener('change', async () => {
+  const s = $(id), v = s.value;
+  if (v === 'input') { znetManOpen(g); return; }
+  $('#znetMan').style.display = 'none';
+  s.disabled = true;
+  await znetOwn(g, v);
+}));
+$('#znetManOk').addEventListener('click', async () => {
+  const a = $('#znetManIn').value.trim(), b = $('#znetManOk');
+  if (!a) { toast('Введите параметры'); return; }
+  b.disabled = true;
+  let ok;
+  if (znetManG === 'gen') {
+    const r = await ctlBg('znet-set custom ' + q(a) + ' ' + q('введена вручную'));
+    ok = isOk(r);
+    toast(ok ? 'Запомнено для сети «' + ZN.curLabel + '»' : errText(r, 'Не получилось'));
+    await loadZnet();
+  } else ok = await znetOwn(znetManG, a);
+  b.disabled = false;
+  if (ok) $('#znetMan').style.display = 'none';
 });
 $('#znetList').addEventListener('click', async (e) => {
   const k = e.target.dataset && e.target.dataset.del; if (!k) return;
@@ -2212,7 +2298,7 @@ function mockExec(cmd) {
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=предпросмотр\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
     '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nwarp=up\nwarp_conf=warp-2\nwarp_note=\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://not-a-dns.quic.best/dns-query\nD DNS_FALLBACKS=https://dns.wlrus.cfd/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.commonnet.work/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://not-a-dns.quic.best/dns-query\nD DNS_FALLBACKS=https://dns.wlrus.cfd/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.commonnet.work/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=1\nD OPERA_API_PROXY=\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
     Object.keys(M.usr).map((k) => 'U ' + k + '=' + M.usr[k] + '\n').join('') };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +
@@ -2220,7 +2306,7 @@ function mockExec(cmd) {
     '\nH wifi:Дом_5G|custom|--dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=www.google.com --dpi-desync-fooling=md5sig|2026-10-18 20:44|подбор: открыла 6 из 6|--dpi-desync=multisplit --dpi-desync-split-pos=1\n' +
     'H wifi:Дом_5G|seqovl||2026-10-19 09:10|выбрана вручную|\n' +
     'H wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|2026-10-20 13:05|подбор: открыла 8 из 8|' };
-  if (/^znet-(set|del) /.test(a)) return { errno: 0, out: 'OK Дом_5G' };
+  if (/^znet-(set|del|own) /.test(a)) return { errno: 0, out: 'OK Дом_5G' };
   if (a === 'metatest') return { errno: 0, out: 'ecs 185.15.56.0\nhost www.instagram.com 57.144.244.34 31.13.72.174\nhost scontent.cdninstagram.com 57.144.244.192 157.240.205.63\nhost www.facebook.com 57.144.244.1 31.13.72.36\nhost static.xx.fbcdn.net 57.144.244.13 31.13.72.12\n' };
   if (a === 'toggle') { M.target = M.target === 'vpn' ? 'direct' : 'vpn'; M.ack = 't' + Date.now(); return { errno: 0, out: 'OK ' + M.ack }; }
   if (a === 'apply') { M.ack = 'a' + Date.now(); return { errno: 0, out: 'OK ' + M.ack }; }
@@ -2261,6 +2347,7 @@ function mockExec(cmd) {
     '10|10|0|1020|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@G|проверка|\n' +
     '7|10|0|900|--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld|быстрый| facebook.com:x35 rutracker.org:x35 linkedin.com:x35\n' +
     '0|10|2|0|--dpi-desync=fake,multisplit --dpi-desync-autottl --dpi-desync-split-pos=1 --dpi-desync-fake-tls=@G|быстрый| ya.ru:x28 google.com:x28\n' };
+  if (a === 'zquick') return { errno: 0, out: '--dpi-desync=multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1\n--dpi-desync=fake,multisplit --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=1000 --dpi-desync-repeats=6 --dpi-desync-fake-tls=@G\n' };
   if (/^zscan-start /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'zscan-stop') return { errno: 0, out: 'OK' };
   if (/^sitetest /.test(a)) return { errno: 0, out: 'ip 142.251.155.4\ndirect 000 8.001 28 0\nprobe 1 1\nzapret 200 1.02 0 18342\n' };
