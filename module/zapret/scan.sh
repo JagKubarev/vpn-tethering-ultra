@@ -471,6 +471,15 @@ test_sites() {
 
 # --- исходное состояние: что вообще заблокировано
 st stage="проверяю, что заблокировано"
+# Плановая проверка сайтов напрямую стучит только в автосписок (его чистка) и контрольные:
+# остальные считаем закрытыми. Голые ClientHello к сотне закрытых имён — самый заметный
+# трафик: 03–06.11 5 из 8 волн Google пришлись на проверку сайтов, а она идёт ~4% времени
+: > "$TMP/ips.rest"
+if [ "$MODE" = sites ] && [ -z "$SITES_ARG" ]; then
+    L=" $(tr '\n' ' ' < "$ZAUTO" 2>/dev/null) ya.ru www.google.com " awk -v rest="$TMP/ips.rest" \
+        'index(ENVIRON["L"], " " $1 " ") { print; next } { print > rest }' "$TMP/ips" > "$TMP/ips.dir" && \
+        mv -f "$TMP/ips.dir" "$TMP/ips"
+fi
 test_sites
 BASE_OK=""; BLOCKED=""
 while read -r h ip; do
@@ -478,6 +487,8 @@ while read -r h ip; do
     v=""; read -r v _ < "$TMP/r.$h" 2>/dev/null
     if [ "$v" = ok ]; then BASE_OK="$BASE_OK $h"; else BLOCKED="$BLOCKED $h"; fi
 done < "$TMP/ips"
+while read -r h ip; do BLOCKED="$BLOCKED $h"; done < "$TMP/ips.rest"
+cat "$TMP/ips.rest" >> "$TMP/ips"
 st blocked="$(echo $BLOCKED)"
 # Плановая проверка сайтов: адресов узнали < 60% или «заблокировано» > 90% —
 # телефон/сеть не успевали (22.10 19:57: 56 из ~210, из них 54 «закрыты»),
@@ -691,7 +702,7 @@ if [ "$MODE" = "sites" ]; then
 --dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=@G $FAKE
 --dpi-desync=fakedsplit --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=badseq
 EOF
-        } | G="$GEN_X" awk 'NF && $0 != ENVIRON["G"] && !/--wssize|syndata/ && !s[$0]++' | head -n 10 > "$TMP/cands"
+        } | G="$GEN_X" awk 'NF && $0 != ENVIRON["G"] && !/--wssize|syndata/ && !s[$0]++' | head -n 5 > "$TMP/cands"
         S_total=$((S_done + $(wc -l < "$TMP/cands") * 2))
         NUSED=0
         while IFS= read -r a <&3; do

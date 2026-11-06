@@ -726,10 +726,10 @@ details.more > summary { color: var(--muted); }
     </div>
     <div class="kv" id="diagOut" style="display:none"></div>
   </div>
-  <div class="row">
+  <div class="row col">
     <div class="txt"><div class="t">Переподключить сеть</div>
-      <div class="s">На секунду просит только 2G и возвращает как было: новая сессия у оператора и обычно новый адрес, без перезагрузки. Связь пропадёт на 5–20 секунд, разговор по этой SIM может оборваться, раздача останется. Если телефон выключится в эту секунду, 2G останется до следующего нажатия.</div></div>
-    <button class="btn small" id="netRenew">Переподключить</button>
+      <div class="s">Новая сессия у оператора и обычно новый адрес, без перезагрузки. Связь пропадёт на 5–20 секунд, раздача останется.</div></div>
+    <button class="btn" id="netRenew">Переподключить</button>
   </div>
 </div>
 
@@ -1025,7 +1025,7 @@ function renderStatus(s) {
     if (s.zwd === '1') {
       const w = (s.zwd_last || '').split('|'), t = w[1] || '';
       h += kvRow('Автопроверка', s.zwd_last ? esc(w[0] + ' · ' + t) : 'проверок ещё не было',
-        /^(работает|починил|ничего)/.test(t) ? 'green' : t ? 'red' : '');
+        /^(работает|починил|ничего|сеть)/.test(t) ? 'green' : t ? 'red' : '');
     }
   }
   else if (s.zapret === 'fail') h += kvRow('Обход блокировок', 'nfqws не запустился, повтор через минуту', 'red');
@@ -1075,6 +1075,8 @@ function renderHealth(s, w, confBad) {
   }
   // пауза и подъём — не проблема: подсказка только у красного и у жёлтого с пояснением
   if (s.warp && s.warp !== 'disabled') add('WARP', w.d, w.d === 'red' || (w.d === 'amber' && w.s) ? w.t + (w.s ? '. ' + w.s : '') : '');
+  if (s.opera && s.opera !== 'disabled') { const o = operaState(s); add('Opera', o[0], o[0] === 'red' || (o[0] === 'amber' && o[2]) ? o[1] + (o[2] ? '. ' + o[2] : '') : ''); }
+  if (/^[^|]*\|волна/.test(s.zwd_last || '') && (s.net_key || '').indexOf('mobile:') === 0) add('Волна', 'amber', 'ТСПУ душит Google на этом адресе. Обычно помогает «Переподключить сеть» на вкладке «Сервис».');
   if (s.curl_src === 'none') add('curl', 'red', 'Нет curl: WARP, подбор и проверки сайтов не работают. Отправьте логи (вкладка «Сервис»).');
   if (s.stealth_rivals) add('Лишний модуль', 'amber', s.stealth_rivals + ': подробности в «Подробнее».');
   if (confBad) add('Настройки', 'amber', 'Часть настроек пропущена: подробности в «Подробнее».');
@@ -1784,7 +1786,7 @@ async function loadZev() {
 $('#zevBox').addEventListener('toggle', () => { if ($('#zevBox').open) loadZev(); });
 $('#netRenew').addEventListener('click', async () => {
   const b = $('#netRenew');
-  if (!confirm('Связь пропадёт на 5–20 секунд, разговор по этой SIM может оборваться. Переподключить сеть?')) return;
+  if (!confirm('Сеть на секунду перейдёт на 2G и вернётся обратно. Связь пропадёт на 5–20 секунд, разговор по этой SIM может оборваться. Если телефон выключится в эту секунду, 2G останется до следующего нажатия. Переподключить?')) return;
   b.disabled = true; b.textContent = 'Переподключаю…';
   try {
     const r = await ctlBg('net-renew');
