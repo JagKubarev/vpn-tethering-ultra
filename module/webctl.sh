@@ -151,6 +151,8 @@ case "$1" in
         # итог последней проверки сторожа (пишет zapret/scan.sh check)
         w=$(head -n 1 "$ZSCAN.wd" 2>/dev/null | tr -d '\r')
         [ -n "$w" ] && echo "zwd_last=$w"
+        # волна свежая: сторож мог и не запуститься (VPN, выключен), и zwd_last остался бы навсегда
+        [ -n "$(find "$ZSCAN.wave" -maxdepth 0 -mmin -30 2>/dev/null)" ] && echo "zwave=1"
         ;;
 
     conf)
@@ -983,7 +985,7 @@ case "$1" in
         fi
         unlock
         # новая сессия уходит от волны: подсказка в WebUI больше не нужна, сторож проверит сразу
-        grep -q 'волна' "$ZSCAN.wd" 2>/dev/null && { rm -f "$ZSCAN.wave"; echo "$(date +%H:%M)|сеть переподключена" > "$ZSCAN.wd"; }
+        [ -f "$ZSCAN.wave" ] && { rm -f "$ZSCAN.wave"; echo "$(date +%H:%M)|сеть переподключена" > "$ZSCAN.wd"; }
         # старая сессия отвалится не сразу: не принять её адрес за новый
         i=0; while [ $i -lt 6 ] && [ "$(wan_ip)" = "$was" ]; do sleep 1; i=$((i + 1)); done
         i=0; now=""

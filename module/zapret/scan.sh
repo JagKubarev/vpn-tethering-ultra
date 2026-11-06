@@ -471,12 +471,13 @@ test_sites() {
 
 # --- исходное состояние: что вообще заблокировано
 st stage="проверяю, что заблокировано"
-# Плановая проверка сайтов напрямую стучит только в автосписок (его чистка) и контрольные:
-# остальные считаем закрытыми. Голые ClientHello к сотне закрытых имён — самый заметный
-# трафик: 03–06.11 5 из 8 волн Google пришлись на проверку сайтов, а она идёт ~4% времени
+# Плановая проверка сайтов напрямую стучит только в контрольные, остальные считаем закрытыми.
+# 06.11 на YOTA даже 87 адресов автосписка без обхода запускали волну Google через минуту
+# (адреса 188.162.5 и .12; на .72 и .77 нет), и она держится до смены адреса. Чистка
+# автосписка по BASE_OK поэтому не срабатывает, записи уходят по возрасту (ZAPRET_AUTO_DAYS)
 : > "$TMP/ips.rest"
 if [ "$MODE" = sites ] && [ -z "$SITES_ARG" ]; then
-    L=" $(tr '\n' ' ' < "$ZAUTO" 2>/dev/null) ya.ru www.google.com " awk -v rest="$TMP/ips.rest" \
+    L=" ya.ru www.google.com " awk -v rest="$TMP/ips.rest" \
         'index(ENVIRON["L"], " " $1 " ") { print; next } { print > rest }' "$TMP/ips" > "$TMP/ips.dir" && \
         mv -f "$TMP/ips.dir" "$TMP/ips"
 fi
@@ -487,6 +488,8 @@ while read -r h ip; do
     v=""; read -r v _ < "$TMP/r.$h" 2>/dev/null
     if [ "$v" = ok ]; then BASE_OK="$BASE_OK $h"; else BLOCKED="$BLOCKED $h"; fi
 done < "$TMP/ips"
+# для защиты ниже — только то, что реально проверяли напрямую
+_dn=$(wc -l < "$TMP/ips"); _db=$(echo $BLOCKED | wc -w)
 while read -r h ip; do BLOCKED="$BLOCKED $h"; done < "$TMP/ips.rest"
 cat "$TMP/ips.rest" >> "$TMP/ips"
 st blocked="$(echo $BLOCKED)"
@@ -497,11 +500,11 @@ st blocked="$(echo $BLOCKED)"
 # убирает открывающиеся сайты, и обычная доля закрытых выросла до ~88–90%
 # (01.11 12:41 и 13:47 проверка срывалась на 205/226 и 204/226 при живой сети)
 if [ "$MODE" = sites ] && [ -z "$SITES_ARG" ]; then
-    _req=$(echo $SITES | wc -w); _got=$(wc -l < "$TMP/ips"); _nb=$(echo $BLOCKED | wc -w)
+    _req=$(echo $SITES | wc -w); _got=$(wc -l < "$TMP/ips")
     # не открылся — и когда адрес ya.ru не узнали (в BLOCKED его тогда нет)
     _cb=1; case " $BASE_OK " in *" ya.ru "*) _cb=0 ;; esac
-    if [ $((_got * 10)) -lt $((_req * 6)) ] || { [ "$_got" -ge 20 ] && [ $((_nb * 10)) -gt $((_got * 9)) ] && [ "$_cb" = 1 ]; }; then
-        st state=error msg="сеть или телефон не успевали (адресов $_got из $_req, закрыто $_nb) — повторю позже"
+    if [ $((_got * 10)) -lt $((_req * 6)) ] || { [ "$_dn" -ge 20 ] && [ $((_db * 10)) -gt $((_dn * 9)) ] && [ "$_cb" = 1 ]; }; then
+        st state=error msg="сеть или телефон не успевали (адресов $_got из $_req, напрямую закрыто $_db из $_dn) — повторю позже"
         exit 1
     fi
 fi
@@ -693,6 +696,7 @@ if [ "$MODE" = "sites" ]; then
             [ -f "$ZALT" ] && K="$KEY" awk -F'|' '$1 == ENVIRON["K"] { print $4 }' "$ZALT"
             L="${NETID#*"|"}" K="$KEY" awk -F'|' '$1 == ENVIRON["K"] || ($4 == ENVIRON["L"] && ENVIRON["L"] != "") { print $1 }' "$ZNETS" 2>/dev/null > "$TMP/keys"
             KS=" $(tr '\n' ' ' < "$TMP/keys") " awk -F'|' 'index(ENVIRON["KS"], " " $1 " ") && $2 == "custom" { l[++n] = $3; if ($6 != "") l[++n] = $6; if ($7 != "") l[++n] = $7 } END { for (i = n; i >= 1; i--) print l[i] }' "$HIST" 2>/dev/null
+            echo @@   # дальше встроенный набор
             cat <<EOF
 --dpi-desync=multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1
 --dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld
@@ -702,7 +706,9 @@ if [ "$MODE" = "sites" ]; then
 --dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=@G $FAKE
 --dpi-desync=fakedsplit --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=badseq
 EOF
-        } | G="$GEN_X" awk 'NF && $0 != ENVIRON["G"] && !/--wssize|syndata/ && !s[$0]++' | head -n 5 > "$TMP/cands"
+        # всего 5: до 3 из истории сети, остальные из встроенного набора
+        } | G="$GEN_X" awk '$0 == "@@" { b = 1; next } NF && $0 != ENVIRON["G"] && !/--wssize|syndata/ && !s[$0]++ {
+            if (b) { if (n < 5) { print; n++ } } else if (n < 3) { print; n++ } }' > "$TMP/cands"
         S_total=$((S_done + $(wc -l < "$TMP/cands") * 2))
         NUSED=0
         while IFS= read -r a <&3; do
