@@ -552,7 +552,9 @@ net_identity_reconcile() {
     [ -n "$NET_KEY" ] && ZWD_LAST=$(( $(date +%s) - ZAPRET_WATCHDOG_MIN * 60 + 90 ))
     # и сайты со своей стратегией — через ~час (31.10: было ~10 мин — залп
     # проверки после каждой смены Wi-Fi/мобильной, а он, похоже, провоцирует ТСПУ)
-    [ -n "$NET_KEY" ] && ZSITES_LAST=$(( $(date +%s) - ZAPRET_ALT_MIN * 60 + 3600 ))
+    # Срок только отодвигаем: иначе каждая смена сети ставила проверку через час вместо суток
+    _zs=$(( $(date +%s) - ZAPRET_ALT_MIN * 60 + 3600 ))
+    [ -n "$NET_KEY" ] && [ "$_zs" -gt "$ZSITES_LAST" ] && ZSITES_LAST=$_zs
     phone_status_refresh
 }
 

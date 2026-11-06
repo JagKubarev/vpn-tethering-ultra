@@ -188,8 +188,6 @@ ZNETS=/data/adb/vpn_tether_zapret_nets
 ZALT=/data/adb/vpn_tether_zapret_alt        # своя стратегия сайтов: ключ|название|сайт|аргументы|дата
 ZSKIP=/data/adb/vpn_tether_zapret_altskip   # не открылись ничем: ключ|сайт|epoch (сутки не проверяем)
 ZAUTO=/data/adb/vpn_tether_zapret_auto.txt  # автосписок nfqws
-ZAUTOOK=/data/adb/vpn_tether_zapret_auto.ok # из него открылись без обхода на прошлой плановой проверке
-ZAUTORM=/data/adb/vpn_tether_zapret_auto.rm # убраны из него проверкой: домен epoch (7 дней второй раз не убираем)
 case "$MODE" in quick|full|check|sites|quic) ;; *) echo "scan.sh: режим quick|full|check|sites|quic|yt|dc" >&2; exit 2 ;; esac
 
 st() { # обновить файл состояния: st key=val ...
@@ -471,12 +469,12 @@ test_sites() {
 
 # --- исходное состояние: что вообще заблокировано
 st stage="проверяю, что заблокировано"
-# Плановая проверка сайтов напрямую стучит только в контрольные, остальные считаем закрытыми.
-# 06.11 на YOTA даже 87 адресов автосписка без обхода запускали волну Google через минуту
-# (адреса 188.162.5 и .12; на .72 и .77 нет), и она держится до смены адреса. Чистка
-# автосписка по BASE_OK поэтому не срабатывает, записи уходят по возрасту (ZAPRET_AUTO_DAYS)
+# Напрямую только контрольные, остальные считаем закрытыми (кроме заданных вручную).
+# 06.11 на YOTA прямые запросы к закрытым именам запускали волну Google через минуту на
+# адресах 188.162.5 и .12 (3 из 3, держится до смены адреса), без них 0 из 3. Автопроверка
+# слала такие каждые 15 мин. Без прямого ответа сайт не сравнить: «ломает» видно только на контрольных
 : > "$TMP/ips.rest"
-if [ "$MODE" = sites ] && [ -z "$SITES_ARG" ]; then
+if [ -z "$SITES_ARG" ]; then
     L=" ya.ru www.google.com " awk -v rest="$TMP/ips.rest" \
         'index(ENVIRON["L"], " " $1 " ") { print; next } { print > rest }' "$TMP/ips" > "$TMP/ips.dir" && \
         mv -f "$TMP/ips.dir" "$TMP/ips"
@@ -488,23 +486,19 @@ while read -r h ip; do
     v=""; read -r v _ < "$TMP/r.$h" 2>/dev/null
     if [ "$v" = ok ]; then BASE_OK="$BASE_OK $h"; else BLOCKED="$BLOCKED $h"; fi
 done < "$TMP/ips"
-# для защиты ниже — только то, что реально проверяли напрямую
-_dn=$(wc -l < "$TMP/ips"); _db=$(echo $BLOCKED | wc -w)
 while read -r h ip; do BLOCKED="$BLOCKED $h"; done < "$TMP/ips.rest"
 cat "$TMP/ips.rest" >> "$TMP/ips"
 st blocked="$(echo $BLOCKED)"
-# Плановая проверка сайтов: адресов узнали < 60% или «заблокировано» > 90% —
-# телефон/сеть не успевали (22.10 19:57: 56 из ~210, из них 54 «закрыты»),
-# итог был бы мусором. Ничего не пишем, демон повторит через ~час.
-# «> 90%» — только если и контрольный ya.ru не открылся: чистка автосписка
-# убирает открывающиеся сайты, и обычная доля закрытых выросла до ~88–90%
-# (01.11 12:41 и 13:47 проверка срывалась на 205/226 и 204/226 при живой сети)
+# Плановая проверка сайтов: адресов узнали < 60% — телефон/сеть не успевали (22.10 19:57:
+# 56 из ~210), итог был бы мусором. Контрольный не открылся — связь или волна: сайты
+# напрасно получили бы отметку «ничем». Ничего не пишем, демон повторит через ~час.
 if [ "$MODE" = sites ] && [ -z "$SITES_ARG" ]; then
     _req=$(echo $SITES | wc -w); _got=$(wc -l < "$TMP/ips")
-    # не открылся — и когда адрес ya.ru не узнали (в BLOCKED его тогда нет)
-    _cb=1; case " $BASE_OK " in *" ya.ru "*) _cb=0 ;; esac
-    if [ $((_got * 10)) -lt $((_req * 6)) ] || { [ "$_dn" -ge 20 ] && [ $((_db * 10)) -gt $((_dn * 9)) ] && [ "$_cb" = 1 ]; }; then
-        st state=error msg="сеть или телефон не успевали (адресов $_got из $_req, напрямую закрыто $_db из $_dn) — повторю позже"
+    _cb=0
+    case " $BASE_OK " in *" ya.ru "*) ;; *) _cb=1 ;; esac
+    case " $BASE_OK " in *" www.google.com "*) ;; *) _cb=1 ;; esac
+    if [ $((_got * 10)) -lt $((_req * 6)) ] || [ "$_cb" = 1 ]; then
+        st state=error msg="сеть не готова (адресов $_got из $_req, открылись контрольные:$BASE_OK) — повторю позже"
         exit 1
     fi
 fi
@@ -751,37 +745,6 @@ EOF
         [ -f "$ZSKIP" ] && K="$KEY" T="$TA" N="$NOW" awk -F'|' '$3 + 86400 > ENVIRON["N"] && !($1 == ENVIRON["K"] && index(ENVIRON["T"], " " $2 " "))' "$ZSKIP"
         for h in $F; do printf '%s|%s|%s\n' "$KEY" "$h" "$NOW"; done
     } > "$ZSKIP.tmp" && chmod 600 "$ZSKIP.tmp" && mv -f "$ZSKIP.tmp" "$ZSKIP"
-    # Автосписок без лишнего (31.10): nfqws добавляет сайт после 3 неотвеченных
-    # ClientHello по любой причине — обрыв при переключении VPN, мёртвый узел
-    # (www.kimi.ai в 10:21 при включении WG Tunnel). Открылся без обхода (обычным
-    # и большим ClientHello) на двух плановых проверках подряд — вон; понадобится —
-    # nfqws добавит снова. Тот же файл (cat, не mv): nfqws его перечитает
-    AOK=""
-    # Пустой/нет автосписка — .ok тоже обнуляем: иначе прошлое «открылся» от
-    # записи, убранной из WebUI или по возрасту, удаляло её же, добавленную
-    # nfqws снова, с первой проверки (ревью 31.10)
-    if [ -z "$SITES_ARG" ]; then
-        P=" $(cat "$ZAUTOOK" 2>/dev/null | tr '\n' ' ') "
-        # убранные за 7 дней и возвращённые nfqws — у браузера всё же не открывались
-        # (другая сеть, другой узел CDN из DNS): второй раз не убираем, без качелей
-        RL=$((NOW - 7 * 86400))
-        R=" $(awk -v l=$RL '$2 >= l { print $1 }' "$ZAUTORM" 2>/dev/null | tr '\n' ' ') "
-        : > "$TMP/aok"
-        for h in $BASE_OK; do
-            grep -qxF "$h" "$ZAUTO" 2>/dev/null || continue
-            case "$R" in *" $h "*) continue ;; esac
-            case "$P" in *" $h "*) AOK="$AOK $h" ;; *) echo "$h" >> "$TMP/aok" ;; esac
-        done
-        if [ -n "$AOK" ]; then
-            L=" $AOK " awk '!index(ENVIRON["L"], " " $1 " ")' "$ZAUTO" > "$TMP/auto" && cat "$TMP/auto" > "$ZAUTO"
-            event "автосписок: убрал $(echo $AOK | wc -w) — открываются и без обхода на двух проверках подряд: $(echo $AOK | tr ' ' '\n' | head -n 8 | tr '\n' ' ')"
-        fi
-        cat "$TMP/aok" > "$ZAUTOOK"; chmod 600 "$ZAUTOOK"
-        # tmp + mv, как ZSKIP: не записалось — прежний .rm цел (cat > обнулял его
-        # до записи), и ни на миг не 644; nfqws этот файл не читает — inode не важен
-        { awk -v l=$RL '$2 >= l' "$ZAUTORM" 2>/dev/null; for h in $AOK; do echo "$h $NOW"; done; } > "$ZAUTORM.tmp" && \
-            chmod 600 "$ZAUTORM.tmp" && mv -f "$ZAUTORM.tmp" "$ZAUTORM"
-    fi
     NA=$(wc -l < "$TMP/assign")
     NT=$(awk 'END {print NR}' "$TMP/ips.all")
     if [ -n "$SITES_ARG" ]; then

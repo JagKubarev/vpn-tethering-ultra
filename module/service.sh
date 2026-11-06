@@ -581,7 +581,7 @@
 #   на живой 149.154.167.220. Отбой мёртвых видеосерверов: 3 с, скан каждый
 #   круг, /28 со второго; Play снова в отбое (после проверки адреса). scan.sh
 #   sites чистит автосписок: открылось без обхода на двух плановых проверках
-#   подряд — вон (.ok), повторно 7 дней не убирает (.rm). WebUI: прежние рабочие
+#   подряд — вон (.ok), повторно 7 дней не убирает (.rm); с 06.11 только по возрасту. WebUI: прежние рабочие
 #   стратегии сети, подписи стратегий, warp.sh list одним stat+awk. DoH: без
 #   мёртвого dagami (not-a-dns, оба GeoHide, comss, commonnet); импорт WARP
 #   отклоняет Endpoint-заглушки; кэш DNS оператора и zone_re — под mksh.
@@ -1348,7 +1348,7 @@ ZAPRET_LIST_USER="/data/adb/vpn_tether_zapret.txt"        # свой списо�
 ZAPRET_LIST_AUTO="/data/adb/vpn_tether_zapret_auto.txt"   # nfqws пополняет сам
 ZAPRET_AUTO_LOG="/data/adb/vpn_tether_zapret_auto.log"    # почему nfqws добавил сайт (--hostlist-auto-debug)
 ZAPRET_AUTO_SEEN="/data/adb/vpn_tether_zapret_auto.seen"  # «сайт epoch» — когда модуль впервые увидел его в автосписке
-ZAPRET_AUTO_DAYS=30     # запись автосписка старше — вон (ещё заблокирован — nfqws добавит снова после 3 неудач)
+ZAPRET_AUTO_DAYS=14     # запись автосписка старше — вон (ещё заблокирован — nfqws добавит снова после 3 неудач)
 ZAPRET_VPN_UIDS_FILE="/data/adb/vpn_tether_vpn_uids"      # uid VPN-клиентов, замеченных владельцами VPN
 ZAPRET_PID_FILE="/data/local/tmp/vpn_tether_nfqws.pid"
 ZAPRET_LOG="/data/local/tmp/vpn_tether_nfqws.log"
