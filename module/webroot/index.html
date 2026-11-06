@@ -726,6 +726,11 @@ details.more > summary { color: var(--muted); }
     </div>
     <div class="kv" id="diagOut" style="display:none"></div>
   </div>
+  <div class="row">
+    <div class="txt"><div class="t">Переподключить сеть</div>
+      <div class="s">На секунду просит только 2G и возвращает как было: новая сессия у оператора и обычно новый адрес, без перезагрузки. Связь пропадёт на 5–20 секунд, разговор по этой SIM может оборваться, раздача останется. Если телефон выключится в эту секунду, 2G останется до следующего нажатия.</div></div>
+    <button class="btn small" id="netRenew">Переподключить</button>
+  </div>
 </div>
 
 
@@ -1777,6 +1782,16 @@ async function loadZev() {
   $('#zev').textContent = lines.length ? lines.join('\n') : 'Пока пусто: здесь появятся результаты автопроверки и подбора.';
 }
 $('#zevBox').addEventListener('toggle', () => { if ($('#zevBox').open) loadZev(); });
+$('#netRenew').addEventListener('click', async () => {
+  const b = $('#netRenew');
+  if (!confirm('Связь пропадёт на 5–20 секунд, разговор по этой SIM может оборваться. Переподключить сеть?')) return;
+  b.disabled = true; b.textContent = 'Переподключаю…';
+  try {
+    const r = await ctlBg('net-renew');
+    toast(isOk(r) ? r.out.trim().replace(/^OK /, '').replace(/^с/, 'С') : errText(r, 'Не получилось'));
+  } finally { b.disabled = false; b.textContent = 'Переподключить'; }
+  loadStatus();
+});
 $('#diagBtn').addEventListener('click', async () => {
   const b = $('#diagBtn'), o = $('#diagOut');
   b.disabled = true; b.textContent = 'Проверяю… (~1 мин)';
@@ -2329,6 +2344,7 @@ function mockExec(cmd) {
   if (/^client-(un)?block /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'dnsflush') return { errno: 0, out: 'OK кэш сброшен (dnsproxy перезапущен). На ноутбуке — ещё ipconfig /flushdns' };
   if (a === 'warp-stats') { M.wrx = (M.wrx || 5e6) + 2e5; M.wup = M.wup || Date.now(); return { errno: 0, out: 'hs_age=' + (Math.floor(Date.now() / 1000) % 130) + '\nrx=' + M.wrx + '\ntx=' + Math.round(M.wrx / 9) + '\nendpoint=188.114.96.1:2408\npeer=bmXOC+hWy3/DnZ3VUUTE7y0yOZfVvcRK0Xf4cPfgyo=\nup=' + Math.round((Date.now() - M.wup) / 1000 + 2534) + '\n' }; }
+  if (a === 'net-renew') return { errno: 0, out: 'OK сеть переподключена, внутренний адрес новый' };
   if (a === 'warp-reconnect') return { errno: 0, out: 'OK переподключаю' };
   if (a === 'zlist') return { errno: 0, out: M.zlist };
   if (a === 'zdefault') return { errno: 0, out: 'youtube.com\ngooglevideo.com\ndiscord.com\nx.com\n' };

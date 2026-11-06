@@ -38,6 +38,7 @@
 #   webctl.sh zscan-start quic        проходит ли QUIC YouTube с подделкой в этой сети
 #   webctl.sh znet-own yt|dc [АРГУМЕНТЫ] [manual]  своя стратегия YouTube или Discord сети (пусто — как общая)
 #   webctl.sh zquick                  стратегии быстрого подбора (для ручного выбора)
+#   webctl.sh net-renew               коротко 2G и обратно: новая сессия и адрес у оператора
 #   webctl.sh warp-list|warp-gen [N]|warp-import ИМЯ BASE64|warp-del ИМЯ|warp-export ИМЯ|warp-save ИМЯ|warp-saveall
 #   webctl.sh warp-stats              туннель: последнее рукопожатие и трафик (awg show)
 #   webctl.sh warp-reconnect          тот же конфиг заново (новая сессия Cloudflare)
@@ -896,6 +897,103 @@ case "$1" in
             'NR == 2 { printf "hs_age=%s\nrx=%s\ntx=%s\nendpoint=%s\npeer=%s\nup=%s\n", ($5 > 0 ? now - $5 : -1), $6, $7, $3, $1, (st > 0 ? int(ut - st / 100) : -1) }'
         ;;
 
+    net-renew)
+        # Новая сессия у оператора без перезагрузки: коротко просим только 2G и возвращаем
+        # как было. 06.11 на YOTA внешний адрес сменился 7 раз из 7, точка доступа осталась;
+        # выключение данных адрес не меняло (0 из 4), а режим полёта снял бы точку.
+        # Вывод cmd — только через канал: файл ему не открыть (Failed transaction)
+        d=$(cur_net)
+        case "$d" in mobile:*) ;; *) echo "ERR нужна мобильная сеть"; exit 1 ;; esac
+        zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
+        RB=/data/adb/vpn_tether_rat_back   # слот, маска, типы: пока 2G держится
+        L="$RB.lock"
+        # Блокировка первой: чтение SIM занимает секунды, и второй запуск успевал
+        # проскочить (06.11). Старше 2 мин — от оборванного запуска
+        if ! mkdir "$L" 2>/dev/null; then
+            [ -n "$(find "$L" -mmin -2 2>/dev/null)" ] && { echo "ERR переподключение уже идёт"; exit 1; }
+            rmdir "$L" 2>/dev/null; mkdir "$L" 2>/dev/null || { echo "ERR переподключение уже идёт"; exit 1; }
+        fi
+        unlock() { rmdir "$L" 2>/dev/null; }
+        # любой глобальный адрес: при CLAT на самом WAN только IPv6. Зовётся через $(...):
+        # присвоения отсюда наружу не выходят
+        wan_ip() {
+            ip addr show "$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)" scope global 2>/dev/null | \
+                awk '/inet6? / {sub(/\/.*/, "", $2); print $2; exit}'
+        }
+        rat_get() { cmd phone get-allowed-network-types-for-users -s "$slot" 2>&1 | cat; }
+        rat_back() {
+            n=0
+            while [ $n -lt 6 ]; do
+                cmd phone set-allowed-network-types-for-users -s "$slot" "$mask" 2>&1 | cat > /dev/null
+                [ "$(rat_get)" = "$types" ] && { rm -f "$RB"; return 0; }
+                n=$((n + 1)); sleep 2
+            done
+            return 1
+        }
+        # файл остался: прошлый запуск оборвался и оставил 2G
+        if [ -f "$RB" ]; then
+            slot=$(sed -n 1p "$RB"); mask=$(sed -n 2p "$RB"); types=$(sed -n 3p "$RB")
+            # запись оборвалась — возвращать нечего, иначе кнопка падала бы каждый раз
+            if [ -z "$slot" ] || [ -z "$mask" ] || [ -z "$types" ]; then rm -f "$RB"
+            else rat_back || { unlock; echo "ERR тип сети не вернулся — проверьте его в настройках SIM"; exit 1; }
+            fi
+        fi
+        wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
+        was=$(wan_ip)
+        # SIM, через которую идёт интернет: настройка «SIM для данных» отстаёт при автопереключении
+        sub=$(dumpsys connectivity 2>/dev/null | grep -E "InterfaceName: $wan( |\$)" | head -n 1 | sed -n 's/.*SubscriptionIds: {\([0-9][0-9]*\)}.*/\1/p')
+        [ -n "$sub" ] || sub=$(settings get global multi_sim_data_call 2>/dev/null | cat)
+        sims=$(content query --uri content://telephony/siminfo --projection _id:sim_id 2>/dev/null | cat)
+        slot=$(echo "$sims" | sed -n "s/.*[ ]_id=$sub, sim_id=\([0-9][0-9]*\).*/\1/p" | head -n 1)
+        # настройки нет: на одной SIM выбирать не из чего
+        if [ -z "$slot" ] && [ "$(echo "$sims" | grep -cE 'sim_id=[0-9]')" = 1 ]; then
+            slot=$(echo "$sims" | sed -n 's/.*sim_id=\([0-9][0-9]*\).*/\1/p')
+        fi
+        types=""; mask=""
+        [ -n "$slot" ] && types=$(rat_get)
+        # имена из TelephonyManager -> двоичная маска; незнакомое имя — маски нет
+        [ -n "$types" ] && mask=$(printf '%s\n' "$types" | tr '|' '\n' | awk '
+            BEGIN { b["GPRS"] = 0; b["EDGE"] = 1; b["UMTS"] = 2; b["CDMA"] = 3; b["CDMA - EvDo rev. 0"] = 4; b["CDMA - EvDo rev. A"] = 5
+                b["CDMA - 1xRTT"] = 6; b["HSDPA"] = 7; b["HSUPA"] = 8; b["HSPA"] = 9; b["iDEN"] = 10; b["CDMA - EvDo rev. B"] = 11; b["LTE"] = 12
+                b["CDMA - eHRPD"] = 13; b["HSPA+"] = 14; b["GSM"] = 15; b["TD_SCDMA"] = 16; b["IWLAN"] = 17; b["LTE_CA"] = 18; b["NR"] = 19 }
+            { if ($0 in b) on[b[$0]] = 1; else bad = 1 }
+            END { if (bad || !NR) exit 1; s = ""; for (i = 19; i >= 0; i--) s = s ((i in on) ? "1" : "0"); sub(/^0+/, "", s); print s }')
+        done2g=0
+        if [ -n "$mask" ]; then
+            f=$((slot + 1)); r0=$(getprop gsm.network.type | cut -d, -f"$f")
+            printf '%s\n' "$slot" "$mask" "$types" > "$RB"; chmod 600 "$RB"
+            # что бы ни случилось, тип сети должен вернуться
+            trap 'rat_back; unlock' EXIT
+            trap 'exit 1' INT TERM HUP
+            cmd phone set-allowed-network-types-for-users -s "$slot" 1000000000000011 2>&1 | cat > /dev/null
+            # успех — по самому режиму: текст ответа на других прошивках может быть другим
+            if [ "$(rat_get)" != "$types" ]; then
+                done2g=1; i=0
+                while [ $i -lt 8 ]; do sleep 1; i=$((i + 1)); [ "$(getprop gsm.network.type | cut -d, -f"$f")" != "$r0" ] && break; done
+            fi
+            trap - EXIT INT TERM HUP
+            rat_back || { unlock; echo "ERR тип сети не вернулся — проверьте его в настройках SIM"; exit 1; }
+        fi
+        if [ "$done2g" = 0 ]; then
+            # команды нет или старый Android: хотя бы новая сессия, адрес обычно тот же
+            trap 'svc data enable; unlock' EXIT
+            trap 'exit 1' INT TERM HUP
+            svc data disable; sleep 3; svc data enable
+            trap - EXIT INT TERM HUP
+        fi
+        unlock
+        # старая сессия отвалится не сразу: не принять её адрес за новый
+        i=0; while [ $i -lt 6 ] && [ "$(wan_ip)" = "$was" ]; do sleep 1; i=$((i + 1)); done
+        i=0; now=""
+        while [ $i -lt 40 ]; do
+            now=$(wan_ip)
+            [ -n "$now" ] && break
+            sleep 1; i=$((i + 1))
+        done
+        if [ -z "$now" ]; then echo "ERR сеть включена, но адреса за 40 с нет"
+        elif [ "$now" = "$was" ]; then echo "OK сеть переподключена, внутренний адрес тот же, внешний мог смениться"
+        else echo "OK сеть переподключена, внутренний адрес новый"; fi
+        ;;
     warp-reconnect)
         # переподключение делает демон (у него состояние туннеля); ждём, пока заберёт
         [ -n "$(daemon_pid)" ] || { echo "ERR демон не запущен"; exit 0; }
