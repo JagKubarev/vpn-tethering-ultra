@@ -1,6 +1,7 @@
 # Сборка curl (лицензия curl, MIT-подобная) с OpenSSL (Apache-2.0) под Android
 # (arm64 и armv7): на части прошивок (Xiaomi, 04.11) системного curl нет, а без
 # него не работают WARP, подбор и проверки. Исходники — официальные релизы.
+# HTTP/3 (ngtcp2 и nghttp3, MIT) — проверка QUIC (scan.sh quic).
 # OpenSSL 3.5+: X25519MLKEM768 — большой ClientHello для подбора (scan.sh).
 name: build-curl
 
@@ -15,6 +16,10 @@ env:
   OPENSSL_VER: 3.6.5
   CURL_SHA256: 8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5
   OPENSSL_SHA256: a2157c2830efdec3788939b00c9b0638306d3f0bbb76dc4832ee503bb397df98
+  NGTCP2_SHA256: 85174d674e7f8fd911a827c6e483fd417b21b1f54d7853dac464cee446c8d35f
+  NGHTTP3_SHA256: 0dc9a55d38ca04c282524bfecdc5e31d393a4bb430200263dd06a87801a150af
+  NGTCP2_VER: 1.26.0
+  NGHTTP3_VER: 1.19.0
   NDK_MAJOR: 30
   API: 21
 
@@ -28,7 +33,9 @@ jobs:
           u=$(echo "$CURL_VER" | tr . _)
           curl -fsSL -o "curl-$CURL_VER.tar.xz" "https://github.com/curl/curl/releases/download/curl-$u/curl-$CURL_VER.tar.xz"
           curl -fsSL -o "openssl-$OPENSSL_VER.tar.gz" "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VER/openssl-$OPENSSL_VER.tar.gz"
-          printf '%s  %s\n' "$CURL_SHA256" "curl-$CURL_VER.tar.xz" "$OPENSSL_SHA256" "openssl-$OPENSSL_VER.tar.gz" | tee out/SOURCES.sha256 | sha256sum -c -
+          curl -fsSL -o "ngtcp2-$NGTCP2_VER.tar.gz" "https://github.com/ngtcp2/ngtcp2/releases/download/v$NGTCP2_VER/ngtcp2-$NGTCP2_VER.tar.gz"
+          curl -fsSL -o "nghttp3-$NGHTTP3_VER.tar.gz" "https://github.com/ngtcp2/nghttp3/releases/download/v$NGHTTP3_VER/nghttp3-$NGHTTP3_VER.tar.gz"
+          printf '%s  %s\n' "$CURL_SHA256" "curl-$CURL_VER.tar.xz" "$OPENSSL_SHA256" "openssl-$OPENSSL_VER.tar.gz" "$NGTCP2_SHA256" "ngtcp2-$NGTCP2_VER.tar.gz" "$NGHTTP3_SHA256" "nghttp3-$NGHTTP3_VER.tar.gz" | tee out/SOURCES.sha256 | sha256sum -c -
 
       - name: curl + OpenSSL (Android NDK)
         run: |
@@ -61,10 +68,30 @@ jobs:
               make -j4 build_libs
               make install_dev
             )
+            export PKG_CONFIG_LIBDIR="$inst/lib/pkgconfig" PKG_CONFIG_PATH=
+            rm -rf "nghttp3-$NGHTTP3_VER" "ngtcp2-$NGTCP2_VER"
+            tar xzf "nghttp3-$NGHTTP3_VER.tar.gz"
+            (
+              cd "nghttp3-$NGHTTP3_VER"
+              ./configure --host="$t" CC="$TC/$t$API-clang" CXX="$TC/$t$API-clang++" AR="$TC/llvm-ar" RANLIB="$TC/llvm-ranlib" \
+                CFLAGS=-Os --prefix="$inst" --libdir="$inst/lib" --enable-lib-only --disable-shared --enable-static
+              make -j4
+              make install
+            )
+            tar xzf "ngtcp2-$NGTCP2_VER.tar.gz"
+            (
+              cd "ngtcp2-$NGTCP2_VER"
+              ./configure --host="$t" CC="$TC/$t$API-clang" CXX="$TC/$t$API-clang++" AR="$TC/llvm-ar" RANLIB="$TC/llvm-ranlib" \
+                CFLAGS=-Os --prefix="$inst" --libdir="$inst/lib" --enable-lib-only --disable-shared --enable-static --with-openssl
+              make -j4
+              make install
+            )
+            ls "$inst/lib"
             (
               cd "curl-$CURL_VER"
               ./configure --host="$t" CC="$TC/$t$API-clang" AR="$TC/llvm-ar" RANLIB="$TC/llvm-ranlib" \
                 CFLAGS=-Os --with-openssl="$inst" --disable-shared --enable-static \
+                --with-ngtcp2="$inst" --with-nghttp3="$inst" \
                 --with-ca-path=/system/etc/security/cacerts --without-ca-bundle --without-ca-fallback \
                 --without-libpsl --without-zlib --without-brotli --without-zstd --without-nghttp2 \
                 --without-libidn2 --disable-ldap --disable-ldaps --disable-rtsp --disable-dict \
@@ -77,6 +104,8 @@ jobs:
               cp COPYING ../out/curl.LICENSE
             )
             cp "openssl-$OPENSSL_VER/LICENSE.txt" out/openssl.LICENSE
+            cp "ngtcp2-$NGTCP2_VER/COPYING" out/ngtcp2.LICENSE
+            cp "nghttp3-$NGHTTP3_VER/COPYING" out/nghttp3.LICENSE
           done
 
       - name: Проверка

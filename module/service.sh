@@ -764,6 +764,9 @@ QUIC_BLOCK_YT=1
 # 443 фильтруемым — QUIC YouTube и подделки nfqws пропускаются мимо его
 # цепочки (реклама через AdGuard вернётся)
 QUIC_YT_FAKE=0
+# 06.11 на YOTA шортсы по TCP (подделка выключена): 76–117 МБ за 4 мин, по QUIC с
+# подделкой 35–58. Поэтому по умолчанию закрыто, а проверка QUIC (кнопка в WebUI)
+# только показывает, проходит ли он, и подделку сама не включает
 # Адаптивные профили сети. 0 = всегда FAST (BBR), без пингов по WAN.
 # 1 = пинг 1.1.1.1 через WAN раз в ~20с, RTT > порога (или потеря) 2 раза
 #     подряд -> STABLE (те же BBR, больше SYN-ретраев).
@@ -810,7 +813,11 @@ YT_GGC_BLOCK=0
 # адрес сначала проверяется (как при снятии отбоя) и отбивается, только если
 # проверка не прошла.
 YT_DEAD_FAILFAST=1
+# Адрес из отбоя вести через WARP, если туннель поднят и адрес там отвечает: плеер остаётся
+# на своём сервере и не ищет запасной. Нет WARP или адрес молчит и там — обычный отказ
+YT_DEAD_WARP=1
 YT_DEAD_AFTER=3         # сек без ответа сервера после ClientHello = мёртв (было 6; ответ на CH — 0,3–0,5 с)
+YT_QUIC_AFTER=2         # сек без единого ответа на QUIC Initial (обычно 0.1–0.5 с, 06.11)
 YT_SILENT_AFTER=10      # сек без новых байт после рукопожатия = молчит (-> проверка)
 YT_DEAD_TTL=1800        # сек держать сервер/подсеть в отбое (ожил раньше — снимаем перепроверкой)
 YT_DEAD_MAX=64          # больше записей не держим
@@ -925,7 +932,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_QUIC_FAKE|QUIC_BLOCK_YT|QUIC_YT_FAKE|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
+        OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|YT_DEAD_WARP|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
@@ -991,7 +998,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST YT_DEAD_WARP ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -1071,7 +1078,7 @@ zapret_strategy_args() {
 # передано название $2 — стратегия сети с тем же названием (YOTA видна то
 # как 25011, то как 25002 — сеть МегаФона), код возврата 3.
 zapret_net_entry() {
-    local line st za yt rc=0
+    local line st za yt dc rc=0
     [ -n "$1" ] && [ -f "$ZAPRET_NETS_FILE" ] || return 1
     line=$(K="$1" awk -F'|' '$1 == ENVIRON["K"] { l = $0 } END { if (l != "") print l }' "$ZAPRET_NETS_FILE" 2>/dev/null)
     if [ -z "$line" ] && [ -n "$2" ]; then
@@ -1082,33 +1089,40 @@ zapret_net_entry() {
     st=$(printf '%s\n' "$line" | cut -d'|' -f2)
     za=$(printf '%s\n' "$line" | cut -d'|' -f3)
     yt=$(printf '%s\n' "$line" | cut -d'|' -f7)
+    dc=$(printf '%s\n' "$line" | cut -d'|' -f8)
     zapret_strategy_valid "$st" || return 2
     zapret_args_valid "$za" || return 2
     zapret_args_valid "$yt" || yt=""
+    zapret_args_valid "$dc" || dc=""
     [ "$st" = custom ] && [ -z "$za" ] && return 2
     [ "$st" = custom ] || za=""
-    printf '%s|%s|%s\n' "$st" "$za" "$yt"
+    printf '%s|%s|%s|%s\n' "$st" "$za" "$yt" "$dc"
     return $rc
 }
 # Для WebUI ("проверить сайт"): стратегия с учётом vpn_tether.conf и, если
 # передан ключ сети, — запомненной для неё
-#   --zapret-strategy КЛЮЧ [НАЗВАНИЕ] [yt|full]
+#   --zapret-strategy КЛЮЧ [НАЗВАНИЕ] [yt|dc|full]
 #     ""   — стратегия остальных сайтов;
-#     yt   — стратегия YouTube (своя или та же);
-#     full — оба профиля nfqws (--filter/--hostlist ... --new ...) для проверок
+#     yt   — стратегия YouTube (своя или та же); dc — то же для Discord;
+#     full — все профили nfqws (--filter/--hostlist ... --new ...) для проверок
 if [ "$1" = "--zapret-strategy" ]; then
     _e=""; _z="${0%/*}/zapret"
     [ "$ZAPRET_PER_NET" = "1" ] && _e=$(zapret_net_entry "$2" "$3")
     if [ -n "$_e" ]; then
-        _st="${_e%%"|"*}"; _r="${_e#*"|"}"; _za="${_r%%"|"*}"; _yt="${_r#*"|"}"
+        _st="${_e%%"|"*}"; _r="${_e#*"|"}"; _za="${_r%%"|"*}"; _r="${_r#*"|"}"; _yt="${_r%%"|"*}"; _dc="${_r#*"|"}"
         _gen=$(zapret_strategy_args "$_z" "$_st" "$_za")
     else
-        _yt=""; _gen=$(zapret_strategy_args "$_z")
+        _yt=""; _dc=""; _gen=$(zapret_strategy_args "$_z")
     fi
     _ytg="$_gen"; [ -n "$_yt" ] && _ytg=$(zapret_strategy_args "$_z" custom "$_yt")
+    _dcg="$_gen"; [ -n "$_dc" ] && _dcg=$(zapret_strategy_args "$_z" custom "$_dc")
     case "$4" in
         yt)   echo "$_ytg" ;;
-        full) if [ -n "$_yt" ]; then echo "--filter-tcp=443 --hostlist=$_z/list-youtube.txt $_ytg --new --filter-tcp=443 $_gen"; else echo "$_gen"; fi ;;
+        dc)   echo "$_dcg" ;;
+        full) _p=""
+              [ -n "$_yt" ] && _p="--filter-tcp=443 --hostlist=$_z/list-youtube.txt $_ytg --new "
+              [ -n "$_dc" ] && _p="$_p--filter-tcp=443 --hostlist=$_z/list-discord.txt $_dcg --new "
+              if [ -n "$_p" ]; then echo "$_p--filter-tcp=443 $_gen"; else echo "$_gen"; fi ;;
         *)    echo "$_gen" ;;
     esac
     exit 0
@@ -1317,6 +1331,8 @@ ZAPRET_LIST_DEFAULT="$ZAPRET_DIR/list-default.txt"
 ZAPRET_LIST_YT="$ZAPRET_DIR/list-youtube.txt"        # своя стратегия YouTube (3.4)
 ZAPRET_LIST_EXCL="$ZAPRET_DIR/list-exclude.txt"      # банки/Госуслуги — обход не трогает
 ZAPRET_LIST_RUTLD="$ZAPRET_DIR/list-rutld.txt"       # .ru/.su/.рф — мимо обхода (кроме списков)
+ZAPRET_QUIC_FILE="/data/adb/vpn_tether_zapret_quic"  # итог проверки QUIC по сетям (scan.sh quic)
+ZAPRET_LIST_DC="$ZAPRET_DIR/list-discord.txt"        # своя стратегия Discord
 ZAPRET_LIST_NOAUTO="$ZAPRET_DIR/list-noauto.txt"     # Google: сам не берёт (автосписок, свои стратегии), 3.20.2
 ZAPRET_RU_RUN="/data/local/tmp/vpn_tether_zru.txt"   # .ru-сайты (и Google) из встроенного и своего списка
 ZAPRET_LIST_USER="/data/adb/vpn_tether_zapret.txt"        # свой список (WebUI)
@@ -1350,6 +1366,12 @@ CHAIN_YT_DEAD="VPN_YT_DEAD"     # filter OUTPUT/FORWARD: мёртвые подс
 YT_CTMARK=0x10000000
 YT_GCTMARK=0x04000000   # gvt1.com (Play): отбой мёртвых да, обрыв медленных (ytslow.sh) — нет
 YT_SILENT_MAX=16384     # молчит после запроса: от сервера не больше (рукопожатие ~5 КБ)
+YT_WARP_FILE="/data/local/tmp/vpn_tether_ytwarp"   # адреса из отбоя, ответившие через WARP
+YT_WARP_NEW=""          # адреса, чьи соединения закрыть, когда встанет маршрут в WARP
+YT_WARP_PEND=""         # очередь на пробу через WARP: адрес|кто|что|kill
+YT_WARP_SIG=""          # сети в цепочке VPN_WARP_YT
+YT_WARP_CH=0
+YT_WPROBE_PID=""
 YT_DEAD_FILE="/data/local/tmp/vpn_tether_ytdead"   # "адрес/32|сеть/28 до_когда(epoch) ip[,ip…]"
 YT_SEEN_FILE="/data/local/tmp/vpn_tether_ytseen"   # кандидаты: "кортеж впервые вид учтён байт_ответа когда_менялись"
 YT_SPROBE_FILE="/data/local/tmp/vpn_tether_ytsprobe"  # проверка молчащих: .in .done .ok
@@ -1395,6 +1417,8 @@ NET_ID_FORCE=0         # 1 = пересчитать сейчас (смена с�
 ZAPRET_EFF_STRATEGY="" # что реально запущено: своя стратегия сети или общая
 ZAPRET_EFF_ARGS=""
 ZAPRET_EFF_YT=""       # своя стратегия YouTube для сети (пусто = как у остальных)
+ZAPRET_EFF_DC=""       # то же для Discord
+QUIC_NET=""            # итог проверки QUIC этой сети: 1, 0 или пусто
 ZAPRET_NET_SRC=""      # net | default
 ZAPRET_NETS_STAMP=""   # stat файла стратегий сетей на прошлой проверке
 ZAPRET_NET_DIRTY=0     # 1 = пересобрать аргументы nfqws сейчас

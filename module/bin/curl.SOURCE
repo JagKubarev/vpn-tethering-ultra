@@ -1,10 +1,14 @@
-curl 8.23.0 (лицензия curl) с OpenSSL 3.6.5 (Apache-2.0), Android NDK r30, API 21
+curl 8.23.0 (лицензия curl) с OpenSSL 3.6.5 (Apache-2.0), ngtcp2 1.26.0 и nghttp3 1.19.0 (MIT), Android NDK r30, API 21
 https://github.com/curl/curl/releases/tag/curl-8_23_0
 https://github.com/openssl/openssl/releases/tag/openssl-3.6.5
+https://github.com/ngtcp2/ngtcp2/releases/tag/v1.26.0
+https://github.com/ngtcp2/nghttp3/releases/tag/v1.19.0
 Сборка: .github/workflows/build-curl.yml. Правка OpenSSL: --capath ищет файлы по
 старому хешу (X509_NAME_hash_old), как названы сертификаты в cacerts Android.
 Группы по умолчанию — без MLKEM: обычный ClientHello, как у системного curl.
 sha256 curl-8.23.0.tar.xz 8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5
 sha256 openssl-3.6.5.tar.gz a2157c2830efdec3788939b00c9b0638306d3f0bbb76dc4832ee503bb397df98
-sha256 curl-arm64 d391da6304e9dff62d6e280c74e1e70be20e8da0cd12c450b6a7f5ee4435e285
-sha256 curl-arm cf98ca226ef44f2798bca0379d45a48832a16cabcffaa51703536e3e348060d4
+sha256 ngtcp2-1.26.0.tar.gz 85174d674e7f8fd911a827c6e483fd417b21b1f54d7853dac464cee446c8d35f
+sha256 nghttp3-1.19.0.tar.gz 0dc9a55d38ca04c282524bfecdc5e31d393a4bb430200263dd06a87801a150af
+sha256 curl-arm64 be89f924b7652d75136ca227134f04ba2bcd438e54220031ee8ea97d8bcf666e
+sha256 curl-arm 4f3f570eb9c96ed4b0f1b23aeaa1c68d74e3e8b95547017f8b2b31523a122216

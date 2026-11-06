@@ -124,6 +124,9 @@ quic_block_apply() {
             $t -t mangle -A "$CHAIN_QUIC_FAKE" -o tun+ -j RETURN 2>/dev/null
             $t -t mangle -A "$CHAIN_QUIC_FAKE" -o warp+ -j RETURN 2>/dev/null
             for u in $fuids; do
+                # пометка для отбоя (yt_dead_scan): имени в QUIC не видно, а это точно YouTube
+                $t -t mangle -A "$CHAIN_QUIC_FAKE" -p udp --dport 443 -m owner --uid-owner "$u" \
+                    -j CONNMARK --set-xmark "$YT_CTMARK/$YT_CTMARK" 2>/dev/null
                 # shellcheck disable=SC2086
                 $t -t mangle -A "$CHAIN_QUIC_FAKE" -p udp --dport 443 -m owner --uid-owner "$u" $ZAPRET_CB_OUT \
                     -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
@@ -474,6 +477,9 @@ zapret_args() {
     q=""
     { [ "$QUIC_BLOCK_YT" = "1" ] && [ "$QUIC_YT_FAKE" = "1" ]; } || [ "$ZAPRET_QUIC_FAKE" = "1" ] && \
         q="--filter-udp=443 $ex --dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$ZAPRET_DIR/quic_initial_www_google_com.bin --new "
+    if [ -n "$ZAPRET_EFF_DC" ] && grep -q '[a-z0-9]' "$ZAPRET_LIST_DC" 2>/dev/null; then
+        rup="--filter-tcp=443 $ex --hostlist=$ZAPRET_LIST_DC $(zapret_strategy_args "$ZAPRET_DIR" custom "$ZAPRET_EFF_DC") --new $rup"
+    fi
     if [ -n "$ZAPRET_EFF_YT" ] && grep -q '[a-z0-9]' "$ZAPRET_LIST_YT" 2>/dev/null; then
         echo "$a $q$alt--filter-tcp=443 $ex --hostlist=$ZAPRET_LIST_YT $(zapret_strategy_args "$ZAPRET_DIR" custom "$ZAPRET_EFF_YT") --new $rup$g"
     else
@@ -487,8 +493,11 @@ zapret_pick_strategy() {
     ZAPRET_EFF_STRATEGY="$ZAPRET_STRATEGY"
     ZAPRET_EFF_ARGS="$ZAPRET_ARGS"
     ZAPRET_EFF_YT=""
+    ZAPRET_EFF_DC=""
     ZAPRET_NET_SRC="default"
+    QUIC_NET=""
     [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] || return 0
+    QUIC_NET=$(K="$NET_KEY" L="$NET_LABEL" awk -F'|' '$1 == ENVIRON["K"] { k = $3 } ENVIRON["L"] != "" && $2 == ENVIRON["L"] { l = $3 } END { print ((k != "") ? k : l) }' "$ZAPRET_QUIC_FILE" 2>/dev/null)
     e=$(zapret_net_entry "$NET_KEY" "$NET_LABEL"); rc=$?
     if [ "$rc" = 2 ]; then
         [ "$ZAPRET_NET_BAD" = "$NET_KEY" ] || log "WARNING: zapret: запись для сети «$NET_LABEL» в $ZAPRET_NETS_FILE не прошла проверку — общая стратегия"
@@ -499,7 +508,9 @@ zapret_pick_strategy() {
     ZAPRET_EFF_STRATEGY="${e%%"|"*}"
     e="${e#*"|"}"
     ZAPRET_EFF_ARGS="${e%%"|"*}"
-    ZAPRET_EFF_YT="${e#*"|"}"
+    e="${e#*"|"}"
+    ZAPRET_EFF_YT="${e%%"|"*}"
+    ZAPRET_EFF_DC="${e#*"|"}"
     ZAPRET_NET_SRC="net"
     [ "$rc" = 3 ] && ZAPRET_NET_SRC="label"
 }
@@ -849,7 +860,7 @@ zapret_reconcile() {
     # файл стратегий сетей поменяли (WebUI, подбор) — подхватываем сразу
     local stamp=""
     # (и файл своих стратегий сайтов — scan.sh sites)
-    [ "$ZAPRET_PER_NET" = "1" ] && stamp=$(stat -c '%Y %s %i' "$ZAPRET_NETS_FILE" "$ZALT_FILE" 2>/dev/null)
+    [ "$ZAPRET_PER_NET" = "1" ] && stamp=$(stat -c '%Y %s %i' "$ZAPRET_NETS_FILE" "$ZALT_FILE" "$ZAPRET_QUIC_FILE" 2>/dev/null)
     [ "$stamp" != "$ZAPRET_NETS_STAMP" ] && ZAPRET_NET_DIRTY=1
     ZAPRET_TICK=$((ZAPRET_TICK + 1))
     if [ "$ZAPRET_TICK" -ge 15 ] || [ "$ZAPRET_STATE" != "on" ] || [ "$ZAPRET_NET_DIRTY" = "1" ]; then
@@ -865,7 +876,10 @@ zapret_reconcile() {
             local _ti; _ti=$(read_table_index "$TUN_NAME")
             [ "$_ti" != "$ZAPRET_OWNER_TUN" ] && { zapret_learn_vpn_owner; ZAPRET_OWNER_TUN="$_ti"; }
         fi
+        local _qn="$QUIC_NET"
         zapret_pick_strategy
+        # итог проверки QUIC сменился: в WebUI он виден сразу, а не со следующим событием
+        [ "$_qn" != "$QUIC_NET" ] && phone_status_refresh
         args=$(zapret_args)
         excl=$(zapret_vpn_uids)
         [ "$ZAPRET_STATE" = "on" ] && [ "$args" != "$ZAPRET_ARGS_RUN" ] && \

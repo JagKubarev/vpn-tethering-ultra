@@ -34,6 +34,9 @@
 #   webctl.sh zalt                    сайты со своей стратегией в текущей сети: сайт|аргументы|дата
 #   webctl.sh zalt-clear              забыть их (и «не открылись ничем»)
 #   webctl.sh zscan-start sites ['сайты']  подобрать своё сайтам (без списка — из списков zapret)
+#   webctl.sh zscan-start yt|dc       подбор только для YouTube или Discord, с замером скорости
+#   webctl.sh zscan-start quic        проходит ли QUIC YouTube с подделкой в этой сети
+#   webctl.sh znet-own yt|dc [АРГУМЕНТЫ]  своя стратегия YouTube или Discord сети (пусто — как общая)
 #   webctl.sh warp-list|warp-gen [N]|warp-import ИМЯ BASE64|warp-del ИМЯ|warp-export ИМЯ|warp-save ИМЯ|warp-saveall
 #   webctl.sh warp-stats              туннель: последнее рукопожатие и трафик (awg show)
 #   webctl.sh warp-reconnect          тот же конфиг заново (новая сессия Cloudflare)
@@ -60,7 +63,7 @@ ZLIST_AUTO=/data/adb/vpn_tether_zapret_auto.txt
 ZAUTO_LOG=/data/adb/vpn_tether_zapret_auto.log   # причины (nfqws --hostlist-auto-debug)
 ZSCAN=/data/local/tmp/vpn_tether_zscan
 ZNETS=/data/adb/vpn_tether_zapret_nets
-ZHIST=/data/adb/vpn_tether_zapret_hist      # ключ|стратегия|аргументы|дата|заметка|аргументы_YouTube — прежние стратегии сетей
+ZHIST=/data/adb/vpn_tether_zapret_hist      # ключ|стратегия|аргументы|дата|заметка|аргументы_YouTube|аргументы_Discord — прежние стратегии сетей
 ZEVENTS=/data/adb/vpn_tether_zapret_events  # дата|сеть|событие — журнал сторожа и подбора
 ZALT=/data/adb/vpn_tether_zapret_alt        # ключ|название|сайт|аргументы|дата — своя стратегия сайтов
 ZSKIP=/data/adb/vpn_tether_zapret_altskip   # ключ|сайт|epoch — не открылись ничем
@@ -498,7 +501,7 @@ case "$1" in
 
     # --- подбор стратегии (zapret/scan.sh в фоне) ----------------------------
     zscan-start)
-        mode="$2"; case "$mode" in quick|full|sites) ;; *) echo "ERR режим"; exit 1 ;; esac
+        mode="$2"; case "$mode" in quick|full|sites|yt|dc|quic) ;; *) echo "ERR режим"; exit 1 ;; esac
         sites=""
         for d in $(printf '%s' "$3" | tr 'A-Z' 'a-z' | tr ',;' '  '); do
             d=${d#http://}; d=${d#https://}; d=${d%%/*}
@@ -508,7 +511,8 @@ case "$1" in
         # zscan_busy — с проверкой cmdline: pid от убитого (kill -9, OOM) scan.sh
         # мог достаться чужому процессу — «подбор идёт» до перезагрузки (ревью PR #20)
         if zscan_busy; then echo "ERR подбор уже идёт"; exit 1; fi
-        rm -f "$ZSCAN.status" "$ZSCAN.results"
+        # проверка QUIC своей таблицы не даёт — таблица подбора остаётся
+        [ "$mode" = quic ] || rm -f "$ZSCAN.status" "$ZSCAN.results" "$ZSCAN.speed"
         # отдельная сессия: страница может закрыться, подбор продолжится
         setsid sh "$MODDIR/zapret/scan.sh" "$mode" "${sites# }" </dev/null >/dev/null 2>&1 &
         # ждём, пока сканер реально стартует (pid + статус), иначе первый
@@ -527,7 +531,9 @@ case "$1" in
             case "$(tr '\0' ' ' < "/proc/$(cat "$ZSCAN.pid" 2>/dev/null)/cmdline" 2>/dev/null)" in *"scan.sh check"*) echo "kind=check" ;; esac
         else echo "alive=0"; fi ;;
     zscan-results)
-        cat "$ZSCAN.results" 2>/dev/null ;;
+        cat "$ZSCAN.results" 2>/dev/null
+        # замер скорости: S|КБ/с|аргументы
+        sed 's/^/S|/' "$ZSCAN.speed" 2>/dev/null ;;
 
     sitetest)
         # Открывается ли сайт мимо VPN: без обхода и с текущей стратегией.
@@ -655,14 +661,18 @@ case "$1" in
         [ -n "$k" ] && [ -f "$ZHIST" ] && K="$k" awk -F'|' '$1 == ENVIRON["K"] { print "H " $0 }' "$ZHIST"
         ;;
     znet-set)
-        st="$2"; a="$3"; yt="$5"
+        st="$2"; a="$3"; yt="$5"; dc="$6"
         # WebUI зовёт без 5-го аргумента — своя стратегия YouTube сети
         # остаётся прежней (раньше молча стиралась); подбор передаёт его, только
         # если YouTube в прогоне мерили (иначе тоже без него)
-        keep_yt=0; [ $# -lt 5 ] && keep_yt=1
+        # «=» вместо аргумента — то же, что без него; Discord так же (6-й)
+        keep_yt=0; { [ $# -lt 5 ] || [ "$yt" = "=" ]; } && { keep_yt=1; yt=""; }
+        keep_dc=0; { [ $# -lt 6 ] || [ "$dc" = "=" ]; } && { keep_dc=1; dc=""; }
         note=$(printf '%s' "$4" | tr -d '\r\n|' | cut -c1-120)
         [ -z "$yt" ] || sh "$MODDIR/service.sh" --check ZAPRET_ARGS "$yt" 2>/dev/null || { echo "ERR недопустимые параметры YouTube"; exit 1; }
+        [ -z "$dc" ] || sh "$MODDIR/service.sh" --check ZAPRET_ARGS "$dc" 2>/dev/null || { echo "ERR недопустимые параметры Discord"; exit 1; }
         [ "$yt" = "$a" ] && yt=""
+        [ "$dc" = "$a" ] && dc=""
         sh "$MODDIR/service.sh" --check ZAPRET_STRATEGY "$st" 2>/dev/null || { echo "ERR стратегия"; exit 1; }
         sh "$MODDIR/service.sh" --check ZAPRET_ARGS "$a" 2>/dev/null || { echo "ERR недопустимые параметры"; exit 1; }
         if [ "$st" = custom ]; then [ -n "$a" ] || { echo "ERR нет параметров"; exit 1; }; else a=""; fi
@@ -672,18 +682,46 @@ case "$1" in
             yt=$(K="$k" awk -F'|' '$1 == ENVIRON["K"] { y = $7 } END { print y }' "$ZNETS")
             [ "$yt" = "$a" ] && yt=""
         fi
+        if [ "$keep_dc" = 1 ] && [ -f "$ZNETS" ]; then
+            dc=$(K="$k" awk -F'|' '$1 == ENVIRON["K"] { y = $8 } END { print y }' "$ZNETS")
+            [ "$dc" = "$a" ] && dc=""
+        fi
         {
             [ -f "$ZNETS" ] && K="$k" awk -F'|' '$1 != ENVIRON["K"]' "$ZNETS"
-            printf '%s|%s|%s|%s|%s|%s|%s\n' "$k" "$st" "$a" "$l" "$note" "$(date '+%Y-%m-%d %H:%M')" "$yt"
+            printf '%s|%s|%s|%s|%s|%s|%s|%s\n' "$k" "$st" "$a" "$l" "$note" "$(date '+%Y-%m-%d %H:%M')" "$yt" "$dc"
         } > "$ZNETS.tmp" && chmod 600 "$ZNETS.tmp" && mv -f "$ZNETS.tmp" "$ZNETS"
         # история сети: сторож при поломке сначала пробует прежние стратегии
         # (та же запись — переносим в конец, держим 8 последних на сеть)
         {
-            [ -f "$ZHIST" ] && K="$k" S="$st" A="$a" Y="$yt" awk -F'|' '!($1 == ENVIRON["K"] && $2 == ENVIRON["S"] && $3 == ENVIRON["A"] && $6 == ENVIRON["Y"])' "$ZHIST"
-            printf '%s|%s|%s|%s|%s|%s\n' "$k" "$st" "$a" "$(date '+%Y-%m-%d %H:%M')" "$note" "$yt"
+            [ -f "$ZHIST" ] && K="$k" S="$st" A="$a" Y="$yt" D="$dc" awk -F'|' '!($1 == ENVIRON["K"] && $2 == ENVIRON["S"] && $3 == ENVIRON["A"] && $6 == ENVIRON["Y"] && $7 == ENVIRON["D"])' "$ZHIST"
+            printf '%s|%s|%s|%s|%s|%s|%s\n' "$k" "$st" "$a" "$(date '+%Y-%m-%d %H:%M')" "$note" "$yt" "$dc"
         } | K="$k" awk -F'|' '{ l[NR] = $0; key[NR] = $1 } END { for (i = NR; i >= 1; i--) if (key[i] != ENVIRON["K"] || ++n <= 8) keep[i] = 1; for (i = 1; i <= NR; i++) if (keep[i]) print l[i] }' > "$ZHIST.tmp" && \
             chmod 600 "$ZHIST.tmp" && mv -f "$ZHIST.tmp" "$ZHIST"
         echo "OK $l"
+        ;;
+    znet-own)
+        # меняет только своё поле: общая и вторая своя стратегия сети остаются.
+        # Записи сети нет — как у демона: запись с тем же названием или общая
+        g="$2"; case "$g" in yt|dc) ;; *) echo "ERR группа"; exit 1 ;; esac
+        d=$(cur_net); k=${d%%"|"*}; l=${d#*"|"}
+        [ -n "$k" ] || { echo "ERR не понял, что за сеть"; exit 1; }
+        e=$(K="$k" L="$l" awk -F'|' '$1 == ENVIRON["K"] { x = $0 } ENVIRON["L"] != "" && $4 == ENVIRON["L"] { y = $0 } END { print ((x != "") ? x : y) }' "$ZNETS" 2>/dev/null)
+        if [ -n "$e" ]; then
+            st=$(printf '%s\n' "$e" | cut -d'|' -f2); a=$(printf '%s\n' "$e" | cut -d'|' -f3); note=$(printf '%s\n' "$e" | cut -d'|' -f5)
+            yt=$(printf '%s\n' "$e" | cut -d'|' -f7); dc=$(printf '%s\n' "$e" | cut -d'|' -f8)
+        else
+            st=$(sh "$MODDIR/service.sh" --get ZAPRET_STRATEGY 2>/dev/null); a=$(sh "$MODDIR/service.sh" --get ZAPRET_ARGS 2>/dev/null); note=""; yt=""; dc=""
+        fi
+        if [ "$g" = yt ]; then yt="$3"; else dc="$3"; fi
+        r=$(sh "$MODDIR/webctl.sh" znet-set "$st" "$a" "$note" "$yt" "$dc")
+        echo "$r"
+        # записи сайтов Discord в ZALT идут раньше его профиля и перекрыли бы новую
+        case "$r" in OK*)
+            if [ "$g" = dc ] && [ -n "$3" ] && [ -f "$ZALT" ]; then
+                K="$k" L="$l" awk -F'|' '!(($1 == ENVIRON["K"] || (ENVIRON["L"] != "" && $2 == ENVIRON["L"])) && $3 ~ /discord|dis[.]gd/)' "$ZALT" > "$ZALT.tmp" && \
+                    chmod 600 "$ZALT.tmp" && mv -f "$ZALT.tmp" "$ZALT"
+            fi ;;
+        esac
         ;;
     zalt)
         # своих записей у сети нет — как у демона, записи сети с тем же названием
