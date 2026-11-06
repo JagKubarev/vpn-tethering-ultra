@@ -323,7 +323,7 @@ if [ "$MODE" = sites ]; then
         } | tr 'A-Z' 'a-z' | sed 's/#.*//; s/^[*.]*//' | tr -d ' \r' | grep -E '^[a-z0-9.-]+\.[a-z0-9-]+$' | \
             K="${NETID%%"|"*}" N=$(date +%s) awk -F'|' '
                 FILENAME == ARGV[1] { x[$1] = 1; next }
-                FILENAME == ARGV[2] { if ($1 == ENVIRON["K"] && $3 + 86400 > ENVIRON["N"]) sk[$2] = 1; next }
+                FILENAME == ARGV[2] { if ($1 == ENVIRON["K"] && $3 + 72000 > ENVIRON["N"]) sk[$2] = 1; next }
                 { h = $1; if ((h in seen) || (h in sk)) next; d = h
                   while (1) { if (d in x) next; i = index(d, "."); if (!i) break; d = substr(d, i + 1) }
                   seen[h] = 1; print h }' "$TMP/xl" "$TMP/skip" - | head -n 400 > "$TMP/sites"
@@ -496,7 +496,10 @@ if [ "$MODE" = sites ] && [ -z "$SITES_ARG" ]; then
     _req=$(echo $SITES | wc -w); _got=$(wc -l < "$TMP/ips")
     _cb=0
     case " $BASE_OK " in *" ya.ru "*) ;; *) _cb=1 ;; esac
-    case " $BASE_OK " in *" www.google.com "*) ;; *) _cb=1 ;; esac
+    # Google молчит: по HTTP отвечает — волна, откладываем; нет — закрыт в этой сети, не повод
+    case " $BASE_OK " in *" www.google.com "*) ;; *)
+        [ "$(curl -s -o /dev/null -m 5 --interface "$WAN" -w '%{http_code}' http://www.google.com/generate_204 2>/dev/null)" = 204 ] && _cb=1 ;;
+    esac
     if [ $((_got * 10)) -lt $((_req * 6)) ] || [ "$_cb" = 1 ]; then
         st state=error msg="сеть не готова (адресов $_got из $_req, открылись контрольные:$BASE_OK) — повторю позже"
         exit 1
@@ -742,7 +745,7 @@ EOF
     NOW=$(date +%s)
     # ZSKIP — по всем проверенным (TA), иначе у «ничем» копились дубли
     {
-        [ -f "$ZSKIP" ] && K="$KEY" T="$TA" N="$NOW" awk -F'|' '$3 + 86400 > ENVIRON["N"] && !($1 == ENVIRON["K"] && index(ENVIRON["T"], " " $2 " "))' "$ZSKIP"
+        [ -f "$ZSKIP" ] && K="$KEY" T="$TA" N="$NOW" awk -F'|' '$3 + 72000 > ENVIRON["N"] && !($1 == ENVIRON["K"] && index(ENVIRON["T"], " " $2 " "))' "$ZSKIP"
         for h in $F; do printf '%s|%s|%s\n' "$KEY" "$h" "$NOW"; done
     } > "$ZSKIP.tmp" && chmod 600 "$ZSKIP.tmp" && mv -f "$ZSKIP.tmp" "$ZSKIP"
     NA=$(wc -l < "$TMP/assign")
@@ -753,7 +756,7 @@ EOF
         elif [ -z "$F" ]; then MSG="основная стратегия открывает — своя не нужна (в режиме «из списка» сайт должен быть в списке)"
         else MSG="не открылся ни одной стратегией — похоже, блок по IP"; fi
     else
-        MSG="проверено $NT, заблокировано $NB, своя стратегия у $NA$([ -n "$F" ] && echo ", не открылись ничем: $(echo $F | wc -w)")"
+        MSG="проверено $NT, через обход $NB, своя стратегия у $NA$([ -n "$F" ] && echo ", не открылись ничем: $(echo $F | wc -w)")"
     fi
     event "сайты$([ -n "$SITES_ARG" ] && echo " ($SITES_ARG)"): $MSG$([ "$NA" -gt 0 ] && echo " — $(cut -d'|' -f1 "$TMP/assign" | head -n 8 | tr '\n' ' ')")$([ -n "$F" ] && echo "; ничем: $(echo $F | tr ' ' '\n' | head -n 8 | tr '\n' ' ')")"
     S_state=done
@@ -836,6 +839,25 @@ if [ "$MODE" = "check" ]; then
     fi
     # волна могла начаться за эту минуту
     wave_google
+    # Без прямых запросов не видно, закрыт ли сайт вообще: в сети без блокировок сторож менял
+    # бы стратегию зря. Спрашиваем напрямую только то, что не открылось, и не больше трёх имён
+    _df=0; _do=0
+    for _t in $(last_fail); do
+        # в журнале имена без www.: www.youtube.com записан как youtube.com
+        _h=$(awk -v h="${_t%%:*}" '$1 == h || $1 == "www." h { print $1; exit }' "$TMP/ips")
+        _ip=$(awk -v h="$_h" '$1 == h { print $2; exit }' "$TMP/ips")
+        [ -n "$_ip" ] || continue
+        _df=$((_df + 1))
+        _c=$(curl -s -o /dev/null -m 5 --interface "$WAN" --capath "$CA" --resolve "$_h:443:$_ip" -w '%{http_code}' "https://$_h/" 2>/dev/null)
+        [ -n "$_c" ] && [ "$_c" != 000 ] && _do=$((_do + 1))
+        [ "$_df" -ge 3 ] && break
+    done
+    if [ "$_df" -gt 0 ] && [ "$_do" = "$_df" ]; then
+        event "автопроверка: стратегия не открывает ($(last_fail)), но напрямую сайты открыты — блокировки нет, не меняю"
+        wd_last "работает (напрямую открыто)"
+        st state=done stage="готово" msg="сайты открыты напрямую — блокировки нет"
+        exit 0
+    fi
     if [ "$AUTOPICK" = 0 ]; then
         event "автопроверка: стратегия не открывает ($(last_fail)) — автоподбор выключен, не меняю"
         wd_last "не открывает, автоподбор выключен"

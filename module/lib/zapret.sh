@@ -552,9 +552,10 @@ net_identity_reconcile() {
     [ -n "$NET_KEY" ] && ZWD_LAST=$(( $(date +%s) - ZAPRET_WATCHDOG_MIN * 60 + 90 ))
     # и сайты со своей стратегией — через ~час (31.10: было ~10 мин — залп
     # проверки после каждой смены Wi-Fi/мобильной, а он, похоже, провоцирует ТСПУ)
-    # Срок только отодвигаем: иначе каждая смена сети ставила проверку через час вместо суток
+    # В сети, где проверка уже была, срок только отодвигаем: иначе каждая смена сети ставила
+    # её через час вместо суток. В другой сети — через час: ей своих стратегий ещё не подбирали
     _zs=$(( $(date +%s) - ZAPRET_ALT_MIN * 60 + 3600 ))
-    [ -n "$NET_KEY" ] && [ "$_zs" -gt "$ZSITES_LAST" ] && ZSITES_LAST=$_zs
+    if [ -n "$NET_KEY" ] && { [ "$NET_KEY" != "$ZSITES_NET" ] || [ "$_zs" -gt "$ZSITES_LAST" ]; }; then ZSITES_LAST=$_zs; fi
     phone_status_refresh
 }
 
@@ -741,6 +742,7 @@ zapret_sites_check() {
     # сторож запустил scan.sh в этом же такте — его pid-файла ещё нет
     [ $((now - ZSCAN_JUST_TS)) -lt 10 ] && return 0
     ZSITES_LAST=$now
+    ZSITES_NET="$NET_KEY"
     log "zapret: проверяю сайты из списков — кому нужна своя стратегия"
     setsid sh "$ZAPRET_DIR/scan.sh" sites </dev/null >/dev/null 2>&1 &
 }

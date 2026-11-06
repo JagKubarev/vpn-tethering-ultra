@@ -1404,6 +1404,7 @@ ZSCAN_PID_FILE="/data/local/tmp/vpn_tether_zscan.pid"
 ZALT_FILE="/data/adb/vpn_tether_zapret_alt"   # своя стратегия сайтов: ключ|название|сайт|аргументы|дата
 ZALT_RUN="/data/local/tmp/vpn_tether_zalt"    # .lst + .1..3 — списки сайтов профилей nfqws
 ZAPRET_ALT_N=0          # сколько сайтов со своей стратегией у запущенного nfqws
+ZSITES_NET=""           # в какой сети она была
 ZSITES_LAST=0           # когда последний раз проверяли сайты (scan.sh sites)
 ZAPRET_HOOK_TICK=0      # проверка хуков zapret — раз в ~10с, не каждый цикл
 ZAPRET_OWNER_TUN="-"    # для какого tun уже узнали владельца VPN
