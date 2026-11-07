@@ -2505,10 +2505,10 @@ $('#znetList').addEventListener('click', async (e) => {
 
 // ---------------------------------------------------------------- автор и помощь
 const LINKS = { tg: 'https://t.me/kubarev_mods', chat: 'https://t.me/+LyVq9jqT-802MGIy',
-  '4pda': 'https://4pda.to/forum/index.php?showtopic=1097835', gh: 'https://github.com/JagKubarev/vpn-tethering-ultra' };
+  '4pda': 'https://4pda.to/forum/index.php?showtopic=1097835&view=findpost&p=142785848', gh: 'https://github.com/JagKubarev/vpn-tethering-ultra' };
 const LINK_ROWS = [['tg', 'Канал в Telegram', 'Новости и релизы', '<path d="M21 4L3 11l6 2 2 6 3-4 5 4z"/><path d="M9 13l8-6"/>'],
   ['chat', 'Чат', 'Вопросы, логи, помощь', '<path d="M4 5h16v11H9l-5 4z"/>'],
-  ['4pda', 'Тема на 4PDA', 'Обсуждение и инструкции', '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h5"/>'],
+  ['4pda', 'Модуль на 4PDA', 'Описание, обсуждение и инструкции', '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h5"/>'],
   ['gh', 'GitHub', 'Код, релизы, сообщить об ошибке', '<path d="M9 19c-4 1-4-2-6-2m12 4v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1-.3-3.4 1.3a11.6 11.6 0 0 0-6 0C6.8 2.8 5.8 3.1 5.8 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4.4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/>']];
 function renderLinks() {
   $('#links').innerHTML = LINK_ROWS.map(([k, t, sub, ic]) => '<div class="row" role="link" tabindex="0" data-link="' + esc(LINKS[k]) + '">' +
