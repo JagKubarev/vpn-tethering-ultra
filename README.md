@@ -7,7 +7,7 @@
 
 Модуль для KernelSU, Magisk и APatch.
 
-[![Версия](https://img.shields.io/github/v/release/JagKubarev/vpn-tethering-ultra?label=%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F&color=2563eb)](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest)
+[![Версия](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FJagKubarev%2Fvpn-tethering-ultra%2Fmain%2Fupdate.json&query=%24.version&label=%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F&color=2563eb)](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest)
 [![Лицензия: GPL-3.0](https://img.shields.io/badge/%D0%BB%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%8F-GPL--3.0-blue)](LICENSE)
 [![KernelSU](https://img.shields.io/badge/KernelSU-%D0%BF%D0%BE%D0%B4%D0%B4%D0%B5%D1%80%D0%B6%D0%B8%D0%B2%D0%B0%D0%B5%D1%82%D1%81%D1%8F-green)](https://kernelsu.org/)
 [![Magisk](https://img.shields.io/badge/Magisk-%D0%BF%D0%BE%D0%B4%D0%B4%D0%B5%D1%80%D0%B6%D0%B8%D0%B2%D0%B0%D0%B5%D1%82%D1%81%D1%8F-green)](https://github.com/topjohnwu/Magisk)
