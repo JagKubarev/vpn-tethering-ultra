@@ -887,11 +887,20 @@ dns_alt_recheck() {
 # неудаче сразу вторая (одна медленная секунда в автобусе — не повод).
 # В деградации — раз в DNS_HEALTH_RECOVER. И то и другое — только если
 # DNS/сеть реально используются (см. ниже).
+# Сети нет совсем: проверке судить не о чем, а откат увёл бы DNS на оператора в первые
+# секунды после возврата сети (06.11: каждая смена сети — «DoH не отвечает: rcode 2»)
+dns_wan_gone() {
+    [ "$WAN_DOWN_LOGGED" = "1" ] && return 0
+    # любой глобальный адрес: при CLAT у самого WAN нет IPv4
+    [ -n "$LAST_WAN_IFACE" ] && ! $ip addr show "$LAST_WAN_IFACE" scope global 2>/dev/null | grep -q "inet"
+}
 dns_health() {
     local now period sz
     case "$DNS_STATE" in dnsproxy*) ;; *) [ "$PHONE_DNS_ON" = "1" ] || { DNS_DEGRADED=0; return 0; } ;; esac
     dnsproxy_alive || return 0
     dnsproxy_log_rotate
+    # журнал считаем и тут: ошибки за обрыв иначе сочлись бы новыми и сняли паузу после возврата
+    dns_wan_gone && { DNS_LOG_SEEN=$(wc -c < "$DNSPROXY_LOG" 2>/dev/null || echo 0); return 0; }
     now=$(date +%s)
     dns_alt_recheck "$now" && return 0
 
@@ -964,6 +973,8 @@ dns_health() {
     elif [ "$DNS_DEGRADED" = "0" ]; then
         # одна неудача — не повод (одна плохая секунда в автобусе), сразу вторая
         if ! dnsproxy_probe; then
+            # сеть пропала во время проверки
+            dns_wan_gone && { DNS_HEALTH_LAST=$(date +%s); return 0; }
             local why="2 проверки подряд: $DNS_PROBE_LAST_MS$(case "$DNS_PROBE_LAST_MS" in [0-9]*) echo 'мс, медленно' ;; esac)"
             if dns_operator_dead; then
                 # сети нет вовсе (метро): оператор тоже молчит — откат ничего не даст,
@@ -971,13 +982,14 @@ dns_health() {
                 [ "$DNS_NONET" = 1 ] || log "DoH молчит ($why), но и DNS оператора молчит — сети нет, DNS не трогаю"
                 DNS_NONET=1
                 DNS_NONET_TS=$now
-            elif [ "$DNS_NONET" = 1 ] || [ $((now - DNS_NONET_TS)) -lt 300 ]; then
+            elif [ "$DNS_NONET" = 1 ] || [ $((now - DNS_NONET_TS)) -lt 300 ] || [ $((now - DNS_ROUTE_CHANGED_TS)) -lt 15 ]; then
                 # сеть только что вернулась (оператор ожил), а DoH-соединение
                 # dnsproxy висит на старом пути (тест 29.10 13:06: через 2 с после
                 # возврата — откат на оператора на 36 с, окно для гео-ошибок):
                 # сначала свежий dnsproxy, откат — только если и он молчит.
                 # И в 5 мин после «сети нет»: метро 29.10 14:13:33 — DNS_NONET
-                # сбросился в 14:12:00, сеть мигнула снова, и 10 мин на запасном
+                # сбросился в 14:12:00, сеть мигнула снова, и 10 мин на запасном.
+                # И сразу после смены маршрута: старое соединение DoH на старом пути
                 DNS_NONET=0
                 dnsproxy_restart "сеть вернулась" quiet
                 # не поднялся — проверять нечего (4 с впустую), сразу дальше

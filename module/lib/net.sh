@@ -736,3 +736,38 @@ apply_rps_xps() {
     log "RPS/XPS applied to all tether interfaces"
 }
 
+# Выход и Google после смены сети (и кнопки «Переподключить сеть»): адрес у
+# Cloudflare (туда уже ходит проверка WARP), Google по HTTPS и HTTP. HTTPS молчит,
+# HTTP отвечает — волна (06.11 на YOTA держалась до смены адреса). В фоне, -k:
+# нужен только код ответа, а свой curl на части прошивок без корневых сертификатов.
+# Без --interface: AdGuard уводит root-трафик на свой локальный прокси, привязанный к
+# rmnet сокет туда не доходит, и все запросы молчали (07.11). VPN поднят — не зовём
+EXIT_FILE="/data/local/tmp/vpn_tether_exit"
+wan_exit_probe() {
+    [ -n "$CURL_BIN" ] && [ -n "$LAST_WAN_IFACE" ] || return 0
+    # при поднятом VPN запросы ушли бы мимо него и показали бы адрес оператора
+    vpn_up_now && return 0
+    local w="$LAST_WAN_IFACE" via="" ts
+    # Google в WARP или Opera — проверка ушла бы в туннель и волну на адресе оператора не увидела
+    [ "$WARP_ENABLE" = 1 ] && [ "$WARP_GOOGLE" = 1 ] && [ "$WARP_PHONE" = 1 ] && [ "$WARP_STATE" = up ] && via=warp
+    [ "$OPERA_ENABLE" = 1 ] && [ "$OPERA_GOOGLE" = 1 ] && [ "$OPERA_PHONE" = 1 ] && [ "$OPERA_STATE" = on ] && via=opera
+    ts=$(date +%s)
+    (
+        sleep 4
+        f="$EXIT_FILE.$ts.$RANDOM"
+        "$CURL_BIN" -s -k -m 6 https://1.1.1.1/cdn-cgi/trace > "$f.t" 2>/dev/null &
+        if [ -z "$via" ]; then
+            "$CURL_BIN" -s -k -o /dev/null -m 5 -w '%{http_code}' https://www.google.com/generate_204 > "$f.g" 2>/dev/null &
+            "$CURL_BIN" -s -o /dev/null -m 5 -w '%{http_code}' http://www.google.com/generate_204 > "$f.h" 2>/dev/null &
+        else
+            echo "$via" > "$f.g"; echo "$via" > "$f.h"
+        fi
+        wait
+        # пишем, только если свежее того, что в файле: проверка от прошлой смены сети,
+        # начатая без связи, дожидалась таймаутов и затирала удачную
+        [ "$(head -n 1 "$EXIT_FILE" 2>/dev/null | cut -d'|' -f1)" -gt "$ts" ] 2>/dev/null || \
+            printf '%s|%s|%s|%s|%s|%s\n' "$ts" "$w" "$(sed -n 's/^ip=//p' "$f.t")" "$(sed -n 's/^loc=//p' "$f.t")" \
+                "$(cat "$f.g" 2>/dev/null)" "$(cat "$f.h" 2>/dev/null)" > "$f" && mv -f "$f" "$EXIT_FILE"
+        rm -f "$f" "$f.t" "$f.g" "$f.h"
+    ) </dev/null >/dev/null 2>&1 &
+}

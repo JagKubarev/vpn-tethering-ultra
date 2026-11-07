@@ -613,6 +613,7 @@ CHAIN_WARP_OUT="VPN_WARP_OUT"     # mangle OUTPUT
 CHAIN_WARP_PRE="VPN_WARP_PRE"     # mangle PREROUTING
 CHAIN_WARP_DST="VPN_WARP_DST"     # адреса групп -> VPN_WARP_SET
 CHAIN_WARP_SET="VPN_WARP_SET"     # connmark + fwmark
+CHAIN_WARP_YT="VPN_WARP_YT"       # видеосерверы из отбоя (yt_warp_sync) -> VPN_WARP_SET
 CHAIN_WARP_NAT="VPN_WARP_NAT"     # nat POSTROUTING
 CHAIN_WARP_FWD="VPN_WARP_FWD"     # filter FORWARD
 CHAIN_WARP_V6="VPN_WARP_V6"       # filter OUTPUT (v6): отбить
@@ -757,7 +758,7 @@ warp_routes_off() {   # [force] — снять, даже если по флаг�
     for t in "$iptables" "$ip6tables"; do
         _n=0; while [ $_n -lt 8 ] && $t -t mangle -D OUTPUT -j "$CHAIN_WARP_OUT" 2>/dev/null; do _n=$((_n + 1)); done
         _n=0; while [ $_n -lt 8 ] && $t -t mangle -D PREROUTING -j "$CHAIN_WARP_PRE" 2>/dev/null; do _n=$((_n + 1)); done
-        for c in "$CHAIN_WARP_OUT" "$CHAIN_WARP_PRE" "$CHAIN_WARP_DST" "$CHAIN_WARP_SET"; do
+        for c in "$CHAIN_WARP_OUT" "$CHAIN_WARP_PRE" "$CHAIN_WARP_DST" "$CHAIN_WARP_YT" "$CHAIN_WARP_SET"; do
             $t -t mangle -F "$c" 2>/dev/null; $t -t mangle -X "$c" 2>/dev/null
         done
         $t -t mangle -D POSTROUTING -o $WARP_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $WARP_MSS 2>/dev/null
@@ -783,7 +784,7 @@ warp_routes_apply() {   # ифейсы раздачи
     # mangle v4: адреса групп одним iptables-restore (~150 правил за раз)
     {
         echo "*mangle"
-        for c in "$CHAIN_WARP_OUT" "$CHAIN_WARP_PRE" "$CHAIN_WARP_DST" "$CHAIN_WARP_SET"; do echo ":$c - [0:0]"; done
+        for c in "$CHAIN_WARP_OUT" "$CHAIN_WARP_PRE" "$CHAIN_WARP_DST" "$CHAIN_WARP_YT" "$CHAIN_WARP_SET"; do echo ":$c - [0:0]"; done
         echo "-A $CHAIN_WARP_SET -j CONNMARK --set-xmark $WARP_MARK/$WARP_MARK"
         echo "-A $CHAIN_WARP_SET -j MARK --set-xmark $WARP_MARK/$WARP_MARK"
         warp_dst4 | while read -r m; do echo "-A $CHAIN_WARP_DST -d $m -j $CHAIN_WARP_SET"; done
@@ -800,9 +801,11 @@ warp_routes_apply() {   # ифейсы раздачи
         echo "-A $CHAIN_WARP_OUT -m owner --uid-owner 0-9999 -j RETURN"
         echo "-A $CHAIN_WARP_OUT -m conntrack ! --ctstate NEW -j RETURN"
         for u in $uids; do echo "-A $CHAIN_WARP_OUT -m owner --uid-owner $u -j $CHAIN_WARP_SET"; done
+        [ "$WARP_PHONE" = "1" ] && echo "-A $CHAIN_WARP_OUT -j $CHAIN_WARP_YT"
         [ "$WARP_PHONE" = "1" ] && echo "-A $CHAIN_WARP_OUT -j $CHAIN_WARP_DST"
         for i in $tif; do
             echo "-A $CHAIN_WARP_PRE -i $i -m connmark --mark $WARP_MARK/$WARP_MARK -j MARK --set-xmark $WARP_MARK/$WARP_MARK"
+            echo "-A $CHAIN_WARP_PRE -i $i -m conntrack --ctstate NEW -j $CHAIN_WARP_YT"
             echo "-A $CHAIN_WARP_PRE -i $i -m conntrack --ctstate NEW -j $CHAIN_WARP_DST"
         done
         echo "COMMIT"
@@ -861,6 +864,7 @@ warp_routes_apply() {   # ифейсы раздачи
     [ -n "$WARP_APPS" ] && what="$what приложения $WARP_APPS,"
     [ -n "$m$WARP_APPS" ] && what="$what uid ${uids:-не установлены},"
     WARP_RT_ON=1
+    YT_WARP_SIG=""; yt_warp_sync   # iptables-restore выше очистил цепочку
     log "WARP: в туннель —${what:- ничего,} $n4 сетей v4, v6 отбито: $n6; для:$([ "$WARP_PHONE" = 1 ] && echo ' телефона')${tif:+ раздачи [$tif]}"
 }
 

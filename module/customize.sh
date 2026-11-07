@@ -115,16 +115,19 @@ else
     # Ключи Opera 3.13–3.15.1 (и блок-подсказка 3.13): новые так называть нельзя,
     # удалятся при установке. Иначе висят
     # в WebUI как «Конфиг: пропущено: ?OPERA_TG». Остальное не трогаем.
-    if grep -qE '^[[:space:]]*#?[[:space:]]*OPERA_(TG|COUNTRY|SITES|API_LIST)[[:space:]]*=|^# --- Telegram без VPN' "$CONF" 2>/dev/null; then
-        awk '
-            /^# --- Telegram без VPN \(прокси Opera\)/ { skip = 1 }
-            skip { if ($0 ~ /^[ \t\r]*$/) skip = 0; next }
-            { s = $0; sub(/^[ \t]*#?[ \t]*/, "", s) }
-            s ~ /^OPERA_(TG|COUNTRY|SITES|API_LIST)[ \t]*=/ { next }
-            { print }' "$CONF" > "$CONF.tmp" && cat "$CONF.tmp" > "$CONF"
-        rm -f "$CONF.tmp"
-        ui_print "- Настройки Opera убраны из $CONF"
+    # OPERA_COUNTRY вернулся в 3.24: остаются только EU, AS и AM, прочие значения 3.14 (AUTO) — вон
+    awk '
+        /^# --- Telegram без VPN \(прокси Opera\)/ { skip = 1 }
+        skip { if ($0 ~ /^[ \t\r]*$/) skip = 0; next }
+        { s = $0; sub(/^[ \t]*#?[ \t]*/, "", s); sub(/\r$/, "", s) }
+        s ~ /^OPERA_(TG|SITES|API_LIST)[ \t]*=/ { next }
+        s ~ /^OPERA_COUNTRY[ \t]*=/ && s !~ /^OPERA_COUNTRY[ \t]*=[ \t]*"?(EU|AS|AM)"?[ \t]*$/ { next }
+        { print }' "$CONF" > "$CONF.tmp" 2>/dev/null
+    if [ -s "$CONF.tmp" ] && ! cmp -s "$CONF" "$CONF.tmp"; then
+        cat "$CONF.tmp" > "$CONF"
+        ui_print "- Устаревшие настройки Opera убраны из $CONF"
     fi
+    rm -f "$CONF.tmp"
 fi
 ui_print " "
 ui_print "VPN Tethering Ultra — что дальше:"

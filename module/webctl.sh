@@ -34,6 +34,11 @@
 #   webctl.sh zalt                    сайты со своей стратегией в текущей сети: сайт|аргументы|дата
 #   webctl.sh zalt-clear              забыть их (и «не открылись ничем»)
 #   webctl.sh zscan-start sites ['сайты']  подобрать своё сайтам (без списка — из списков zapret)
+#   webctl.sh zscan-start yt|dc       подбор только для YouTube или Discord, с замером скорости
+#   webctl.sh zscan-start quic        проходит ли QUIC YouTube с подделкой в этой сети
+#   webctl.sh znet-own yt|dc [АРГУМЕНТЫ] [manual]  своя стратегия YouTube или Discord сети (пусто — как общая)
+#   webctl.sh zquick                  стратегии быстрого подбора (для ручного выбора)
+#   webctl.sh net-renew               коротко 2G и обратно: новая сессия и адрес у оператора
 #   webctl.sh warp-list|warp-gen [N]|warp-import ИМЯ BASE64|warp-del ИМЯ|warp-export ИМЯ|warp-save ИМЯ|warp-saveall
 #   webctl.sh warp-stats              туннель: последнее рукопожатие и трафик (awg show)
 #   webctl.sh warp-reconnect          тот же конфиг заново (новая сессия Cloudflare)
@@ -60,7 +65,7 @@ ZLIST_AUTO=/data/adb/vpn_tether_zapret_auto.txt
 ZAUTO_LOG=/data/adb/vpn_tether_zapret_auto.log   # причины (nfqws --hostlist-auto-debug)
 ZSCAN=/data/local/tmp/vpn_tether_zscan
 ZNETS=/data/adb/vpn_tether_zapret_nets
-ZHIST=/data/adb/vpn_tether_zapret_hist      # ключ|стратегия|аргументы|дата|заметка|аргументы_YouTube — прежние стратегии сетей
+ZHIST=/data/adb/vpn_tether_zapret_hist      # ключ|стратегия|аргументы|дата|заметка|аргументы_YouTube|аргументы_Discord — прежние стратегии сетей
 ZEVENTS=/data/adb/vpn_tether_zapret_events  # дата|сеть|событие — журнал сторожа и подбора
 ZALT=/data/adb/vpn_tether_zapret_alt        # ключ|название|сайт|аргументы|дата — своя стратегия сайтов
 ZSKIP=/data/adb/vpn_tether_zapret_altskip   # ключ|сайт|epoch — не открылись ничем
@@ -146,6 +151,10 @@ case "$1" in
         # итог последней проверки сторожа (пишет zapret/scan.sh check)
         w=$(head -n 1 "$ZSCAN.wd" 2>/dev/null | tr -d '\r')
         [ -n "$w" ] && echo "zwd_last=$w"
+        # волна свежая: сторож мог и не запуститься (VPN, выключен), и zwd_last остался бы навсегда
+        [ -n "$(find "$ZSCAN.wave" -maxdepth 0 -mmin -30 2>/dev/null)" ] && echo "zwave=1"
+        # выход и Google после последней смены сети (пишет демон, wan_exit_probe)
+        [ -f /data/local/tmp/vpn_tether_exit ] && echo "exit=$(head -n 1 /data/local/tmp/vpn_tether_exit)"
         ;;
 
     conf)
@@ -269,7 +278,7 @@ case "$1" in
             sed -n 's/^version=/модуль: /p' "$MODDIR/module.prop"
             echo "телефон: $(getprop ro.product.manufacturer) $(getprop ro.product.model), Android $(getprop ro.build.version.release), ядро $(uname -r)"
             echo; echo "=== состояние"; sed '1,2d' "$STATUS_FILE" 2>/dev/null
-            echo; echo "=== настройки (vpn_tether.conf, без комментариев)"; grep -v '^[[:space:]]*#' "$CONF" 2>/dev/null | grep .
+            echo; echo "=== настройки (vpn_tether.conf, без комментариев)"; grep -v '^[[:space:]]*#' "$CONF" 2>/dev/null | grep . | sed 's#://[^ ]*@#://***@#'
             echo; echo "=== журнал модуля (последние 3000 строк)"; tail -n 3000 "$LOG_FILE" 2>/dev/null
             echo; echo "=== журнал прошлого запуска (последние 500 строк)"; tail -n 500 "$LOG_FILE.prev" 2>/dev/null
             echo; echo "=== сторож и подбор (последние 100)"; tail -n 100 "$ZEVENTS" 2>/dev/null
@@ -277,7 +286,7 @@ case "$1" in
             echo; echo "=== свои стратегии сайтов"; cat "$ZALT" 2>/dev/null
             echo; echo "=== автосписок: домен|когда|сбросы/зависания/редиректы|кто"; sh "$MODDIR/webctl.sh" zauto-info 2>/dev/null
             echo; echo "=== nfqws (последние 50 строк)"; tail -n 50 /data/local/tmp/vpn_tether_nfqws.log 2>/dev/null
-            echo; echo "=== opera-proxy (последние 60 строк)"; tail -n 60 /data/local/tmp/vpn_tether_op.log 2>/dev/null
+            echo; echo "=== opera-proxy (последние 60 строк)"; tail -n 60 /data/local/tmp/vpn_tether_op.log 2>/dev/null | sed 's#://[^ ]*@#://***@#'
             echo; echo "=== hev-socks5-tproxy (последние 20 строк)"; tail -n 20 /data/local/tmp/vpn_tether_ophev.log 2>/dev/null
             echo; echo "=== ip rule"; ip rule 2>/dev/null
             echo; echo "=== цепочки модуля (filter / nat / mangle)"
@@ -498,7 +507,7 @@ case "$1" in
 
     # --- подбор стратегии (zapret/scan.sh в фоне) ----------------------------
     zscan-start)
-        mode="$2"; case "$mode" in quick|full|sites) ;; *) echo "ERR режим"; exit 1 ;; esac
+        mode="$2"; case "$mode" in quick|full|sites|yt|dc|quic) ;; *) echo "ERR режим"; exit 1 ;; esac
         sites=""
         for d in $(printf '%s' "$3" | tr 'A-Z' 'a-z' | tr ',;' '  '); do
             d=${d#http://}; d=${d#https://}; d=${d%%/*}
@@ -508,7 +517,8 @@ case "$1" in
         # zscan_busy — с проверкой cmdline: pid от убитого (kill -9, OOM) scan.sh
         # мог достаться чужому процессу — «подбор идёт» до перезагрузки (ревью PR #20)
         if zscan_busy; then echo "ERR подбор уже идёт"; exit 1; fi
-        rm -f "$ZSCAN.status" "$ZSCAN.results"
+        # проверка QUIC своей таблицы не даёт — таблица подбора остаётся
+        [ "$mode" = quic ] || rm -f "$ZSCAN.status" "$ZSCAN.results" "$ZSCAN.speed"
         # отдельная сессия: страница может закрыться, подбор продолжится
         setsid sh "$MODDIR/zapret/scan.sh" "$mode" "${sites# }" </dev/null >/dev/null 2>&1 &
         # ждём, пока сканер реально стартует (pid + статус), иначе первый
@@ -522,9 +532,14 @@ case "$1" in
         echo "OK" ;;
     zscan-status)
         cat "$ZSCAN.status" 2>/dev/null
-        if zscan_busy; then echo "alive=1"; else echo "alive=0"; fi ;;
+        if zscan_busy; then
+            echo "alive=1"
+            case "$(tr '\0' ' ' < "/proc/$(cat "$ZSCAN.pid" 2>/dev/null)/cmdline" 2>/dev/null)" in *"scan.sh check"*) echo "kind=check" ;; esac
+        else echo "alive=0"; fi ;;
     zscan-results)
-        cat "$ZSCAN.results" 2>/dev/null ;;
+        cat "$ZSCAN.results" 2>/dev/null
+        # замер скорости: S|КБ/с|аргументы
+        sed 's/^/S|/' "$ZSCAN.speed" 2>/dev/null ;;
 
     sitetest)
         # Открывается ли сайт мимо VPN: без обхода и с текущей стратегией.
@@ -652,35 +667,79 @@ case "$1" in
         [ -n "$k" ] && [ -f "$ZHIST" ] && K="$k" awk -F'|' '$1 == ENVIRON["K"] { print "H " $0 }' "$ZHIST"
         ;;
     znet-set)
-        st="$2"; a="$3"; yt="$5"
+        st="$2"; a="$3"; yt="$5"; dc="$6"
         # WebUI зовёт без 5-го аргумента — своя стратегия YouTube сети
         # остаётся прежней (раньше молча стиралась); подбор передаёт его, только
         # если YouTube в прогоне мерили (иначе тоже без него)
-        keep_yt=0; [ $# -lt 5 ] && keep_yt=1
+        # «=» вместо аргумента — то же, что без него; Discord так же (6-й)
+        keep_yt=0; { [ $# -lt 5 ] || [ "$yt" = "=" ]; } && { keep_yt=1; yt=""; }
+        keep_dc=0; { [ $# -lt 6 ] || [ "$dc" = "=" ]; } && { keep_dc=1; dc=""; }
         note=$(printf '%s' "$4" | tr -d '\r\n|' | cut -c1-120)
+        # Ручной выбор: не посреди подбора (перезапуск nfqws сбил бы замеры, а итог подбора
+        # перезаписал бы выбор) и не в историю: её 8 записей — проверенные, сторож пробует их
+        # znet-own говорит сам (0 или 1): он передаёт старую заметку сети, по ней судить нельзя
+        manual="$ZNET_MANUAL"
+        [ -n "$manual" ] || { manual=0; case "$note" in *вручную*) manual=1 ;; esac; }
+        [ "$manual" = 1 ] && zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
         [ -z "$yt" ] || sh "$MODDIR/service.sh" --check ZAPRET_ARGS "$yt" 2>/dev/null || { echo "ERR недопустимые параметры YouTube"; exit 1; }
+        [ -z "$dc" ] || sh "$MODDIR/service.sh" --check ZAPRET_ARGS "$dc" 2>/dev/null || { echo "ERR недопустимые параметры Discord"; exit 1; }
         [ "$yt" = "$a" ] && yt=""
+        [ "$dc" = "$a" ] && dc=""
         sh "$MODDIR/service.sh" --check ZAPRET_STRATEGY "$st" 2>/dev/null || { echo "ERR стратегия"; exit 1; }
         sh "$MODDIR/service.sh" --check ZAPRET_ARGS "$a" 2>/dev/null || { echo "ERR недопустимые параметры"; exit 1; }
         if [ "$st" = custom ]; then [ -n "$a" ] || { echo "ERR нет параметров"; exit 1; }; else a=""; fi
         d=$(cur_net); k=${d%%"|"*}; l=${d#*"|"}
         [ -n "$k" ] || { echo "ERR не понял, что за сеть (нет Wi-Fi/мобильной сети или модуль её ещё не видел)"; exit 1; }
         if [ "$keep_yt" = 1 ] && [ -f "$ZNETS" ]; then
-            yt=$(K="$k" awk -F'|' '$1 == ENVIRON["K"] { y = $7 } END { print y }' "$ZNETS")
+            # своей записи нет — как у демона, запись с тем же названием
+            yt=$(K="$k" L="$l" awk -F'|' '$1 == ENVIRON["K"] { x = $7; f = 1 } ENVIRON["L"] != "" && $4 == ENVIRON["L"] { y = $7 } END { print (f ? x : y) }' "$ZNETS")
             [ "$yt" = "$a" ] && yt=""
+        fi
+        if [ "$keep_dc" = 1 ] && [ -f "$ZNETS" ]; then
+            dc=$(K="$k" L="$l" awk -F'|' '$1 == ENVIRON["K"] { x = $8; f = 1 } ENVIRON["L"] != "" && $4 == ENVIRON["L"] { y = $8 } END { print (f ? x : y) }' "$ZNETS")
+            [ "$dc" = "$a" ] && dc=""
         fi
         {
             [ -f "$ZNETS" ] && K="$k" awk -F'|' '$1 != ENVIRON["K"]' "$ZNETS"
-            printf '%s|%s|%s|%s|%s|%s|%s\n' "$k" "$st" "$a" "$l" "$note" "$(date '+%Y-%m-%d %H:%M')" "$yt"
+            printf '%s|%s|%s|%s|%s|%s|%s|%s\n' "$k" "$st" "$a" "$l" "$note" "$(date '+%Y-%m-%d %H:%M')" "$yt" "$dc"
         } > "$ZNETS.tmp" && chmod 600 "$ZNETS.tmp" && mv -f "$ZNETS.tmp" "$ZNETS"
         # история сети: сторож при поломке сначала пробует прежние стратегии
         # (та же запись — переносим в конец, держим 8 последних на сеть)
-        {
-            [ -f "$ZHIST" ] && K="$k" S="$st" A="$a" Y="$yt" awk -F'|' '!($1 == ENVIRON["K"] && $2 == ENVIRON["S"] && $3 == ENVIRON["A"] && $6 == ENVIRON["Y"])' "$ZHIST"
-            printf '%s|%s|%s|%s|%s|%s\n' "$k" "$st" "$a" "$(date '+%Y-%m-%d %H:%M')" "$note" "$yt"
+        if [ "$manual" != 1 ]; then {
+            [ -f "$ZHIST" ] && K="$k" S="$st" A="$a" Y="$yt" D="$dc" awk -F'|' '!($1 == ENVIRON["K"] && $2 == ENVIRON["S"] && $3 == ENVIRON["A"] && $6 == ENVIRON["Y"] && $7 == ENVIRON["D"])' "$ZHIST"
+            printf '%s|%s|%s|%s|%s|%s|%s\n' "$k" "$st" "$a" "$(date '+%Y-%m-%d %H:%M')" "$note" "$yt" "$dc"
         } | K="$k" awk -F'|' '{ l[NR] = $0; key[NR] = $1 } END { for (i = NR; i >= 1; i--) if (key[i] != ENVIRON["K"] || ++n <= 8) keep[i] = 1; for (i = 1; i <= NR; i++) if (keep[i]) print l[i] }' > "$ZHIST.tmp" && \
             chmod 600 "$ZHIST.tmp" && mv -f "$ZHIST.tmp" "$ZHIST"
+        fi
         echo "OK $l"
+        ;;
+    zquick)
+        # список один — в scan.sh; FAKE там задан так же
+        awk '/^    done <<EOF$/ { f = 1; next } /^EOF$/ { f = 0 } f { gsub(/\$FAKE/, "--dpi-desync-fake-tls=@G"); print }' "$MODDIR/zapret/scan.sh"
+        ;;
+    znet-own)
+        # меняет только своё поле: общая и вторая своя стратегия сети остаются.
+        # Записи сети нет — как у демона: запись с тем же названием или общая
+        g="$2"; case "$g" in yt|dc) ;; *) echo "ERR группа"; exit 1 ;; esac
+        d=$(cur_net); k=${d%%"|"*}; l=${d#*"|"}
+        [ -n "$k" ] || { echo "ERR не понял, что за сеть"; exit 1; }
+        e=$(K="$k" L="$l" awk -F'|' '$1 == ENVIRON["K"] { x = $0 } ENVIRON["L"] != "" && $4 == ENVIRON["L"] { y = $0 } END { print ((x != "") ? x : y) }' "$ZNETS" 2>/dev/null)
+        if [ -n "$e" ]; then
+            st=$(printf '%s\n' "$e" | cut -d'|' -f2); a=$(printf '%s\n' "$e" | cut -d'|' -f3); note=$(printf '%s\n' "$e" | cut -d'|' -f5)
+            yt=$(printf '%s\n' "$e" | cut -d'|' -f7); dc=$(printf '%s\n' "$e" | cut -d'|' -f8)
+        else
+            st=$(sh "$MODDIR/service.sh" --get ZAPRET_STRATEGY 2>/dev/null); a=$(sh "$MODDIR/service.sh" --get ZAPRET_ARGS 2>/dev/null); note=""; yt=""; dc=""
+        fi
+        if [ "$g" = yt ]; then yt="$3"; else dc="$3"; fi
+        r=$(ZNET_MANUAL=$([ "$4" = manual ] && echo 1 || echo 0) sh "$MODDIR/webctl.sh" znet-set "$st" "$a" "$note" "$yt" "$dc")
+        echo "$r"
+        # записи сайтов Discord в ZALT идут раньше его профиля и перекрыли бы новую
+        case "$r" in OK*)
+            if [ "$g" = dc ] && [ -n "$3" ] && [ -f "$ZALT" ]; then
+                K="$k" L="$l" awk -F'|' '!(($1 == ENVIRON["K"] || (ENVIRON["L"] != "" && $2 == ENVIRON["L"])) && $3 ~ /discord|dis[.]gd/)' "$ZALT" > "$ZALT.tmp" && \
+                    chmod 600 "$ZALT.tmp" && mv -f "$ZALT.tmp" "$ZALT"
+            fi ;;
+        esac
         ;;
     zalt)
         # своих записей у сети нет — как у демона, записи сети с тем же названием
@@ -709,6 +768,7 @@ case "$1" in
         ;;
     znet-del)
         [ -n "$2" ] || { echo "ERR ключ"; exit 1; }
+        zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
         [ -f "$ZNETS" ] || { echo "OK"; exit 0; }
         K="$2" awk -F'|' '$1 != ENVIRON["K"]' "$ZNETS" > "$ZNETS.tmp" && chmod 600 "$ZNETS.tmp" && mv -f "$ZNETS.tmp" "$ZNETS"
         echo "OK"
@@ -841,6 +901,107 @@ case "$1" in
             'NR == 2 { printf "hs_age=%s\nrx=%s\ntx=%s\nendpoint=%s\npeer=%s\nup=%s\n", ($5 > 0 ? now - $5 : -1), $6, $7, $3, $1, (st > 0 ? int(ut - st / 100) : -1) }'
         ;;
 
+    net-renew)
+        # Новая сессия у оператора без перезагрузки: коротко просим только 2G и возвращаем
+        # как было. 06.11 на YOTA внешний адрес сменился 7 раз из 7, точка доступа осталась;
+        # выключение данных адрес не меняло (0 из 4), а режим полёта снял бы точку.
+        # Вывод cmd — только через канал: файл ему не открыть (Failed transaction)
+        d=$(cur_net)
+        case "$d" in mobile:*) ;; *) echo "ERR нужна мобильная сеть"; exit 1 ;; esac
+        zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
+        RB=/data/adb/vpn_tether_rat_back   # слот, маска, типы: пока 2G держится
+        L="$RB.lock"
+        # Блокировка первой: чтение SIM занимает секунды, и второй запуск успевал
+        # проскочить (06.11). Старше 2 мин — от оборванного запуска
+        if ! mkdir "$L" 2>/dev/null; then
+            [ -n "$(find "$L" -mmin -2 2>/dev/null)" ] && { echo "ERR переподключение уже идёт"; exit 1; }
+            rmdir "$L" 2>/dev/null; mkdir "$L" 2>/dev/null || { echo "ERR переподключение уже идёт"; exit 1; }
+        fi
+        unlock() { rmdir "$L" 2>/dev/null; }
+        # любой глобальный адрес: при CLAT на самом WAN только IPv6. Зовётся через $(...):
+        # присвоения отсюда наружу не выходят
+        wan_ip() {
+            ip addr show "$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)" scope global 2>/dev/null | \
+                awk '/inet6? / {sub(/\/.*/, "", $2); print $2; exit}'
+        }
+        rat_get() { cmd phone get-allowed-network-types-for-users -s "$slot" 2>&1 | cat; }
+        rat_back() {
+            n=0
+            while [ $n -lt 6 ]; do
+                cmd phone set-allowed-network-types-for-users -s "$slot" "$mask" 2>&1 | cat > /dev/null
+                [ "$(rat_get)" = "$types" ] && { rm -f "$RB"; return 0; }
+                n=$((n + 1)); sleep 2
+            done
+            return 1
+        }
+        # файл остался: прошлый запуск оборвался и оставил 2G
+        if [ -f "$RB" ]; then
+            slot=$(sed -n 1p "$RB"); mask=$(sed -n 2p "$RB"); types=$(sed -n 3p "$RB")
+            # запись оборвалась — возвращать нечего, иначе кнопка падала бы каждый раз
+            if [ -z "$slot" ] || [ -z "$mask" ] || [ -z "$types" ]; then rm -f "$RB"
+            else rat_back || { unlock; echo "ERR тип сети не вернулся — проверьте его в настройках SIM"; exit 1; }
+            fi
+        fi
+        wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
+        was=$(wan_ip)
+        # SIM, через которую идёт интернет: настройка «SIM для данных» отстаёт при автопереключении
+        sub=$(dumpsys connectivity 2>/dev/null | grep -E "InterfaceName: $wan( |\$)" | head -n 1 | sed -n 's/.*SubscriptionIds: {\([0-9][0-9]*\)}.*/\1/p')
+        [ -n "$sub" ] || sub=$(settings get global multi_sim_data_call 2>/dev/null | cat)
+        sims=$(content query --uri content://telephony/siminfo --projection _id:sim_id 2>/dev/null | cat)
+        slot=$(echo "$sims" | sed -n "s/.*[ ]_id=$sub, sim_id=\([0-9][0-9]*\).*/\1/p" | head -n 1)
+        # настройки нет: на одной SIM выбирать не из чего
+        if [ -z "$slot" ] && [ "$(echo "$sims" | grep -cE 'sim_id=[0-9]')" = 1 ]; then
+            slot=$(echo "$sims" | sed -n 's/.*sim_id=\([0-9][0-9]*\).*/\1/p')
+        fi
+        types=""; mask=""
+        [ -n "$slot" ] && types=$(rat_get)
+        # имена из TelephonyManager -> двоичная маска; незнакомое имя — маски нет
+        [ -n "$types" ] && mask=$(printf '%s\n' "$types" | tr '|' '\n' | awk '
+            BEGIN { b["GPRS"] = 0; b["EDGE"] = 1; b["UMTS"] = 2; b["CDMA"] = 3; b["CDMA - EvDo rev. 0"] = 4; b["CDMA - EvDo rev. A"] = 5
+                b["CDMA - 1xRTT"] = 6; b["HSDPA"] = 7; b["HSUPA"] = 8; b["HSPA"] = 9; b["iDEN"] = 10; b["CDMA - EvDo rev. B"] = 11; b["LTE"] = 12
+                b["CDMA - eHRPD"] = 13; b["HSPA+"] = 14; b["GSM"] = 15; b["TD_SCDMA"] = 16; b["IWLAN"] = 17; b["LTE_CA"] = 18; b["NR"] = 19 }
+            { if ($0 in b) on[b[$0]] = 1; else bad = 1 }
+            END { if (bad || !NR) exit 1; s = ""; for (i = 19; i >= 0; i--) s = s ((i in on) ? "1" : "0"); sub(/^0+/, "", s); print s }')
+        done2g=0
+        if [ -n "$mask" ]; then
+            f=$((slot + 1)); r0=$(getprop gsm.network.type | cut -d, -f"$f")
+            printf '%s\n' "$slot" "$mask" "$types" > "$RB"; chmod 600 "$RB"
+            # что бы ни случилось, тип сети должен вернуться
+            trap 'rat_back; unlock' EXIT
+            trap 'exit 1' INT TERM HUP
+            cmd phone set-allowed-network-types-for-users -s "$slot" 1000000000000011 2>&1 | cat > /dev/null
+            # успех — по самому режиму: текст ответа на других прошивках может быть другим
+            if [ "$(rat_get)" != "$types" ]; then
+                done2g=1; i=0
+                while [ $i -lt 8 ]; do sleep 1; i=$((i + 1)); [ "$(getprop gsm.network.type | cut -d, -f"$f")" != "$r0" ] && break; done
+            fi
+            trap - EXIT INT TERM HUP
+            rat_back || { unlock; echo "ERR тип сети не вернулся — проверьте его в настройках SIM"; exit 1; }
+        fi
+        if [ "$done2g" = 0 ]; then
+            # команды нет или старый Android: хотя бы новая сессия, адрес обычно тот же
+            trap 'svc data enable; unlock' EXIT
+            trap 'exit 1' INT TERM HUP
+            svc data disable; sleep 3; svc data enable
+            trap - EXIT INT TERM HUP
+        fi
+        unlock
+        # новая сессия уходит от волны: подсказка в WebUI больше не нужна, сторож проверит сразу
+        [ -n "$(find "$ZSCAN.wave" -maxdepth 0 -mmin -30 2>/dev/null)" ] && { rm -f "$ZSCAN.wave"; echo "$(date +%H:%M)|сеть переподключена" > "$ZSCAN.wd"; }
+        # старая сессия отвалится не сразу: не принять её адрес за новый
+        i=0; while [ $i -lt 6 ] && [ "$(wan_ip)" = "$was" ]; do sleep 1; i=$((i + 1)); done
+        i=0; now=""
+        while [ $i -lt 40 ]; do
+            now=$(wan_ip)
+            [ -n "$now" ] && break
+            sleep 1; i=$((i + 1))
+        done
+        # выход и Google демон проверяет сам после смены сети (wan_exit_probe), ~30 с:
+        # кнопку не держим, WebUI покажет под ней, когда придёт
+        if [ -z "$now" ]; then echo "ERR сеть включена, но адреса за 40 с нет"
+        elif [ "$now" = "$was" ]; then echo "OK сеть переподключена, внутренний адрес тот же, внешний мог смениться"
+        else echo "OK сеть переподключена, внутренний адрес новый"; fi
+        ;;
     warp-reconnect)
         # переподключение делает демон (у него состояние туннеля); ждём, пока заберёт
         [ -n "$(daemon_pid)" ] || { echo "ERR демон не запущен"; exit 0; }

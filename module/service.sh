@@ -581,7 +581,7 @@
 #   на живой 149.154.167.220. Отбой мёртвых видеосерверов: 3 с, скан каждый
 #   круг, /28 со второго; Play снова в отбое (после проверки адреса). scan.sh
 #   sites чистит автосписок: открылось без обхода на двух плановых проверках
-#   подряд — вон (.ok), повторно 7 дней не убирает (.rm). WebUI: прежние рабочие
+#   подряд — вон (.ok), повторно 7 дней не убирает (.rm); с 06.11 только по возрасту. WebUI: прежние рабочие
 #   стратегии сети, подписи стратегий, warp.sh list одним stat+awk. DoH: без
 #   мёртвого dagami (not-a-dns, оба GeoHide, comss, commonnet); импорт WARP
 #   отклоняет Endpoint-заглушки; кэш DNS оператора и zone_re — под mksh.
@@ -624,6 +624,10 @@
 # v3.23.0 — запасной выход Opera (lib/opera.sh): opera-proxy и hev-socks5-tproxy,
 #   группы, сайты и приложения как у WARP, по умолчанию выключено; DNS для
 #   WARP_DOMAINS на Android 8; подсказки при установке.
+# v3.24.0 — волна Google: проверки без прямых запросов к закрытым именам, проверка сайтов
+#   раз в сутки, кнопка «Переподключить сеть»; подбор YouTube и Discord со скоростью, ручной
+#   выбор и ZAPRET_AUTOPICK; отбой QUIC и маршрут в WARP; OPERA_API_PROXY и OPERA_COUNTRY;
+#   выход и Google после смены сети; DoH при смене сети.
 # ============================================================================
 # ============================================================================
 
@@ -764,6 +768,9 @@ QUIC_BLOCK_YT=1
 # 443 фильтруемым — QUIC YouTube и подделки nfqws пропускаются мимо его
 # цепочки (реклама через AdGuard вернётся)
 QUIC_YT_FAKE=0
+# 06.11 на YOTA шортсы по TCP (подделка выключена): 76–117 МБ за 4 мин, по QUIC с
+# подделкой 35–58. Поэтому по умолчанию закрыто, а проверка QUIC (кнопка в WebUI)
+# только показывает, проходит ли он, и подделку сама не включает
 # Адаптивные профили сети. 0 = всегда FAST (BBR), без пингов по WAN.
 # 1 = пинг 1.1.1.1 через WAN раз в ~20с, RTT > порога (или потеря) 2 раза
 #     подряд -> STABLE (те же BBR, больше SYN-ретраев).
@@ -810,7 +817,11 @@ YT_GGC_BLOCK=0
 # адрес сначала проверяется (как при снятии отбоя) и отбивается, только если
 # проверка не прошла.
 YT_DEAD_FAILFAST=1
+# Адрес из отбоя вести через WARP, если туннель поднят и адрес там отвечает: плеер остаётся
+# на своём сервере и не ищет запасной. Нет WARP или адрес молчит и там — обычный отказ
+YT_DEAD_WARP=1
 YT_DEAD_AFTER=3         # сек без ответа сервера после ClientHello = мёртв (было 6; ответ на CH — 0,3–0,5 с)
+YT_QUIC_AFTER=2         # сек без единого ответа на QUIC Initial (обычно 0.1–0.5 с, 06.11)
 YT_SILENT_AFTER=10      # сек без новых байт после рукопожатия = молчит (-> проверка)
 YT_DEAD_TTL=1800        # сек держать сервер/подсеть в отбое (ожил раньше — снимаем перепроверкой)
 YT_DEAD_MAX=64          # больше записей не держим
@@ -827,12 +838,15 @@ YT_SLOW_RETRY=1
 # подбор. Только при своей стратегии для сети и без поднятого VPN.
 ZAPRET_WATCHDOG=1
 ZAPRET_WATCHDOG_MIN=15
+# 0: стратегии сети (общую, YouTube, Discord) меняет только пользователь. Сторож лишь
+# пишет в журнал, что стратегия не открывает, подбор показывает таблицу, но не запоминает
+ZAPRET_AUTOPICK=1
 # Своя стратегия для отдельных сайтов (3.6): раз в ZAPRET_ALT_MIN минут
 # zapret/scan.sh sites проверяет сайты из списков; если основная стратегия
 # какой-то не открывает, подбирает для него другую (до 3 стратегий на сеть).
 # Только при своей стратегии для сети и без поднятого VPN.
 ZAPRET_ALT=1
-ZAPRET_ALT_MIN=360     # 31.10: было 180 — залп проверки, похоже, провоцирует ТСПУ
+ZAPRET_ALT_MIN=1440    # 06.11: было 360 — 5 из 8 волн Google за 03–06.11 пришлись на проверку
 # Автосписок (режим «из списка»): после скольких сбоев за минуту nfqws
 # добавляет сайт. Причины пишутся в ZAPRET_AUTO_LOG, WebUI их показывает (3.9).
 ZAPRET_AUTO_FAIL=3
@@ -847,6 +861,8 @@ WARP_GOOGLE=0           # сети Google (goog.json) — в «волны» ТС
 WARP_TELEGRAM=1         # сети Telegram (заблокирован по IP)
 WARP_APPS=""            # приложения телефона целиком (пакеты через пробел)
 OPERA_ENABLE=0          # запасной выход через прокси Opera (lib/opera.sh)
+OPERA_COUNTRY=EU        # регион серверов Opera: EU, AS (Азия), AM (Америка)
+OPERA_API_PROXY=""      # свой прокси только для регистрации: socks5://логин:пароль@адрес:порт; пусто — бесплатный список
 OPERA_TELEGRAM=0        # сети и клиенты Telegram через Opera
 OPERA_GOOGLE=0          # сети Google через Opera
 OPERA_APPS=""           # приложения телефона целиком (только TCP)
@@ -925,7 +941,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_QUIC_FAKE|QUIC_BLOCK_YT|QUIC_YT_FAKE|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
+        OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|YT_DEAD_WARP|ZAPRET_WATCHDOG|ZAPRET_AUTOPICK|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
@@ -956,6 +972,13 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
             # домены через пробел; пусто — выключить
             case "$val" in *[!a-z0-9.\ -]*) ok=0 ;; esac
             [ ${#val} -le 2000 ] || ok=0 ;;
+        OPERA_COUNTRY)
+            case "$val" in EU|AS|AM) ;; *) ok=0 ;; esac ;;
+        OPERA_API_PROXY)
+            # идёт в команду opera-proxy: только адрес, без пробелов и знаков шелла
+            case "$val" in ''|socks5://?*|socks5h://?*|http://?*|https://?*) ;; *) ok=0 ;; esac
+            case "$val" in *[!A-Za-z0-9._~:/@%+-]*) ok=0 ;; esac
+            [ ${#val} -le 300 ] || ok=0 ;;
         OPERA_DOMAINS)
             # как WARP_DOMAINS, плюс «!домен» — и через адреса общих CDN
             case "$val" in *[!a-z0-9.\ !-]*) ok=0 ;; esac
@@ -991,7 +1014,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST ZAPRET_WATCHDOG ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST YT_DEAD_WARP ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -1071,7 +1094,7 @@ zapret_strategy_args() {
 # передано название $2 — стратегия сети с тем же названием (YOTA видна то
 # как 25011, то как 25002 — сеть МегаФона), код возврата 3.
 zapret_net_entry() {
-    local line st za yt rc=0
+    local line st za yt dc rc=0
     [ -n "$1" ] && [ -f "$ZAPRET_NETS_FILE" ] || return 1
     line=$(K="$1" awk -F'|' '$1 == ENVIRON["K"] { l = $0 } END { if (l != "") print l }' "$ZAPRET_NETS_FILE" 2>/dev/null)
     if [ -z "$line" ] && [ -n "$2" ]; then
@@ -1082,33 +1105,40 @@ zapret_net_entry() {
     st=$(printf '%s\n' "$line" | cut -d'|' -f2)
     za=$(printf '%s\n' "$line" | cut -d'|' -f3)
     yt=$(printf '%s\n' "$line" | cut -d'|' -f7)
+    dc=$(printf '%s\n' "$line" | cut -d'|' -f8)
     zapret_strategy_valid "$st" || return 2
     zapret_args_valid "$za" || return 2
     zapret_args_valid "$yt" || yt=""
+    zapret_args_valid "$dc" || dc=""
     [ "$st" = custom ] && [ -z "$za" ] && return 2
     [ "$st" = custom ] || za=""
-    printf '%s|%s|%s\n' "$st" "$za" "$yt"
+    printf '%s|%s|%s|%s\n' "$st" "$za" "$yt" "$dc"
     return $rc
 }
 # Для WebUI ("проверить сайт"): стратегия с учётом vpn_tether.conf и, если
 # передан ключ сети, — запомненной для неё
-#   --zapret-strategy КЛЮЧ [НАЗВАНИЕ] [yt|full]
+#   --zapret-strategy КЛЮЧ [НАЗВАНИЕ] [yt|dc|full]
 #     ""   — стратегия остальных сайтов;
-#     yt   — стратегия YouTube (своя или та же);
-#     full — оба профиля nfqws (--filter/--hostlist ... --new ...) для проверок
+#     yt   — стратегия YouTube (своя или та же); dc — то же для Discord;
+#     full — все профили nfqws (--filter/--hostlist ... --new ...) для проверок
 if [ "$1" = "--zapret-strategy" ]; then
     _e=""; _z="${0%/*}/zapret"
     [ "$ZAPRET_PER_NET" = "1" ] && _e=$(zapret_net_entry "$2" "$3")
     if [ -n "$_e" ]; then
-        _st="${_e%%"|"*}"; _r="${_e#*"|"}"; _za="${_r%%"|"*}"; _yt="${_r#*"|"}"
+        _st="${_e%%"|"*}"; _r="${_e#*"|"}"; _za="${_r%%"|"*}"; _r="${_r#*"|"}"; _yt="${_r%%"|"*}"; _dc="${_r#*"|"}"
         _gen=$(zapret_strategy_args "$_z" "$_st" "$_za")
     else
-        _yt=""; _gen=$(zapret_strategy_args "$_z")
+        _yt=""; _dc=""; _gen=$(zapret_strategy_args "$_z")
     fi
     _ytg="$_gen"; [ -n "$_yt" ] && _ytg=$(zapret_strategy_args "$_z" custom "$_yt")
+    _dcg="$_gen"; [ -n "$_dc" ] && _dcg=$(zapret_strategy_args "$_z" custom "$_dc")
     case "$4" in
         yt)   echo "$_ytg" ;;
-        full) if [ -n "$_yt" ]; then echo "--filter-tcp=443 --hostlist=$_z/list-youtube.txt $_ytg --new --filter-tcp=443 $_gen"; else echo "$_gen"; fi ;;
+        dc)   echo "$_dcg" ;;
+        full) _p=""
+              [ -n "$_yt" ] && _p="--filter-tcp=443 --hostlist=$_z/list-youtube.txt $_ytg --new "
+              [ -n "$_dc" ] && _p="$_p--filter-tcp=443 --hostlist=$_z/list-discord.txt $_dcg --new "
+              if [ -n "$_p" ]; then echo "$_p--filter-tcp=443 $_gen"; else echo "$_gen"; fi ;;
         *)    echo "$_gen" ;;
     esac
     exit 0
@@ -1317,13 +1347,15 @@ ZAPRET_LIST_DEFAULT="$ZAPRET_DIR/list-default.txt"
 ZAPRET_LIST_YT="$ZAPRET_DIR/list-youtube.txt"        # своя стратегия YouTube (3.4)
 ZAPRET_LIST_EXCL="$ZAPRET_DIR/list-exclude.txt"      # банки/Госуслуги — обход не трогает
 ZAPRET_LIST_RUTLD="$ZAPRET_DIR/list-rutld.txt"       # .ru/.su/.рф — мимо обхода (кроме списков)
+ZAPRET_QUIC_FILE="/data/adb/vpn_tether_zapret_quic"  # итог проверки QUIC по сетям (scan.sh quic)
+ZAPRET_LIST_DC="$ZAPRET_DIR/list-discord.txt"        # своя стратегия Discord
 ZAPRET_LIST_NOAUTO="$ZAPRET_DIR/list-noauto.txt"     # Google: сам не берёт (автосписок, свои стратегии), 3.20.2
 ZAPRET_RU_RUN="/data/local/tmp/vpn_tether_zru.txt"   # .ru-сайты (и Google) из встроенного и своего списка
 ZAPRET_LIST_USER="/data/adb/vpn_tether_zapret.txt"        # свой список (WebUI)
 ZAPRET_LIST_AUTO="/data/adb/vpn_tether_zapret_auto.txt"   # nfqws пополняет сам
 ZAPRET_AUTO_LOG="/data/adb/vpn_tether_zapret_auto.log"    # почему nfqws добавил сайт (--hostlist-auto-debug)
 ZAPRET_AUTO_SEEN="/data/adb/vpn_tether_zapret_auto.seen"  # «сайт epoch» — когда модуль впервые увидел его в автосписке
-ZAPRET_AUTO_DAYS=30     # запись автосписка старше — вон (ещё заблокирован — nfqws добавит снова после 3 неудач)
+ZAPRET_AUTO_DAYS=14     # запись автосписка старше — вон (ещё заблокирован — nfqws добавит снова после 3 неудач)
 ZAPRET_VPN_UIDS_FILE="/data/adb/vpn_tether_vpn_uids"      # uid VPN-клиентов, замеченных владельцами VPN
 ZAPRET_PID_FILE="/data/local/tmp/vpn_tether_nfqws.pid"
 ZAPRET_LOG="/data/local/tmp/vpn_tether_nfqws.log"
@@ -1350,6 +1382,12 @@ CHAIN_YT_DEAD="VPN_YT_DEAD"     # filter OUTPUT/FORWARD: мёртвые подс
 YT_CTMARK=0x10000000
 YT_GCTMARK=0x04000000   # gvt1.com (Play): отбой мёртвых да, обрыв медленных (ytslow.sh) — нет
 YT_SILENT_MAX=16384     # молчит после запроса: от сервера не больше (рукопожатие ~5 КБ)
+YT_WARP_FILE="/data/local/tmp/vpn_tether_ytwarp"   # адреса из отбоя, ответившие через WARP
+YT_WARP_NEW=""          # адреса, чьи соединения закрыть, когда встанет маршрут в WARP
+YT_WARP_PEND=""         # очередь на пробу через WARP: адрес|кто|что|kill
+YT_WARP_SIG=""          # сети в цепочке VPN_WARP_YT
+YT_WARP_CH=0
+YT_WPROBE_PID=""
 YT_DEAD_FILE="/data/local/tmp/vpn_tether_ytdead"   # "адрес/32|сеть/28 до_когда(epoch) ip[,ip…]"
 YT_SEEN_FILE="/data/local/tmp/vpn_tether_ytseen"   # кандидаты: "кортеж впервые вид учтён байт_ответа когда_менялись"
 YT_SPROBE_FILE="/data/local/tmp/vpn_tether_ytsprobe"  # проверка молчащих: .in .done .ok
@@ -1373,6 +1411,7 @@ ZSCAN_PID_FILE="/data/local/tmp/vpn_tether_zscan.pid"
 ZALT_FILE="/data/adb/vpn_tether_zapret_alt"   # своя стратегия сайтов: ключ|название|сайт|аргументы|дата
 ZALT_RUN="/data/local/tmp/vpn_tether_zalt"    # .lst + .1..3 — списки сайтов профилей nfqws
 ZAPRET_ALT_N=0          # сколько сайтов со своей стратегией у запущенного nfqws
+ZSITES_NET=""           # в какой сети она была
 ZSITES_LAST=0           # когда последний раз проверяли сайты (scan.sh sites)
 ZAPRET_HOOK_TICK=0      # проверка хуков zapret — раз в ~10с, не каждый цикл
 ZAPRET_OWNER_TUN="-"    # для какого tun уже узнали владельца VPN
@@ -1395,6 +1434,8 @@ NET_ID_FORCE=0         # 1 = пересчитать сейчас (смена с�
 ZAPRET_EFF_STRATEGY="" # что реально запущено: своя стратегия сети или общая
 ZAPRET_EFF_ARGS=""
 ZAPRET_EFF_YT=""       # своя стратегия YouTube для сети (пусто = как у остальных)
+ZAPRET_EFF_DC=""       # то же для Discord
+QUIC_NET=""            # итог проверки QUIC этой сети: 1, 0 или пусто
 ZAPRET_NET_SRC=""      # net | default
 ZAPRET_NETS_STAMP=""   # stat файла стратегий сетей на прошлой проверке
 ZAPRET_NET_DIRTY=0     # 1 = пересобрать аргументы nfqws сейчас
@@ -1505,7 +1546,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.23.0 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.24.0 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # curl: системный, если есть, иначе свой из модуля (PATH — в конце, системный
