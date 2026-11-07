@@ -80,9 +80,11 @@ _opera_pids() {
 }
 opera_proxy_pids() { _opera_pids "$OPERA_BIN" "-bind-address 127.0.0.1:$OPERA_PORT "; }
 opera_hev_pids()   { _opera_pids "$OPERA_HEV_BIN" "$OPERA_HEV_CONF"; }
-# без ss: на Android 8 его нет. hev слушает AF_INET6-сокетом
+# без ss: на Android 8 его нет. hev слушает AF_INET6-сокетом. Состояние LISTEN — 0A,
+# но на ядре 4.9 (OnePlus 6T, 07.11) у сокета hev в tcp6 стоит 8A: hev работал, а мы
+# считали, что не слушает, и убивали его
 _opera_listening() {
-    grep -qE "^ *[0-9]+: [0-9A-F]+:$(printf '%04X' "$1") [0-9A-F]+:0000 0A " /proc/net/tcp /proc/net/tcp6 2>/dev/null
+    grep -qE "^ *[0-9]+: [0-9A-F]+:$(printf '%04X' "$1") [0-9A-F]+:0000 [08]A " /proc/net/tcp /proc/net/tcp6 2>/dev/null
 }
 _opera_kill() {
     local p
@@ -367,7 +369,9 @@ opera_rules_on() {
     rm -f "$f" "$f.err"
     # в конец: TPROXY завершает обход таблицы, системные цепочки — раньше
     $iptables -t mangle -C PREROUTING -j "$CHAIN_OPERA_IN" 2>/dev/null || $iptables -t mangle -A PREROUTING -j "$CHAIN_OPERA_IN" 2>/dev/null
-    $iptables -t mangle -C OUTPUT -j "$CHAIN_OPERA_OUT" 2>/dev/null || $iptables -t mangle -A OUTPUT -j "$CHAIN_OPERA_OUT" 2>/dev/null
+    # первой, а не в конец: чужая цепочка с NFQUEUE (модуль nfqttl, 07.11, OnePlus 6T) раньше нашей
+    # заканчивает таблицу на каждом пакете — метка Opera не ставилась, 4PDA шёл напрямую
+    $iptables -t mangle -C OUTPUT -j "$CHAIN_OPERA_OUT" 2>/dev/null || $iptables -t mangle -I OUTPUT 1 -j "$CHAIN_OPERA_OUT" 2>/dev/null
     # FORWARD — вторым: первым должен стоять kill-switch
     $iptables -C OUTPUT -j "$CHAIN_OPERA_QO" 2>/dev/null || $iptables -I OUTPUT 1 -j "$CHAIN_OPERA_QO" 2>/dev/null
     $iptables -C FORWARD -j "$CHAIN_OPERA_QF" 2>/dev/null || $iptables -I FORWARD 2 -j "$CHAIN_OPERA_QF" 2>/dev/null
