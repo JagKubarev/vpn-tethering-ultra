@@ -830,3 +830,33 @@ apply_state() {
     return 0
 }
 
+
+# Чужая очередь NFQUEUE в mangle (07.11: модуль nfqttl у юзера, OnePlus 6T). Его программа
+# получает каждый пакет, а TCP выбрасывает и шлёт своей копией через raw-сокет от root:
+# обход её не видит (nfqws пропускает root), метки Opera и WARP теряются, IPv6 он режет.
+# Ищем по правилам, а не по имени модуля; наши очереди — 200 (nfqws), 202–204 (проверки).
+NFQ_RIVALS=""
+NFQ_RIVALS_LOGGED="-"
+nfq_rivals_check() {
+    local x c q d n out=""
+    for x in $({ $iptables -t mangle -S 2>/dev/null; $ip6tables -t mangle -S 2>/dev/null; } | \
+            grep -- '-j NFQUEUE' | grep -vE -- '--queue-num 20[0-4]( |$)' | \
+            sed -n 's/^-A \([^ ]*\) .*--queue-num \([0-9]*\).*/\1:\2/p' | sort -u); do
+        c="${x%%:*}"; q="${x##*:}"
+        # чей: модуль, в скриптах которого есть эта цепочка
+        n=""
+        for d in /data/adb/modules/*; do
+            [ "$d" = "$MODULE_DIR" ] && continue
+            grep -qs -- "$c" "$d/service.sh" "$d/post-fs-data.sh" "$d/customize.sh" 2>/dev/null || continue
+            n=$(sed -n 's/^name=//p' "$d/module.prop" 2>/dev/null | head -n 1 | tr -d '\r|')
+            n="${n:-${d##*/}}"; break
+        done
+        n="${n:-цепочка $c}, очередь $q"
+        case " $out " in *" $n "*) ;; *) out="${out:+$out; }$n" ;; esac
+    done
+    NFQ_RIVALS="$out"
+    [ "$NFQ_RIVALS" = "$NFQ_RIVALS_LOGGED" ] && return 0
+    NFQ_RIVALS_LOGGED="$NFQ_RIVALS"
+    [ -n "$NFQ_RIVALS" ] && log "WARNING: весь трафик забирает себе чужая программа через NFQUEUE ($NFQ_RIVALS): с ней не работают обход, Opera и WARP. Выключите этот модуль; TTL раздачи умеет «Скрытие раздачи»"
+    phone_status_refresh
+}

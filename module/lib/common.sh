@@ -116,6 +116,7 @@ update_status() {
         echo "stealth_strict=$TETHER_TTL_STRICT"
         echo "ttl_foreign=$(stealth_foreign)"
         echo "stealth_rivals=$STEALTH_RIVALS"
+        echo "nfq_rivals=$NFQ_RIVALS"
         echo "stealth_rival_rules=$STEALTH_RIVAL_RULES"
         echo "phone_dns=$PHONE_DNS_ON"
         echo "dns_phone_enabled=$DNS_PHONE"
