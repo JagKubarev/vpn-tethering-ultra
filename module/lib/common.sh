@@ -146,6 +146,7 @@ update_status() {
         echo "wan=$LAST_WAN_IFACE"
         echo "opera=$([ "$OPERA_ENABLE" = 1 ] && echo "$OPERA_STATE" || echo disabled)"
         echo "opera_endpoint=$OPERA_ENDPOINT"
+        echo "opera_country=$OPERA_COUNTRY"
         echo "opera_err=$OPERA_ERR"
         echo "opera_ips=$OPERA_NETS"
         echo "opera_skip=${OPERA_DOM_SKIP:-0}"

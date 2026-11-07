@@ -660,6 +660,13 @@ details.more > summary { color: var(--muted); }
   <div class="row" data-dep="OPERA_ENABLE" style="gap:10px"><span class="dot" id="operaDot"></span>
     <div class="txt"><div class="t" id="operaTitle">—</div><div class="s" id="operaSub"></div></div></div>
   <div class="row" data-dep="OPERA_ENABLE">
+    <div class="txt"><div class="t">Регион</div>
+      <div class="s">Где выход Opera. Азия и Америка дальше и обычно медленнее.</div></div>
+    <select data-key="OPERA_COUNTRY" style="width:auto" aria-label="Регион Opera">
+      <option value="EU">Европа</option><option value="AS">Азия</option><option value="AM">Америка</option>
+    </select>
+  </div>
+  <div class="row" data-dep="OPERA_ENABLE">
     <div class="txt"><div class="t">Telegram</div>
       <div class="s">Сети и клиенты Telegram. Звонки через Opera не идут. Выключите Telegram в WARP: включённый в обоих местах идёт по-разному на телефоне и раздаче.</div></div>
     <label class="sw"><input type="checkbox" data-key="OPERA_TELEGRAM"><span></span></label>
@@ -730,6 +737,7 @@ details.more > summary { color: var(--muted); }
     <div class="txt"><div class="t">Переподключить сеть</div>
       <div class="s">Новая сессия у оператора и обычно новый адрес, без перезагрузки. Связь пропадёт на 5–20 секунд, раздача останется.</div></div>
     <button class="btn" id="netRenew">Переподключить</button>
+    <div class="s" id="netExit" style="margin-top:8px"></div>
   </div>
 </div>
 
@@ -1047,6 +1055,20 @@ function renderStatus(s) {
     '\nQUIC YouTube: ' + (s.quic_net === '1' ? 'подделка проходит' : s.quic_net === '0' ? 'подделка не проходит' : 'не проверялся') + (s.quic_fake ? ', подделка включена' : ', закрыт') +
     '\nОтдельные сайты: ' + (+s.zapret_alt_n ? s.zapret_alt_n + ' со своей стратегией' : 'нет') : '';
   if (s.warp && s.warp !== 'disabled') h += kvRow('WARP', esc(w.t + (w.s ? ' · ' + w.s : '')), w.d);
+  // выход и Google после последней смены сети: «время|интерфейс|адрес|страна|https|http»
+  const ex = (s.exit || '').split('|');
+  let exTxt = '';
+  if (ex[2] || ex[4]) {
+    const g = ex[4] === 'warp' || ex[4] === 'opera' ? 'идёт через ' + (ex[4] === 'warp' ? 'WARP' : 'Opera') + ', не проверяю'
+      : ex[4] && ex[4] !== '000' ? 'работает' : ex[5] && ex[5] !== '000' ? 'HTTPS молчит, HTTP отвечает' : 'не отвечает';
+    const age = Math.round((Date.now() / 1000 - +ex[0]) / 60);
+    exTxt = (ex[2] || 'адрес не узнан') + (ex[3] ? ' (' + ex[3] + ')' : '') + ' · Google: ' + g + (age > 1 ? ' · ' + age + ' мин назад' : '');
+    h += kvRow('Выход', esc(exTxt), g === 'работает' ? 'green' : /^идёт/.test(g) ? '' : 'amber');
+  }
+  // после нажатия «Переподключить сеть» — пока не пришла свежая проверка, старое не показываем
+  const exOld = renewTs && s.vpn_up !== '1' && !(+ex[0] > renewTs);
+  if (exOld && Date.now() / 1000 - renewTs > 120) renewTs = 0;
+  if ($('#netExit')) $('#netExit').textContent = exOld ? 'Проверяю новый выход и Google…' : exTxt ? 'Сейчас: ' + exTxt : '';
   if (s.opera && s.opera !== 'disabled') { const o = operaState(s); h += kvRow('Opera', esc(o[1] + (o[2] ? ' · ' + o[2] : '')), o[0]); }
   if (s.quic_uids) h += kvRow('Без QUIC', esc(String(s.quic_uids.split(' ').length)) + ' прил.');
   const bad = (s.conf_note || '').split(' ').filter((x) => x[0] === '!' || x[0] === '?');
@@ -1076,7 +1098,9 @@ function renderHealth(s, w, confBad) {
   // пауза и подъём — не проблема: подсказка только у красного и у жёлтого с пояснением
   if (s.warp && s.warp !== 'disabled') add('WARP', w.d, w.d === 'red' || (w.d === 'amber' && w.s) ? w.t + (w.s ? '. ' + w.s : '') : '');
   if (s.opera && s.opera !== 'disabled') { const o = operaState(s); add('Opera', o[0], o[0] === 'red' || (o[0] === 'amber' && o[2]) ? o[1] + (o[2] ? '. ' + o[2] : '') : ''); }
-  if (s.zwave === '1' && (s.net_key || '').indexOf('mobile:') === 0) add('Волна', 'amber', 'ТСПУ душит Google на этом адресе. Обычно помогает «Переподключить сеть» на вкладке «Сервис».');
+  // волна: по сторожу или по проверке после смены сети (свежей, до 30 мин)
+  const ex = (s.exit || '').split('|'), exw = ex[4] === '000' && ex[5] && ex[5] !== '000' && Date.now() / 1000 - +ex[0] < 1800;
+  if ((s.zwave === '1' || exw) && (s.net_key || '').indexOf('mobile:') === 0) add('Волна', 'amber', 'ТСПУ душит Google на этом адресе. Обычно помогает «Переподключить сеть» на вкладке «Сервис».');
   if (s.curl_src === 'none') add('curl', 'red', 'Нет curl: WARP, подбор и проверки сайтов не работают. Отправьте логи (вкладка «Сервис»).');
   if (s.stealth_rivals) add('Лишний модуль', 'amber', s.stealth_rivals + ': подробности в «Подробнее».');
   if (confBad) add('Настройки', 'amber', 'Часть настроек пропущена: подробности в «Подробнее».');
@@ -1102,7 +1126,7 @@ const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAM
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE','ZAPRET_EXCL_APPS',
   'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK','YT_DEAD_FAILFAST','YT_DEAD_WARP','ZAPRET_WATCHDOG','ZAPRET_AUTOPICK','ZAPRET_WATCHDOG_MIN',
   'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','YT_SLOW_RETRY','ZAPRET_AUTO_FAIL',
-  'WARP_ENABLE','WARP_CONF','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
+  'WARP_ENABLE','WARP_CONF','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_COUNTRY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
 // интервал в минутах человеческим языком: 15 -> «15 минут», 180 -> «3 часа»
 function fmtMin(v, def) {
   const m = +v || def;
@@ -1560,7 +1584,7 @@ function operaState(s) {
   return {
     on: pause ? ['', 'Пауза: включён VPN', 'Без VPN включится сам']
       : none ? ['amber', 'Сайты не направлены', s.opera_skip !== '0' ? 'Они на общих CDN: поставьте «!» перед именем' : 'Проверьте список и выключатели «телефон» и «раздача»']
-      : ['green', 'Работает', a ? 'Сервер ' + a : ''],
+      : ['green', 'Работает', [{ EU: 'Европа', AS: 'Азия', AM: 'Америка' }[s.opera_country], a && 'сервер ' + a].filter(Boolean).join(', ')],
     starting: ['amber', 'Подключается', 'Обычно несколько секунд'],
     fail: ['red', 'Не запустился', s.opera_err || 'Повтор идёт сам'],
     off: s.vpn_up === '1' ? ['', 'Пауза: включён VPN', 'Без VPN включится сам'] : ['', 'Ждёт список сайтов или сеть', ''],
@@ -1784,14 +1808,17 @@ async function loadZev() {
   $('#zev').textContent = lines.length ? lines.join('\n') : 'Пока пусто: здесь появятся результаты автопроверки и подбора.';
 }
 $('#zevBox').addEventListener('toggle', () => { if ($('#zevBox').open) loadZev(); });
+let renewTs = 0;   // когда нажата «Переподключить сеть»: ждём проверку выхода новее
 $('#netRenew').addEventListener('click', async () => {
   const b = $('#netRenew');
   if (!confirm('Сеть на секунду перейдёт на 2G и вернётся обратно. Связь пропадёт на 5–20 секунд, разговор по этой SIM может оборваться. Если телефон выключится в эту секунду, 2G останется до следующего нажатия. Переподключить?')) return;
   b.disabled = true; b.textContent = 'Переподключаю…';
+  renewTs = Math.floor(Date.now() / 1000);
   try {
     const r = await ctlBg('net-renew');
+    if (!isOk(r)) renewTs = 0;   // переподключения не было — и проверки выхода не будет
     toast(isOk(r) ? r.out.trim().replace(/^OK /, '').replace(/^с/, 'С') : errText(r, 'Не получилось'));
-  } finally { b.disabled = false; b.textContent = 'Переподключить'; }
+  } catch (e) { renewTs = 0; throw e; } finally { b.disabled = false; b.textContent = 'Переподключить'; }
   loadStatus();
 });
 $('#diagBtn').addEventListener('click', async () => {
@@ -2315,7 +2342,7 @@ function mockExec(cmd) {
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=предпросмотр\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
     '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nwarp=up\nwarp_conf=warp-2\nwarp_note=\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://not-a-dns.quic.best/dns-query\nD DNS_FALLBACKS=https://dns.wlrus.cfd/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.commonnet.work/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=1\nD OPERA_API_PROXY=\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://not-a-dns.quic.best/dns-query\nD DNS_FALLBACKS=https://dns.wlrus.cfd/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.commonnet.work/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=1\nD OPERA_API_PROXY=\nD OPERA_COUNTRY=EU\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
     Object.keys(M.usr).map((k) => 'U ' + k + '=' + M.usr[k] + '\n').join('') };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +

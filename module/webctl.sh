@@ -153,6 +153,8 @@ case "$1" in
         [ -n "$w" ] && echo "zwd_last=$w"
         # волна свежая: сторож мог и не запуститься (VPN, выключен), и zwd_last остался бы навсегда
         [ -n "$(find "$ZSCAN.wave" -maxdepth 0 -mmin -30 2>/dev/null)" ] && echo "zwave=1"
+        # выход и Google после последней смены сети (пишет демон, wan_exit_probe)
+        [ -f /data/local/tmp/vpn_tether_exit ] && echo "exit=$(head -n 1 /data/local/tmp/vpn_tether_exit)"
         ;;
 
     conf)
@@ -994,6 +996,8 @@ case "$1" in
             [ -n "$now" ] && break
             sleep 1; i=$((i + 1))
         done
+        # выход и Google демон проверяет сам после смены сети (wan_exit_probe), ~30 с:
+        # кнопку не держим, WebUI покажет под ней, когда придёт
         if [ -z "$now" ]; then echo "ERR сеть включена, но адреса за 40 с нет"
         elif [ "$now" = "$was" ]; then echo "OK сеть переподключена, внутренний адрес тот же, внешний мог смениться"
         else echo "OK сеть переподключена, внутренний адрес новый"; fi

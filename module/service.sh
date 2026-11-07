@@ -624,6 +624,10 @@
 # v3.23.0 — запасной выход Opera (lib/opera.sh): opera-proxy и hev-socks5-tproxy,
 #   группы, сайты и приложения как у WARP, по умолчанию выключено; DNS для
 #   WARP_DOMAINS на Android 8; подсказки при установке.
+# v3.24.0 — волна Google: проверки без прямых запросов к закрытым именам, проверка сайтов
+#   раз в сутки, кнопка «Переподключить сеть»; подбор YouTube и Discord со скоростью, ручной
+#   выбор и ZAPRET_AUTOPICK; отбой QUIC и маршрут в WARP; OPERA_API_PROXY и OPERA_COUNTRY;
+#   выход и Google после смены сети; DoH при смене сети.
 # ============================================================================
 # ============================================================================
 
@@ -857,6 +861,7 @@ WARP_GOOGLE=0           # сети Google (goog.json) — в «волны» ТС
 WARP_TELEGRAM=1         # сети Telegram (заблокирован по IP)
 WARP_APPS=""            # приложения телефона целиком (пакеты через пробел)
 OPERA_ENABLE=0          # запасной выход через прокси Opera (lib/opera.sh)
+OPERA_COUNTRY=EU        # регион серверов Opera: EU, AS (Азия), AM (Америка)
 OPERA_API_PROXY=""      # свой прокси только для регистрации: socks5://логин:пароль@адрес:порт; пусто — бесплатный список
 OPERA_TELEGRAM=0        # сети и клиенты Telegram через Opera
 OPERA_GOOGLE=0          # сети Google через Opera
@@ -967,6 +972,8 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
             # домены через пробел; пусто — выключить
             case "$val" in *[!a-z0-9.\ -]*) ok=0 ;; esac
             [ ${#val} -le 2000 ] || ok=0 ;;
+        OPERA_COUNTRY)
+            case "$val" in EU|AS|AM) ;; *) ok=0 ;; esac ;;
         OPERA_API_PROXY)
             # идёт в команду opera-proxy: только адрес, без пробелов и знаков шелла
             case "$val" in ''|socks5://?*|socks5h://?*|http://?*|https://?*) ;; *) ok=0 ;; esac
@@ -1007,7 +1014,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST YT_DEAD_WARP ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST YT_DEAD_WARP ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -1539,7 +1546,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.23.0 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.24.0 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # curl: системный, если есть, иначе свой из модуля (PATH — в конце, системный

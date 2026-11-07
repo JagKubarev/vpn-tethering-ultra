@@ -118,6 +118,7 @@ handle_change() {
     # Другая сеть -> zapret_reconcile пересчитает её имя и стратегию
     $net_diff && NET_ID_FORCE=1
     $net_diff && phone_status_refresh
+    $net_diff && wan_exit_probe
 
     local tun_idx=$(read_table_index "$TUN_NAME")
     refresh_tether_ifaces
@@ -225,7 +226,7 @@ reload_config() {
     _conf_grp_sig s_op0 $CONF_GRP_OPERA
     _conf_grp_sig s_wp0 $CONF_GRP_WARP
     _conf_grp_sig s_wr0 $CONF_GRP_WARPR
-    local s_tgw0="$WARP_ENABLE$WARP_TELEGRAM" s_api0="$OPERA_API_PROXY"
+    local s_tgw0="$WARP_ENABLE$WARP_TELEGRAM" s_api0="$OPERA_API_PROXY|$OPERA_COUNTRY"
     conf_restore_defaults
     USER_CONF_NOTE=""
     load_user_conf
@@ -242,7 +243,7 @@ reload_config() {
     # прошлые адреса — тоже: иначе убранный сайт шёл бы через Opera ещё 10 минут
     [ "$s_op0" != "$s_op1" ] && { OPERA_DOM_TS=0; OPERA_APP_TS=0; OPERA_NOSUPPORT=0; OPERA_DOM_LAST=""; OPERA_DOM_FLAST=""; }
     # прокси регистрации — аргумент opera-proxy: новый заработает только с новым запуском
-    [ "$s_api0" != "$OPERA_API_PROXY" ] && [ "$OPERA_STATE" != "off" ] && { log "opera: сменился свой прокси, перезапускаю"; opera_down quiet; }
+    [ "$s_api0" != "$OPERA_API_PROXY|$OPERA_COUNTRY" ] && [ "$OPERA_STATE" != "off" ] && { log "opera: сменился регион или свой прокси, перезапускаю"; opera_down quiet; }
     _conf_grp_sig s_wp1 $CONF_GRP_WARP
     _conf_grp_sig s_wr1 $CONF_GRP_WARPR
     RELOAD_NEED_REBUILD=0
@@ -253,7 +254,7 @@ reload_config() {
     [ "$s_st0" != "$s_st1" ] && what="$what скрытие-раздачи"
     [ "$s_wp0" != "$s_wp1" ] && what="$what WARP"
     [ "$s_wr0" != "$s_wr1" ] && what="$what что-идёт-в-WARP"
-    [ "$s_api0" != "$OPERA_API_PROXY" ] && what="$what прокси-Opera"
+    [ "$s_api0" != "$OPERA_API_PROXY|$OPERA_COUNTRY" ] && what="$what Opera"
     log "Настройки перечитаны:${USER_CONF_NOTE:- (всё по умолчанию)}"
     log "Применяю:${what:- ничего не поменялось}$([ "$RELOAD_NEED_REBUILD" = 1 ] && echo ' — пересборка правил раздачи' || echo ' — без пересборки раздачи')"
     log "Config: DNSPROXY=$DNSPROXY_ENABLE KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE UPSTREAMS=[$DNS_UPSTREAMS] QUIC_BLOCK=[$QUIC_BLOCK_APPS]/yt=$QUIC_BLOCK_YT/fake=$QUIC_YT_FAKE ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/phone=$ZAPRET_PHONE/quic=$ZAPRET_QUIC_BLOCK/qfake=$ZAPRET_QUIC_FAKE/per_net=$ZAPRET_PER_NET META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s"

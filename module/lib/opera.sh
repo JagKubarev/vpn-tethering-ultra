@@ -133,7 +133,7 @@ opera_start() {
     fi
     opera_exempt
     opera_ca_build || log "WARNING: opera: системные сертификаты не найдены"
-    args="-bind-address 127.0.0.1:$OPERA_PORT -socks-mode -country EU -verbosity 20 -cafile $OPERA_CA"
+    args="-bind-address 127.0.0.1:$OPERA_PORT -socks-mode -country $OPERA_COUNTRY -verbosity 20 -cafile $OPERA_CA"
     args="$args -server-selection fastest -server-selection-timeout 3s -server-selection-test-url http://www.example.com/"
     args="$args -api-address api2.sec-tunnel.com"
     OPERA_OWN=0
