@@ -1,0 +1,4 @@
+tg=https://t.me/kubarev_mods
+chat=https://t.me/+LyVq9jqT-802MGIy
+4pda=https://4pda.to/forum/index.php?showtopic=1097835&view=findpost&p=142785848
+gh=https://github.com/JagKubarev/vpn-tethering-ultra

@@ -8,45 +8,57 @@
 <style>
 :root {
   color-scheme: light dark;   /* select, чекбоксы, полосы прокрутки — в тон теме */
-  --bg: #f4f5f7;
+  --bg: #e8ecea;
   --card: #ffffff;
-  --text: #16181d;
-  --muted: #5f6672;   /* 4.5:1 и на фоне страницы, не только на карточке */
-  --line: #e5e7eb;
-  --field: #d1d5db;   /* рамка полей и выключенный тумблер — заметнее линий-разделителей */
-  --accent: #2563eb;
+  --text: #16201c;
+  --muted: #56625d;   /* 4.5:1 и на фоне страницы, не только на карточке */
+  --line: #d6ddd9;
+  --field: #c3ccc7;   /* рамка полей и выключенный тумблер — заметнее линий-разделителей */
+  --accent: #2246c4;
   --accent-text: #ffffff;
-  --input: #f9fafb;
-  --green: #16a34a;
-  --amber: #d97706;
-  --amber-text: #b45309;   /* текст: #d97706 на белом даёт только 3:1 */
-  --red: #dc2626;
-  --grey: #9ca3af;
-  --blue: #2563eb;
-  --shadow: 0 1px 2px rgba(0,0,0,.05);
-  --tabbar-h: 58px;   /* от неё отсчитываются плашка «Применить» и тост */
+  --input: #f1f4f2;
+  --green: #1d7a52;
+  --amber: #c27a00;
+  --amber-text: #9a5a00;   /* текст: жёлтый на белом даёт мало контраста */
+  --amber-soft: #fbefd9;
+  --red: #b8302a;
+  --grey: #9aa59f;
+  --blue: #2246c4;
+  --shadow: none;
+  /* цвет маршрута: VPN, напрямую, волна — им красится верх Главной и полоска вкладки */
+  --vpn: #2246c4;    --vpn-soft: #dde4fa;
+  --direct: #5b6a1c; --direct-soft: #e7ecd2;
+  --wave: #a85f00;   --wave-soft: #f7e6c8;
+  --route: var(--vpn); --route-soft: var(--vpn-soft);
+  --tabbar-h: 60px;   /* от неё отсчитываются плашка «Применить» и тост */
   --tabbar-pad: 8px;  /* поля панели снизу и по бокам (.in) — подальше от скруглённых углов экрана */
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f1115;
-    --card: #181b21;
-    --text: #e8eaee;
-    --muted: #9aa1ad;
-    --line: #2a2f38;
-    --field: #3d4450;
-    --accent: #4f8cff;
-    --accent-text: #0b1020;
-    --input: #12151a;
-    --green: #22c55e;
-    --amber: #f59e0b;
-    --amber-text: #f59e0b;
-    --red: #ef4444;
-    --grey: #6b7280;
-    --blue: #4f8cff;
-    --shadow: none;
+    --bg: #0d1311;
+    --card: #151d1a;
+    --text: #e2e9e6;
+    --muted: #98a49f;
+    --line: #25302b;
+    --field: #3a4641;
+    --accent: #8aa3ff;
+    --accent-text: #0b1230;
+    --input: #101714;
+    --green: #52c792;
+    --amber: #f2a640;
+    --amber-text: #f2a640;
+    --amber-soft: #33260f;
+    --red: #ff7d72;
+    --grey: #66726d;
+    --blue: #8aa3ff;
+    --vpn: #8aa3ff;    --vpn-soft: #1a2448;
+    --direct: #bfcc6e; --direct-soft: #262c12;
+    --wave: #f2a640;   --wave-soft: #33260f;
   }
 }
+body[data-route="direct"] { --route: var(--direct); --route-soft: var(--direct-soft); }
+body[data-route="wave"], body[data-route="blocked"] { --route: var(--wave); --route-soft: var(--wave-soft); }
+body[data-route="off"] { --route: var(--muted); --route-soft: var(--card); }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
 /* Прокручивается body, а не вся страница: у страницы WebView на Android
@@ -65,8 +77,10 @@ h1 .logo { width: 30px; height: 30px; border-radius: 9px; background: var(--acce
 h1 .logo svg { width: 18px; height: 18px; }
 h1 small { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--muted); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }   /* длинная версия (тестовые сборки) — с многоточием, а не за край экрана */
 h1 small:empty { display: none; }
-h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 24px 4px 8px; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+h2 small { font-size: 13px; font-weight: 400; color: var(--muted); margin-left: 6px; }
+.hero .dot { display: none; }
+h2 { font-size: 17px; font-weight: 650; letter-spacing: -.005em; color: var(--text); margin: 28px 4px 10px; }
+.card { background: var(--card); border-radius: 16px; overflow: hidden; }
 .pad { padding: 16px; }
 
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; background: var(--grey); }
@@ -98,13 +112,14 @@ h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacin
   .kv .k:first-child { margin-top: 0; }
 }
 
-.btn { appearance: none; border: 1px solid var(--field); background: var(--card); color: var(--text); border-radius: 10px; padding: 0 14px; min-height: 44px; font: inherit; font-weight: 500; cursor: pointer; transition: background .1s, transform .1s; }
+.btn { appearance: none; border: 1px solid var(--line); background: var(--input); color: var(--text); border-radius: 10px; padding: 0 14px; min-height: 44px; font: inherit; font-weight: 600; font-size: 14.5px; cursor: pointer; transition: background .1s, transform .1s; }
 .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .btn.wide { width: 100%; margin-top: 16px; min-height: 48px; }
 /* компактная — 38 px на вид, но зона нажатия всё равно 44 */
 .btn.small { position: relative; padding: 0 12px; min-height: 38px; font-size: 13.5px; flex: none; }
 .btn.small::after { content: ""; position: absolute; inset: -3px 0; }
-.btn:active:not(:disabled) { background: var(--input); transform: scale(.98); }
+.btn:active:not(:disabled) { background: var(--line); transform: scale(.98); }
+.btn.bad { color: var(--red); }
 .btn.primary:active:not(:disabled) { background: var(--accent); filter: brightness(.92); }
 .btn:disabled { opacity: .5; cursor: default; }
 .btn:focus-visible, summary:focus-visible, .chip button:focus-visible, .offnote:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -116,8 +131,10 @@ h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacin
 /* равные кнопки в ряд; не влезают — переносятся и растягиваются на свободное место */
 .btn-row.fill > .btn { flex: 1 1 0; padding: 0 8px; white-space: nowrap; }
 
-.row { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-top: 1px solid var(--line); }
-.row:first-child { border-top: 0; }
+.row { display: flex; align-items: center; gap: 12px; padding: 14px 16px;
+  background: linear-gradient(var(--line), var(--line)) 16px 0 / calc(100% - 16px) 1px no-repeat; }
+/* у строк со своей рамкой (таблица подбора, список сетей) линия — только их */
+.row:first-child, .row[style*="border-top"] { background: none; }
 .row .txt { flex: 1; min-width: 0; }
 .row .t { font-weight: 500; overflow-wrap: anywhere; }
 .row .s { color: var(--muted); font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
@@ -174,19 +191,22 @@ details > summary::-webkit-details-marker { display: none; }
 /* шеврон рамкой, а не символом «›»: одинаковый в любом шрифте */
 details > summary::after { content: ""; flex: none; width: 7px; height: 7px; margin: 0 4px -2px 0; border: solid var(--muted); border-width: 0 2px 2px 0; transform: translateY(-3px) rotate(45deg); transition: transform .15s; }
 details[open] > summary::after { transform: translateY(1px) rotate(-135deg); }
-.card > details { border-top: 1px solid var(--line); }
-.card > details:first-child { border-top: 0; }
+.card > details { background: linear-gradient(var(--line), var(--line)) 16px 0 / calc(100% - 16px) 1px no-repeat; }
+.card > details:first-child { background: none; }
 .card > details[open]:not(.kvbox) > summary { padding-bottom: 8px; min-height: 44px; }
 
 pre.log { margin: 0; padding: 12px 14px; background: var(--input); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; border-top: 1px solid var(--line); }
 
-.applybar { touch-action: none; position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + var(--tabbar-pad) + var(--tabbar-h) + 1px); padding: 10px 16px; background: var(--card); border-top: 1px solid var(--line); box-shadow: 0 -4px 12px rgba(0,0,0,.08); display: none; z-index: 10; }
+.applybar { touch-action: none; position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + var(--tabbar-pad) + var(--tabbar-h) + 10px); padding: 0 16px; display: none; z-index: 10; }
 .applybar.show { display: block; }
-.applybar .in { max-width: 640px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
+.applybar .in { max-width: 608px; margin: 0 auto; display: flex; gap: 10px; align-items: center; background: var(--text); color: var(--bg); border-radius: 16px; padding: 8px 8px 8px 16px; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+.applybar #revertBtn { background: transparent; border-color: transparent; color: var(--bg); opacity: .8; }
+.applybar #applyBtn { background: var(--route); border-color: var(--route); color: var(--card); }
 .applybar .msg { flex: 1; min-width: 0; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
-.applybar .btn { padding: 0 12px; }
-.applybar .msg { white-space: nowrap; }
-.applybar .msg::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); flex: none; }
+.applybar .btn { padding: 0 10px; flex: none; }
+/* блоком, а не flex: при крупном шрифте текст обрезается многоточием, а не налезает на «Отмену» */
+.applybar .msg { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.applybar .msg::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); margin-right: 8px; vertical-align: 1px; }
 
 .sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; z-index: 20; }
 .sheet-bg.show { display: block; }
@@ -210,13 +230,15 @@ pre.log { margin: 0; padding: 12px 14px; background: var(--input); font: 12px/1.
 /* вкладки (3.10) */
 .tab { display: none; }
 .tab.on { display: block; }
-.tabbar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); z-index: 11; touch-action: none; padding-bottom: calc(env(safe-area-inset-bottom) + var(--tabbar-pad)); }
+.tabbar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); z-index: 11; touch-action: none; padding-bottom: calc(env(safe-area-inset-bottom) + var(--tabbar-pad)); }
 .tabbar .in { max-width: 640px; margin: 0 auto; display: flex; height: var(--tabbar-h); padding: 0 6px; }
 .tabbar button { flex: 1; min-width: 0; background: none; border: 0; padding: 6px 2px 0; color: var(--muted); font: 500 12px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; cursor: pointer; }
 .tabbar button svg { width: 27px; height: 27px; }
 /* пять вкладок: при крупном системном шрифте подпись не налезает на соседнюю */
 .tabbar button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tabbar button.on { color: var(--accent); font-weight: 600; }
+.tabbar button { position: relative; }
+.tabbar button.on { color: var(--text); font-weight: 650; }
+.tabbar button.on::before { content: ""; position: absolute; top: 0; left: 28%; right: 28%; height: 3px; border-radius: 0 0 3px 3px; background: var(--route); }
 @media (max-width: 340px) {   /* 320 px: «Главная» и «Сервис» не обрезаются и при шрифте ×1.3 */
   .tabbar .in { padding: 0 2px; }
   .tabbar button { font-size: 11px; }
@@ -225,16 +247,83 @@ details.more { margin-top: 18px; }
 details.kvbox { margin: 14px -16px -16px; border-top: 1px solid var(--line); }
 details.kvbox > summary { padding: 12px 16px; min-height: 46px; font-size: 14px; color: var(--muted); }
 details.kvbox .kv { border-top: 0; margin: 0; padding: 0 16px 16px; }
-details.more > summary { color: var(--muted); }
+details.more > summary, .card > details > summary { color: var(--accent); }
+details > summary::after { border-color: currentColor; }
 .hint { color: var(--muted); font-size: 13px; margin: 8px 4px 0; }
 .tipbox { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--accent); border-radius: 6px; background: var(--input); color: var(--text); font-size: 13px; line-height: 1.45; }
 .offnote { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 10px 16px; font-size: 13.5px; color: var(--amber-text); background: var(--input); cursor: pointer; }
 .offnote::before { content: "!"; flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--amber); color: var(--card); font: 700 12px/18px system-ui, sans-serif; text-align: center; }
 .offnote[hidden] { display: none; }
 /* скрытая подсказка — первой строке карточки линия сверху не нужна */
-.offnote[hidden] + .row, .offnote[hidden] + details { border-top: 0; }
+.offnote[hidden] + .row, .offnote[hidden] + details { background: none; }
 .offnote::after { content: "›"; margin-left: auto; font-size: 18px; line-height: 1; }
 .muted { color: var(--muted); }
+
+/* ---- Главная: верх в цвет маршрута, путь трафика ---- */
+#statusCard { background: var(--route-soft); border-radius: 22px; transition: background-color .4s; }
+#statusCard .kv { border-top-color: color-mix(in srgb, var(--route) 25%, transparent); }
+.hero-title { font-size: 22px; font-weight: 650; letter-spacing: -.01em; line-height: 1.2; }
+.path { display: grid; grid-template-columns: auto 1fr auto 1fr auto 1fr auto; align-items: start; margin: 18px 0 4px; }
+.path:empty { display: none; }
+.node { display: flex; flex-direction: column; align-items: center; gap: 5px; width: 64px; text-align: center; }
+.node .ic { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--card); color: var(--text); border: 2px solid var(--route); }
+.node.out .ic { background: var(--route); color: var(--card); }
+.node.dim .ic { border-color: var(--field); color: var(--muted); }
+.node svg { width: 22px; height: 22px; }
+.node .nm { font-size: 12px; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
+.node .cp { font-size: 11px; color: var(--muted); line-height: 1.2; overflow-wrap: anywhere; }
+.link { height: 3px; border-radius: 2px; background: var(--route); margin-top: 21px; }
+.link.cut { background: repeating-linear-gradient(90deg, var(--route) 0 6px, transparent 6px 11px); }
+.link.dim { background: var(--field); }
+.seg { display: flex; background: var(--input); border: 1px solid var(--line); border-radius: 12px; padding: 3px; gap: 2px; }
+.seg button { flex: 1; min-width: 0; appearance: none; border: 0; background: transparent; border-radius: 9px; min-height: 38px; padding: 0 8px; font: inherit; font-size: 14px; color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seg button.on { background: var(--card); color: var(--text); font-weight: 650; box-shadow: 0 0 0 1px var(--line); }
+.seg button:disabled { opacity: .45; cursor: default; }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.seg.mode { margin-top: 16px; }
+.seg.mode button { min-height: 44px; font-weight: 600; }
+.seg.mode button.on { background: var(--route); color: var(--card); box-shadow: none; }
+#health .hi { color: var(--text); }
+.exitline { display: flex; align-items: center; gap: 12px; margin-top: 10px; background: var(--card); border-radius: 16px; padding: 12px 14px 12px 16px; }
+.exitline:empty, .wavebox:empty { display: none; }
+.exitline .txt { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.exitline .t { font-size: 14.5px; }
+.exitline .s { font-size: 13px; color: var(--muted); }
+.wavebox { margin-top: 10px; background: var(--amber-soft); border-radius: 16px; padding: 14px 16px; }
+.wavebox .t { font-weight: 650; color: var(--amber-text); }
+.wavebox p { margin: 4px 0 12px; font-size: 13.5px; }
+.wavebox p.wl { margin: 12px 0 0; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--amber) 30%, transparent); color: var(--muted); }
+
+/* ---- подсказка наверху карточки ---- */
+.tip { margin: 14px 16px 0; font-size: 13px; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); border-radius: 10px; padding: 8px 10px; }
+.tip[hidden] { display: none; }
+
+/* ---- Выходы: плитки и списки ---- */
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
+.tile { background: var(--card); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.tile .hd { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.tile .nm { font-weight: 650; font-size: 16px; }
+.tile .st { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; display: flex; gap: 8px; align-items: flex-start; }
+.tile .st .dot { margin-top: 5px; }
+.tile .st b { font-weight: 600; color: var(--text); }
+.route-row .seg { margin-top: 10px; }
+.item { gap: 10px; }
+.item .txt .s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item.gone .t { color: var(--muted); }
+.item .seg { flex: none; }
+.item .seg button { min-height: 32px; font-size: 13px; padding: 0 9px; }
+.item .x { appearance: none; border: 0; background: none; color: var(--muted); width: 36px; height: 36px; border-radius: 50%; font-size: 15px; cursor: pointer; flex: none; }
+.item .x:active { background: var(--line); }
+.links .row { color: inherit; text-decoration: none; cursor: pointer; }
+.links .lic { width: 36px; height: 36px; border-radius: 50%; background: var(--input); display: grid; place-items: center; flex: none; color: var(--accent); }
+.links .lic svg, .links .go { width: 18px; height: 18px; }
+.links .go { color: var(--muted); flex: none; }
+.foot { text-align: center; color: var(--muted); font-size: 12.5px; margin: 24px 0 0; }
+@media (max-width: 360px) {
+  .tiles { grid-template-columns: 1fr; }
+  .node { width: 54px; }
+}
+@media (prefers-reduced-motion: reduce) { #statusCard { transition: none; } }
 .mt8 { margin-top: 8px; }
 </style>
 </head>
@@ -251,13 +340,17 @@ details.more > summary { color: var(--muted); }
       <div class="hero-sub" id="heroSub"></div>
     </div>
   </div>
-  <button class="btn primary wide" id="toggleBtn" disabled>Переключить</button>
+  <div class="path" id="path"></div>
+  <div class="seg mode" id="modeSeg" role="radiogroup" aria-label="Режим раздачи"><button data-m="vpn" role="radio" disabled>Через VPN</button><button data-m="direct" role="radio" disabled>Напрямую</button></div>
+  <button id="toggleBtn" hidden disabled>Переключить</button>
   <div class="health" id="health"></div>
   <details class="kvbox" id="kvBox">
     <summary>Подробнее</summary>
     <div class="kv" id="kv"></div>
   </details>
 </div>
+<div class="exitline" id="exitLine"></div>
+<div class="wavebox" id="waveBox"></div>
 
 <h2>Основное</h2>
 <div class="card">
@@ -268,7 +361,7 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row">
     <div class="txt"><div class="t">Зашифрованный DNS</div>
-      <div class="s">DNS по DoH: оператор не подменит ответы, откроются сервисы с блокировкой по стране.</div></div>
+      <div class="s">Оператор не подменит ответы, сервисы с блокировкой по стране откроются.</div></div>
     <label class="sw"><input type="checkbox" data-key="DNSPROXY_ENABLE"><span></span></label>
   </div>
   <div class="row">
@@ -278,7 +371,7 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row">
     <div class="txt"><div class="t">Защита от утечек</div>
-      <div class="s">В режиме VPN трафик раздачи не уходит мимо туннеля, пока VPN переподключается или сбоит. Если VPN так и не поднимется — см. «Пауза раздачи без VPN».</div></div>
+      <div class="s">Пока VPN переподключается или сбоит, раздача не уходит мимо него.</div></div>
     <label class="sw"><input type="checkbox" data-key="KILL_SWITCH"><span></span></label>
   </div>
 </div>
@@ -286,7 +379,7 @@ details.more > summary { color: var(--muted); }
   <summary>Дополнительно</summary>
   <div class="row" data-dep="KILL_SWITCH">
     <div class="txt"><div class="t">Пауза раздачи без VPN</div>
-      <div class="s">Если VPN не подключён, раздача ждёт его, а не переходит на «напрямую».</div></div>
+      <div class="s">Без VPN раздача ждёт его, а не переходит на «напрямую».</div></div>
     <label class="sw"><input type="checkbox" data-key="KILL_SWITCH_STRICT"><span></span></label>
   </div>
   <div class="row" data-dep="TETHER_STEALTH">
@@ -299,8 +392,8 @@ details.more > summary { color: var(--muted); }
 <div class="card">
   <div id="clients"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
 </div>
-<div class="hint">Заблокированное устройство остаётся подключённым к точке, но без интернета, и потом может отключиться само. После разблокировки иногда нужно переподключиться. Новый «случайный» MAC блокировку обходит. ↓ ↑ — трафик с подключения устройства (Wi-Fi) или с подключения USB; если телефон этого не даёт — по открытым сейчас соединениям («в открытых соединениях»).</div>
-<div class="hint">Остальные настройки — во вкладках «Обход», «Сеть» и «WARP», проверки и журналы — в «Сервисе».</div>
+<div class="hint">Заблокированное устройство остаётся в точке доступа, но без интернета; новый «случайный» MAC блокировку обходит. ↓ ↑ — трафик с подключения, а если телефон его не даёт — в открытых сейчас соединениях.</div>
+<div class="hint">Остальные настройки — во вкладках «Обход», «Выходы» и «DNS», проверки и журналы — в «Сервисе».</div>
 
 </section>
 
@@ -308,9 +401,10 @@ details.more > summary { color: var(--muted); }
 <h2>Стратегия</h2>
 <div class="card">
   <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
+  <div class="tip" id="pickTip">Для лучшей работы подберите стратегию под свою сеть, отдельно для YouTube и Discord: кнопки в «Подборе стратегии» ниже.</div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Стратегия для каждой сети</div>
-      <div class="s">Отдельная стратегия для каждой сети Wi-Fi и мобильного оператора, переключается автоматически.</div></div>
+      <div class="s">Своя для каждой сети Wi-Fi и оператора, переключается сама.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_PER_NET"><span></span></label>
   </div>
   <div class="row col" id="znetBox">
@@ -348,14 +442,35 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Автопроверка обхода</div>
-      <div class="s">Раз в <span id="zwdMin">15 минут</span> (и сразу при зависании видео) проверяет, открываются ли заблокированные сайты; если нет — возвращает рабочую стратегию или подбирает новую, а при выключенном автоподборе только пишет в журнал. Нужна «Стратегия для каждой сети»; при включённом VPN не работает.</div></div>
+      <div class="s">Раз в <span id="zwdMin">15 минут</span> и при зависании видео проверяет закрытые сайты. Не открываются — возвращает рабочую стратегию или подбирает новую. Нужна «Стратегия для каждой сети», с VPN не работает.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_WATCHDOG"><span></span></label>
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Автоподбор</div>
-      <div class="s">Сам меняет общую стратегию, YouTube и Discord: автопроверка возвращает прежнюю или подбирает новую, кнопки подбора запоминают лучшую. Выключено: стратегии меняете только вы, подбор показывает таблицу, автопроверка пишет в журнал. Свои стратегии отдельных сайтов подбираются всё равно.</div></div>
+      <div class="s">Сам меняет общую стратегию, YouTube и Discord. Выключено — меняете только вы: подбор показывает таблицу, автопроверка пишет в журнал.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_AUTOPICK"><span></span></label>
   </div>
+</div>
+
+<h2>Подбор стратегии</h2>
+<div class="card pad">
+  <div class="s muted" style="font-size:13px;margin-top:2px">Ищет рабочую стратегию для этой сети по сайтам ниже, в фоне. При сбое автопроверка запускает его сама.</div>
+  <textarea id="scSites" rows="3" aria-label="Сайты для подбора" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+  <div class="btn-row eq mt8">
+    <button class="btn" id="scQuick">Быстрый · ~2 мин</button>
+    <button class="btn" id="scFull">Полный · ~7 мин</button>
+    <button class="btn" id="scStop" style="display:none">Остановить</button>
+  </div>
+  <div class="s muted" style="font-size:13px;margin-top:10px">YouTube и Discord часто работают лучше со своей стратегией: запустите подбор, дождитесь конца и примените лучшую в таблице. Общая не меняется, замер скачивает до 110 МБ.</div>
+  <div class="btn-row eq mt8">
+    <button class="btn" id="scYt">YouTube · ~4 мин</button>
+    <button class="btn" id="scDc">Discord · ~4 мин</button>
+  </div>
+  <div class="btn-row eq mt8">
+    <button class="btn" id="scQ">Проверить QUIC · ~30 с</button>
+  </div>
+  <div id="scProg" class="mt8" style="font-size:14px"></div>
+  <div id="scRes" class="mt8"></div>
 </div>
 
 <h2>Сайты</h2>
@@ -370,13 +485,13 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row col" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Дополнительные сайты</div>
-      <div class="s">По одному домену в строке, поддомены тоже. Сайты в .ru, .su и .рф обходятся, только если они есть здесь или во встроенном списке.</div></div>
+      <div class="s">По одному в строке, поддомены входят. Сайты в .ru, .su и .рф обходятся, только если они есть здесь или во встроенном списке.</div></div>
     <textarea id="zlist" rows="4" placeholder="example.com" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
     <div class="err" id="zlistErr" style="display:none"></div>
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Стратегии для отдельных сайтов</div>
-      <div class="s">Раз в <span id="zaltMin">24 часа</span> проверяет сайты из списков и подбирает свою стратегию тем, что не открываются основной (до трёх на сеть). Нужна «Стратегия для каждой сети»; при включённом VPN не работает.</div></div>
+      <div class="s">Раз в <span id="zaltMin">24 часа</span> подбирает свою стратегию сайтам, которые не открывает основная, до трёх на сеть. Нужна «Стратегия для каждой сети», с VPN не работает.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_ALT"><span></span></label>
   </div>
   <details id="zaltBox" data-dep="ZAPRET_ENABLE">
@@ -393,7 +508,7 @@ details.more > summary { color: var(--muted); }
     <summary>Встроенный список и автосписок</summary>
     <div class="row col">
       <div class="txt"><div class="t">Автосписок: <span id="zautoN">0</span></div>
-        <div class="s">Сайты, которые модуль добавил сам после сбоев соединения, — с датой и причиной. ✕ — убрать из списка.</div></div>
+        <div class="s">Модуль добавил их сам после сбоев, с датой и причиной. ✕ — убрать.</div></div>
       <div id="zauto" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:8px;padding:2px 10px"></div>
       <div class="row" style="padding:10px 0 0;border-top:0">
         <div class="txt"><div class="s">Порог добавления, сбоев за минуту</div></div>
@@ -411,97 +526,74 @@ details.more > summary { color: var(--muted); }
   </details>
 </div>
 
-<h2>YouTube</h2>
+<h2>YouTube и QUIC</h2>
 <div class="card">
   <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Пропуск неотвечающих серверов</div>
-      <div class="s">Видеосервер YouTube, который молчит после соединения, отключается на 30 минут — плеер сразу берёт другой.</div></div>
+      <div class="s">Молчащий видеосервер YouTube отключается на 30 минут, плеер сразу берёт другой.</div></div>
     <label class="sw"><input type="checkbox" data-key="YT_DEAD_FAILFAST"><span></span></label>
   </div>
   <div class="row" data-dep="YT_DEAD_FAILFAST">
     <div class="txt"><div class="t">Вести такие серверы через WARP</div>
-      <div class="s">Если WARP поднят и сервер отвечает через него, видео продолжается с того же сервера, без поиска запасного. Нет WARP — сервер просто пропускается.</div></div>
+      <div class="s">Если сервер отвечает через WARP, видео идёт с него же. Без WARP сервер просто пропускается.</div></div>
     <label class="sw"><input type="checkbox" data-key="YT_DEAD_WARP"><span></span></label>
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Переподключение медленного видео</div>
-      <div class="s">Медленное видеосоединение YouTube обрывается, и плеер переходит на быстрый сервер. Если быстрых серверов нет, обрывы на время прекращаются.</div></div>
+      <div class="s">Медленное соединение обрывается, и плеер переходит на быстрый сервер. Быстрых нет — обрывы на время прекращаются.</div></div>
     <label class="sw"><input type="checkbox" data-key="YT_SLOW_RETRY"><span></span></label>
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">YouTube без кэшей оператора</div>
-      <div class="s">Блокирует серверы-кэши оператора, чтобы видео загружалось с серверов Google. Не включайте, если оператор отдаёт видео только с кэшей.</div></div>
+      <div class="s">Видео грузится с серверов Google, а не с кэшей оператора. Не включайте, если оператор отдаёт видео только с кэшей.</div></div>
     <label class="sw"><input type="checkbox" data-key="YT_GGC_BLOCK"><span></span></label>
   </div>
   <div class="row">
     <div class="txt"><div class="t">QUIC у YouTube и Google Play</div>
-      <div class="s">QUIC приложений YouTube (YouTube Music, ReVanced, Morphe, NewPipe и др.) и Google Play закрывается — они идут по HTTPS, где модуль пропускает неотвечающие серверы и переподключает медленное видео. С «Подделкой» ниже QUIC не закрывается, а пробивается обходом. Только без VPN.</div></div>
+      <div class="s">QUIC у YouTube (и Music, ReVanced, Morphe, NewPipe) и Google Play закрыт: они идут по HTTPS, где работают пропуск серверов и переподключение видео. Только без VPN.</div></div>
     <label class="sw"><input type="checkbox" data-key="QUIC_BLOCK_YT"><span></span></label>
   </div>
   <div class="row" data-dep="QUIC_BLOCK_YT">
     <div class="txt"><div class="t">Подделка вместо закрытия</div>
-      <div class="s">QUIC этих приложений пробивается обходом: на YOTA видео быстрее перематывается. Но по QUIC не работают пропуск серверов и переподключение медленного видео. Нужен включённый обход; через VPN QUIC идёт в туннеле как есть. AdGuard закрывает QUIC сам — модуль пускает QUIC этих приложений мимо него, поэтому реклама в YouTube через AdGuard может вернуться.</div></div>
+      <div class="s">QUIC пробивается обходом: видео быстрее перематывается, но пропуск серверов и переподключение по QUIC не работают. AdGuard закрывает QUIC сам, поэтому модуль пускает эти приложения мимо него — реклама в YouTube может вернуться.</div></div>
     <label class="sw"><input type="checkbox" data-key="QUIC_YT_FAKE"><span></span></label>
   </div>
-</div>
-
-<h2>QUIC</h2>
-<div class="card">
-  <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
   <div class="row" data-dep="ZAPRET_ENABLE" data-depoff="ZAPRET_QUIC_FAKE">
     <div class="txt"><div class="t">Без QUIC на раздаче</div>
-      <div class="s">QUIC (HTTP/3) устройств раздачи закрывается — браузеры сразу идут по HTTPS, где работает обход. Только без VPN. Не действует, пока включена «Подделка QUIC на раздаче» (если подделка не встала — в ядре нет connbytes — действует закрытие).</div></div>
+      <div class="s">Браузеры раздачи идут по HTTPS, где работает обход. Только без VPN. Пока включена подделка ниже, не действует (если ядро её не умеет — действует закрытие).</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_BLOCK"><span></span></label>
   </div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Подделка QUIC на раздаче</div>
-      <div class="s">QUIC устройств раздачи не закрывается, а пробивается обходом: YouTube и Google Play на смартфоне раздачи быстрее перематывают. Свой AdGuard на устройстве закрывает QUIC сам.</div></div>
+      <div class="s">QUIC раздачи пробивается обходом: YouTube и Play на устройствах быстрее перематывают.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_FAKE"><span></span></label>
   </div>
 </div>
-<div class="card pad mt8">
-  <div class="muted" style="font-size:13px">Приложения телефона без QUIC (UDP 443) — идут по HTTPS. Помогает, если оператор режет QUIC.</div>
-  <div class="chips" id="quicChips"></div>
-  <div class="mt8"><button class="btn small" id="quicAdd">Добавить приложение</button></div>
-</div>
 
-<h2>Обход для приложений</h2>
+
+<h2>Приложения</h2>
 <div class="card">
   <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
   <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">Приложения телефона</div>
-      <div class="s">Обход блокировок и для приложений самого телефона, чей трафик идёт мимо VPN. Выключено — только для раздачи. VPN-клиенты не затрагиваются.</div></div>
+    <div class="txt"><div class="t">Обход для самого телефона</div>
+      <div class="s">Для приложений телефона, чей трафик идёт мимо VPN. Выключено — только для раздачи.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_PHONE"><span></span></label>
   </div>
   <div class="row col" data-dep="ZAPRET_PHONE">
-    <div class="txt"><div class="t">Исключения</div>
-      <div class="s">Приложения без обхода — например, банки, если с ним не открываются. Если приложение фильтрует AdGuard, исключите его и в AdGuard: его HTTPS открывает AdGuard от своего имени.</div></div>
+    <div class="txt"><div class="t">Мимо обхода</div>
+      <div class="s">Без обхода, например банки. Если приложение фильтрует AdGuard, исключите его и там.</div></div>
     <div class="chips" id="zexChips"></div>
     <div class="mt8"><button class="btn small" id="zexAdd">Добавить приложение</button></div>
   </div>
+  <div class="row col">
+    <div class="txt"><div class="t">Без QUIC</div>
+      <div class="s">Идут по HTTPS, где работает обход. Помогает, если оператор режет QUIC.</div></div>
+    <div class="chips" id="quicChips"></div>
+    <div class="mt8"><button class="btn small" id="quicAdd">Добавить приложение</button></div>
+  </div>
 </div>
 
-<h2>Подбор стратегии</h2>
-<div class="card pad">
-  <div class="s muted" style="font-size:13px;margin-top:2px">Ищет рабочую стратегию для текущей сети по этим сайтам, в фоне. При сбое стратегии автопроверка обхода запускает подбор сама.</div>
-  <textarea id="scSites" rows="3" aria-label="Сайты для подбора" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
-  <div class="btn-row eq mt8">
-    <button class="btn" id="scQuick">Быстрый · ~2 мин</button>
-    <button class="btn" id="scFull">Полный · ~7 мин</button>
-    <button class="btn" id="scStop" style="display:none">Остановить</button>
-  </div>
-  <div class="s muted" style="font-size:13px;margin-top:10px">Только для YouTube или Discord: свои сайты и замер скорости, общая стратегия не меняется. Замер скачивает до 110 МБ и показывает скорость проверочного файла, а не самого видео. Список сайтов выше здесь не участвует.</div>
-  <div class="btn-row eq mt8">
-    <button class="btn" id="scYt">YouTube · ~4 мин</button>
-    <button class="btn" id="scDc">Discord · ~4 мин</button>
-  </div>
-  <div class="btn-row eq mt8">
-    <button class="btn" id="scQ">Проверить QUIC · ~30 с</button>
-  </div>
-  <div id="scProg" class="mt8" style="font-size:14px"></div>
-  <div id="scRes" class="mt8"></div>
-</div>
 
 </section>
 
@@ -511,59 +603,63 @@ details.more > summary { color: var(--muted); }
   <div class="offnote" data-offnote="DNSPROXY_ENABLE" role="button">Зашифрованный DNS выключен — включается на Главной.</div>
   <div class="row col" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Сервер DNS (DoH)</div>
-      <div class="s">not-a-dns, wlrus, geohide, comss и commonnet открывают и сервисы с блокировкой по стране (ChatGPT, Gemini, Claude; Gemini через comss и commonnet — нет). Google, Cloudflare, AdGuard, Quad9, DNS4EU и LibreDNS дают настоящие адреса — это для приватности: сервисы с блокировкой по стране с ними не откроются. Не отвечает — по порядку «Запасные DoH-серверы» из «Дополнительно».</div></div>
+      <div class="s">Серверы из первой группы открывают ChatGPT, Gemini и Claude без VPN. Обычные дают настоящие адреса, это для приватности. Не отвечает — по порядку запасные из «Тонкой настройки».</div></div>
     <select id="upSelect">
+      <optgroup label="Открывают ChatGPT, Gemini и Claude">
       <option value="https://not-a-dns.quic.best/dns-query">not-a-dns.quic.best</option>
       <option value="https://dns.wlrus.cfd/dns-query">wlrus.cfd</option>
       <option value="https://dns.geohide.ru:444/dns-query">dns.geohide.ru:444</option>
       <option value="https://geohide.ru/dns-query">geohide.ru</option>
       <option value="https://dns.comss.one/dns-query">comss.one</option>
       <option value="https://dns.commonnet.work/dns-query">commonnet.work</option>
+      </optgroup>
+      <optgroup label="Обычные, для приватности">
       <option value="https://dns.google/dns-query">Google</option>
       <option value="https://cloudflare-dns.com/dns-query">Cloudflare</option>
       <option value="https://dns.adguard-dns.com/dns-query">AdGuard</option>
       <option value="https://dns.quad9.net/dns-query">Quad9</option>
       <option value="https://unfiltered.joindns4.eu/dns-query">DNS4EU (без фильтров)</option>
       <option value="https://doh.libredns.gr/dns-query">LibreDNS</option>
+      </optgroup>
       <option value="custom">Свой адрес…</option>
     </select>
     <input type="text" id="upCustom" placeholder="https://example.com/dns-query" style="display:none" autocapitalize="off" autocorrect="off" spellcheck="false">
     <div class="err" id="upErr" style="display:none"></div>
+    <div class="st-line s" id="upAi"></div>
   </div>
   <div class="row" data-dep="DNSPROXY_ENABLE">
-    <div class="txt"><div class="t">Для телефона</div>
-      <div class="s">Зашифрованный DNS для самого телефона, когда VPN выключен.</div></div>
+    <div class="txt"><div class="t">Для самого телефона</div>
+      <div class="s">Когда VPN выключен.</div></div>
     <label class="sw"><input type="checkbox" data-key="DNS_PHONE"><span></span></label>
   </div>
   <div class="row" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Для раздачи напрямую</div>
-      <div class="s">Зашифрованный DNS для устройств раздачи в режиме «напрямую».</div></div>
+      <div class="s">Устройства раздачи в режиме «напрямую».</div></div>
     <label class="sw"><input type="checkbox" id="directDoh"><span></span></label>
   </div>
   <div class="row col" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">DNS раздачи при VPN</div>
-      <div class="s">DNS для устройств раздачи, когда VPN включён.</div>
-      <div class="tipbox"><b>Что выбрать.</b> «DNS VPN-клиента» — если VPN-клиент выбирает путь по доменам (AmneziaVPN по сайтам, fake-ip в sing-box и NekoBox). «Как без VPN» — если важно, чтобы ChatGPT, Gemini и другие сервисы с блокировкой по стране открывались сразу после выключения VPN, без сброса кэша DNS; выбор пути по доменам в VPN-клиенте для раздачи при этом не работает.</div></div>
+      <div class="s" id="dnsVpnSub">DNS для устройств раздачи, когда VPN включён.</div></div>
     <select data-key="DNS_VPN">
       <option value="dnat">DNS VPN-клиента</option>
-      <option value="cache">DNS VPN-клиента + кэш</option>
+      <option value="cache">DNS VPN-клиента с кэшем</option>
       <option value="doh">DoH через туннель (Google, Cloudflare)</option>
-      <option value="geo">Как без VPN (гео-DoH через туннель)</option>
+      <option value="geo">DoH для ИИ, как без VPN</option>
     </select>
   </div>
   <div class="row" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Instagram и Facebook без VPN</div>
-      <div class="s">Instagram, Facebook и Threads получают европейские адреса (ECS) и открываются без VPN вместе с обходом блокировок.</div></div>
+      <div class="s">Instagram, Facebook и Threads получают европейские адреса и открываются через обход, без VPN.</div></div>
     <label class="sw"><input type="checkbox" data-key="DNS_META_EU"><span></span></label>
   </div>
 </div>
 
 
 <details class="card more">
-  <summary>Дополнительно</summary>
+  <summary>Тонкая настройка</summary>
   <div class="row col">
     <div class="txt"><div class="t">Запасные DoH-серверы</div>
-      <div class="s">По порядку, если основной не отвечает. Google и Cloudflare сюда не добавляйте: они не обходят блокировку по стране, и ИИ-сервисы напишут «недоступно в вашем регионе».</div></div>
+      <div class="s">По порядку, если основной не отвечает. Google и Cloudflare не добавляйте: с ними ИИ-сервисы пишут «недоступно в вашем регионе».</div></div>
     <input type="text" data-key="DNS_FALLBACKS" autocapitalize="off" autocorrect="off" spellcheck="false">
   </div>
   <div class="row col">
@@ -573,7 +669,7 @@ details.more > summary { color: var(--muted); }
   </div>
   <div class="row col">
     <div class="txt"><div class="t">Начальный DNS (bootstrap)</div>
-      <div class="s">Чтобы узнать адрес DoH-сервера (IP:порт).</div></div>
+      <div class="s">Чтобы узнать адрес DoH-сервера, IP:порт.</div></div>
     <input type="text" data-key="DNS_BOOTSTRAP" autocapitalize="off" autocorrect="off" spellcheck="false">
   </div>
   <div class="row col">
@@ -600,110 +696,32 @@ details.more > summary { color: var(--muted); }
 </section>
 
 <section class="tab" data-tab="warp">
-<h2>WARP</h2>
-<div class="card">
-  <div class="row">
-    <div class="txt"><div class="t">Туннель WARP</div>
-      <div class="s">Бесплатный туннель Cloudflare (AmneziaWG) для того, что не открывает обход: Telegram, сайты с блокировкой по IP или по стране. Работает, когда VPN на телефоне выключен.</div></div>
-    <label class="sw"><input type="checkbox" data-key="WARP_ENABLE"><span></span></label>
+<div class="tiles" style="margin-top:14px">
+  <div class="tile">
+    <div class="hd"><span class="nm">WARP</span><label class="sw"><input type="checkbox" data-key="WARP_ENABLE" aria-label="WARP"><span></span></label></div>
+    <div class="st"><span class="dot" id="warpDot"></span><div><b id="warpTitle">—</b><div id="warpSub"></div><div id="warpStats" hidden></div></div></div>
   </div>
-  <div class="row" data-dep="WARP_ENABLE" style="gap:10px"><span class="dot" id="warpDot"></span>
-    <div class="txt"><div class="t" id="warpTitle">—</div><div class="s" id="warpSub"></div><div class="s" id="warpStats" hidden></div></div></div>
+  <div class="tile">
+    <div class="hd"><span class="nm">Opera</span><label class="sw"><input type="checkbox" data-key="OPERA_ENABLE" aria-label="Opera"><span></span></label></div>
+    <div class="st"><span class="dot" id="operaDot"></span><div><b id="operaTitle">—</b><div id="operaSub"></div></div></div>
+  </div>
 </div>
+<div class="hint">WARP — бесплатный туннель Cloudflare, Opera — прокси браузера Opera. Работают, когда VPN на телефоне выключен: для того, что не открывает обход.</div>
 
-<h2>Для кого</h2>
+<h2>WARP</h2>
 <div class="card">
   <div class="row" data-dep="WARP_ENABLE">
     <div class="txt"><div class="t">Для самого телефона</div>
-      <div class="s">Выбранное ниже идёт через WARP у приложений телефона.</div></div>
+      <div class="s">Выбранное в «Что куда идёт» идёт через WARP и в приложениях телефона.</div></div>
     <label class="sw"><input type="checkbox" data-key="WARP_PHONE"><span></span></label>
   </div>
   <div class="row" data-dep="WARP_ENABLE">
     <div class="txt"><div class="t">Для раздачи</div>
-      <div class="s">Выбранное ниже идёт через WARP у устройств на раздаче. Выключено — раздача ходит без WARP.</div></div>
+      <div class="s">Выключено — устройства раздачи ходят без WARP.</div></div>
     <label class="sw"><input type="checkbox" data-key="WARP_TETHER"><span></span></label>
   </div>
-</div>
-
-<h2>Что идёт через WARP</h2>
-<div class="card">
-  <div class="row" data-dep="WARP_ENABLE">
-    <div class="txt"><div class="t">Telegram</div>
-      <div class="s">Без VPN Telegram закрыт по IP. Клиенты Telegram на телефоне (официальный, Telegram X, Nekogram и др.) при включённом «Для самого телефона» идут через WARP целиком — вместе с запасными узлами, на которые Telegram переходит при сбоях; устройства раздачи — по сетям Telegram.</div></div>
-    <label class="sw"><input type="checkbox" data-key="WARP_TELEGRAM"><span></span></label>
-  </div>
-  <div class="row" data-dep="WARP_ENABLE">
-    <div class="txt"><div class="t">Google</div>
-      <div class="s">Поиск, YouTube, Play — если оператор периодически режет Google. Скорость — как у WARP, в замерах 30–40 Мбит/с.</div></div>
-    <label class="sw"><input type="checkbox" data-key="WARP_GOOGLE"><span></span></label>
-  </div>
-  <div class="row col" data-dep="WARP_ENABLE">
-    <div class="txt"><div class="t">Сайты</div>
-      <div class="s">Домены через пробел. Сайты на общих CDN (Cloudflare, Akamai, Fastly, CloudFront) так не направить: на тех же адресах тысячи чужих сайтов — для них обход или VPN.</div></div>
-    <input type="text" data-key="WARP_DOMAINS" placeholder="example.com example.org" autocapitalize="off" autocorrect="off" spellcheck="false">
-  </div>
-  <div class="row col" data-dep="WARP_ENABLE">
-    <div class="txt"><div class="t">Приложения целиком</div>
-      <div class="s">Весь трафик выбранных приложений телефона; пока WARP не поднят — напрямую. Если приложение фильтрует AdGuard, его TCP (в том числе HTTPS) открывает AdGuard от своего имени, и оно идёт мимо WARP (проверено), а UDP и QUIC — через WARP. Чтобы шло целиком, исключите приложение в AdGuard. Клиенты Telegram добавлять не нужно — их берёт переключатель «Telegram».</div></div>
-    <div class="chips" id="warpChips"></div>
-    <div class="mt8"><button class="btn small" id="warpAdd">Добавить приложение</button></div>
-  </div>
-</div>
-
-<h2>Запасной выход Opera</h2>
-<div class="card">
-  <div class="row">
-    <div class="txt"><div class="t">Прокси Opera</div>
-      <div class="s">Другой маршрут рядом с WARP: для того, что обход и WARP не открывают или открывают плохо. Выход в Европе, только TCP и IPv4, скорость зависит от сети. Opera видит, куда вы ходите. Регистрация идёт через бесплатные прокси, сам трафик через них не идёт.</div></div>
-    <label class="sw"><input type="checkbox" data-key="OPERA_ENABLE"><span></span></label>
-  </div>
-  <div class="row" data-dep="OPERA_ENABLE" style="gap:10px"><span class="dot" id="operaDot"></span>
-    <div class="txt"><div class="t" id="operaTitle">—</div><div class="s" id="operaSub"></div></div></div>
-  <div class="row" data-dep="OPERA_ENABLE">
-    <div class="txt"><div class="t">Регион</div>
-      <div class="s">Где выход Opera. Азия и Америка дальше и обычно медленнее.</div></div>
-    <select data-key="OPERA_COUNTRY" style="width:auto" aria-label="Регион Opera">
-      <option value="EU">Европа</option><option value="AS">Азия</option><option value="AM">Америка</option>
-    </select>
-  </div>
-  <div class="row" data-dep="OPERA_ENABLE">
-    <div class="txt"><div class="t">Telegram</div>
-      <div class="s">Сети и клиенты Telegram. Звонки через Opera не идут. Выключите Telegram в WARP: включённый в обоих местах идёт по-разному на телефоне и раздаче.</div></div>
-    <label class="sw"><input type="checkbox" data-key="OPERA_TELEGRAM"><span></span></label>
-  </div>
-  <div class="row" data-dep="OPERA_ENABLE">
-    <div class="txt"><div class="t">Google</div>
-      <div class="s">Поиск, YouTube, Play. Скорость сильно зависит от сети: на части сетей это единицы Мбит/с.</div></div>
-    <label class="sw"><input type="checkbox" data-key="OPERA_GOOGLE"><span></span></label>
-  </div>
-  <div class="row col" data-dep="OPERA_ENABLE">
-    <div class="txt"><div class="t">Свой прокси для регистрации</div>
-      <div class="s">Вместо бесплатного списка: через него opera-proxy только получает адреса серверов, трафик сайтов через него не идёт. Пусто или прокси не отвечает — бесплатный список. Логин и пароль попадут в файл экспорта настроек, в логи — нет.</div></div>
-    <input type="text" data-key="OPERA_API_PROXY" placeholder="socks5://логин:пароль@адрес:порт" autocapitalize="off" autocorrect="off" spellcheck="false">
-  </div>
-  <div class="row col" data-dep="OPERA_ENABLE">
-    <div class="txt"><div class="t">Сайты</div>
-      <div class="s">Точные имена через пробел, поддомены сами не добавляются. Сайт на общем CDN пропускается; чтобы отправить его всё равно, поставьте перед именем «!»: например, !4pda.to. Тогда через Opera пойдут и другие сайты на этом адресе. Приложения из списка WARP идут через WARP.</div></div>
-    <input type="text" data-key="OPERA_DOMAINS" placeholder="!4pda.to app.4pda.to" autocapitalize="off" autocorrect="off" spellcheck="false">
-  </div>
-  <div class="row col" data-dep="OPERA_ENABLE">
-    <div class="txt"><div class="t">Приложения целиком</div>
-      <div class="s">Только TCP. Приложение не добавляйте сразу и в WARP: приоритет у WARP.</div></div>
-    <div class="chips" id="operaChips"></div>
-    <div class="mt8"><button class="btn small" id="operaAdd">Добавить приложение</button></div>
-  </div>
-  <div class="row" data-dep="OPERA_ENABLE">
-    <div class="txt"><div class="t">Для самого телефона</div><div class="s">Группы и сайты выше — у приложений телефона.</div></div>
-    <label class="sw"><input type="checkbox" data-key="OPERA_PHONE"><span></span></label>
-  </div>
-  <div class="row" data-dep="OPERA_ENABLE">
-    <div class="txt"><div class="t">Для раздачи</div><div class="s">Группы и сайты выше — у устройств на раздаче.</div></div>
-    <label class="sw"><input type="checkbox" data-key="OPERA_TETHER"><span></span></label>
-  </div>
-</div>
-
-<h2>Конфиги</h2>
-<div class="card">
+  <details id="warpCfg">
+    <summary>Конфиги</summary>
   <div id="warpList"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
   <div class="row btn-row eq">
     <button class="btn small" id="warpGen">Создать</button>
@@ -717,40 +735,76 @@ details.more > summary { color: var(--muted); }
   </div>
   <!-- без accept: у .conf на Android нет MIME, выбор файлов делал их серыми (только txt/zip); содержимое проверяет warpImport -->
   <input type="file" id="warpFile" multiple style="display:none">
+<div class="s" style="padding:0 16px 12px">«Создать» регистрирует конфиг в Cloudflare прямо с телефона, импорт — .conf из AmneziaVPN или WireGuard и их zip. «Подключить» делает конфиг основным; перестал отвечать — модуль сам берёт следующий. «Переподключить» — новая сессия того же.</div>
+<div class="s" style="padding:0 16px 12px">«Сохранить» кладёт конфиг в «Загрузки». В файле закрытый ключ: не публикуйте и удалите после переноса.</div>
+  </details>
 </div>
-<div class="hint">«Создать» регистрирует новый конфиг в Cloudflare прямо с телефона. Импорт — файлы .conf из AmneziaVPN или WireGuard и zip-экспорт AmneziaVPN. «Подключить» — сразу на этот конфиг, он становится основным и пробуется первым; если перестал отвечать, модуль сам переходит на следующий. «Переподключить» — тот же конфиг заново: новая сессия Cloudflare, иногда быстрее и с живыми серверами Telegram.</div>
-<div class="hint">«Сохранить» кладёт конфиг в «Загрузки», «Сохранить все в zip» — все сразу, как экспорт AmneziaVPN. В файле закрытый ключ: его видят приложения с доступом к памяти — не публикуйте и удалите после переноса.</div>
+
+<h2>Opera</h2>
+<div class="card">
+  <div class="row col" data-dep="OPERA_ENABLE">
+    <div class="txt"><div class="t">Регион</div>
+      <div class="s">Амстердам, Сингапур или Вашингтон. Азия и Америка дальше и обычно медленнее.</div></div>
+    <div class="seg" data-key="OPERA_COUNTRY" role="radiogroup" aria-label="Регион Opera" style="margin-top:10px"><button data-v="EU" role="radio">Европа</button><button data-v="AS" role="radio">Азия</button><button data-v="AM" role="radio">Америка</button></div>
+  </div>
+  <div class="row" data-dep="OPERA_ENABLE">
+    <div class="txt"><div class="t">Для самого телефона</div></div>
+    <label class="sw"><input type="checkbox" data-key="OPERA_PHONE"><span></span></label>
+  </div>
+  <div class="row" data-dep="OPERA_ENABLE">
+    <div class="txt"><div class="t">Для раздачи</div></div>
+    <label class="sw"><input type="checkbox" data-key="OPERA_TETHER"><span></span></label>
+  </div>
+  <details data-dep="OPERA_ENABLE">
+    <summary>Свой прокси для регистрации</summary>
+    <div class="row col" style="border-top:0;padding-top:0">
+      <div class="txt"><div class="s">Нужен, только если бесплатные не отвечают: через него opera-proxy получает адреса серверов, трафик сайтов через него не идёт. Логин и пароль попадут в файл экспорта настроек, в логи — нет.</div></div>
+      <input type="text" data-key="OPERA_API_PROXY" placeholder="socks5://логин:пароль@адрес:порт" aria-label="Свой прокси для регистрации Opera" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+  </details>
+  <div class="row"><div class="txt"><div class="s">Только TCP и IPv4, звонков нет. Opera видит, куда вы ходите.</div></div></div>
+</div>
+
+<h2>Что куда идёт</h2>
+<div class="card" id="routeGroups"></div>
+
+<h2>Сайты <small id="routeSitesN"></small></h2>
+<div class="card" id="routeSites"></div>
+
+<h2>Приложения <small id="routeAppsN"></small></h2>
+<div class="card" id="routeApps"></div>
+<div class="hint">Всё, чего нет здесь, идёт как выбрано на Главной: через VPN телефона или напрямую с обходом.</div>
 </section>
 
 <section class="tab" data-tab="tools">
-<h2>Диагностика сети</h2>
+<h2>Сеть</h2>
 <div class="card">
-  <div class="row col">
-    <div class="head">
-      <div class="txt"><div class="t">Проверка оператора</div>
-        <div class="s">Подменяет ли оператор DNS, рвёт ли соединения, включил ли белые списки, открыт ли Telegram. Около минуты. Ходит напрямую к закрытым сайтам: на части адресов это вызывает волну, тогда поможет «Переподключить сеть».</div></div>
-      <button class="btn small" id="diagBtn">Проверить</button>
-    </div>
-    <div class="kv" id="diagOut" style="display:none"></div>
-  </div>
   <div class="row col">
     <div class="txt"><div class="t">Переподключить сеть</div>
       <div class="s">Новая сессия у оператора и обычно новый адрес, без перезагрузки. Связь пропадёт на 5–20 секунд, раздача останется.</div></div>
     <button class="btn" id="netRenew">Переподключить</button>
     <div class="s" id="netExit" style="margin-top:8px"></div>
   </div>
+  <div class="row col">
+    <div class="head">
+      <div class="txt"><div class="t">Проверка оператора</div>
+        <div class="s">Подменяет ли DNS, рвёт ли соединения, есть ли белые списки, открыт ли Telegram. Около минуты. Ходит к закрытым сайтам напрямую и может вызвать волну — тогда «Переподключить сеть».</div></div>
+      <button class="btn small" id="diagBtn">Проверить</button>
+    </div>
+    <div class="kv" id="diagOut" style="display:none"></div>
+  </div>
 </div>
 
 
 <h2>Проверить сайт</h2>
 <div class="card pad">
-  <div class="s muted" style="font-size:13px;margin-top:2px">Доступность сайта мимо VPN — без обхода и с текущей стратегией.</div>
+  <div class="s muted" style="font-size:13px;margin-top:2px">Открывается ли сайт мимо VPN: без обхода и с ним.</div>
   <div class="inline">
     <input type="text" id="stHost" enterkeyhint="go" aria-label="Адрес сайта" placeholder="youtube.com" autocapitalize="off" autocorrect="off" spellcheck="false">
     <button class="btn" id="stBtn">Проверить</button>
   </div>
   <button class="btn" id="ytBtn" style="margin-top:10px">Скорость YouTube</button>
-  <div class="s muted" style="font-size:12px;margin-top:4px">Скорость загрузки с серверов Google под именем видеосервера — без обхода и с ним. ~15 секунд, до ~80 МБ трафика.</div>
+  <div class="s muted" style="font-size:12px;margin-top:4px">Скорость с серверов Google без обхода и с ним. 15 секунд, до 80 МБ.</div>
   <div id="stRes" class="mt8" style="font-size:14px"></div>
 </div>
 
@@ -761,12 +815,12 @@ details.more > summary { color: var(--muted); }
     <button class="btn small" id="dohBtn">Проверить</button>
   </div>
   <div class="row wrap">
-    <div class="txt"><div class="t">Сбросить кэш DNS</div><div class="s" id="dnsFlushRes">Если сайт пишет «недоступно в вашем регионе», хотя должен открываться. На ноутбуке затем — ipconfig /flushdns или переподключение к точке.</div></div>
+    <div class="txt"><div class="t">Сбросить кэш DNS</div><div class="s" id="dnsFlushRes">Если сайт пишет «недоступно в вашем регионе». На ноутбуке потом ipconfig /flushdns.</div></div>
     <button class="btn small" id="dnsFlushBtn">Сбросить</button>
   </div>
   <div class="row col">
     <div class="head">
-      <div class="txt"><div class="t">Проверка адресов Meta</div><div class="s">Адреса Instagram и Facebook, полученные с европейским ECS. Рабочие обычно начинаются с 57.144.</div></div>
+      <div class="txt"><div class="t">Проверка адресов Meta</div><div class="s">Адреса Instagram и Facebook с европейским ECS. Рабочие обычно на 57.144.</div></div>
       <button class="btn small" id="metaBtn">Проверить</button>
     </div>
     <div id="metaRes" style="font-size:14px"></div>
@@ -777,12 +831,12 @@ details.more > summary { color: var(--muted); }
 <div class="card">
   <div class="row">
     <div class="txt"><div class="t">Адаптация TCP к качеству связи</div>
-      <div class="s">Раз в ~20 секунд проверяет связь и при потерях или большой задержке перенастраивает TCP.</div></div>
+      <div class="s">Раз в 20 секунд проверяет связь и при потерях или задержке перенастраивает TCP.</div></div>
     <label class="sw"><input type="checkbox" data-key="NET_PROFILE_ADAPTIVE"><span></span></label>
   </div>
   <div class="row">
     <div class="txt"><div class="t">Состояние в описании модуля</div>
-      <div class="s">Текущий режим — в описании модуля в менеджере (KernelSU, Magisk).</div></div>
+      <div class="s">Режим виден в списке модулей KernelSU и Magisk.</div></div>
     <label class="sw"><input type="checkbox" data-key="STATUS_IN_DESCRIPTION"><span></span></label>
   </div>
 </div>
@@ -791,18 +845,18 @@ details.more > summary { color: var(--muted); }
 <div class="card">
   <div class="row wrap">
     <div class="txt"><div class="t">Экспорт</div>
-      <div class="s" id="cfgExpRes">Сохранённые настройки и свой список сайтов обхода — файлом в «Загрузки»: для другого телефона или после переустановки. Конфиги WARP — на вкладке WARP.</div></div>
+      <div class="s" id="cfgExpRes">Настройки и свой список сайтов — файлом в «Загрузки». Конфиги WARP — на вкладке «Выходы».</div></div>
     <button class="btn small" id="cfgExp">Сохранить</button>
   </div>
   <div class="row wrap">
     <div class="txt"><div class="t">Импорт</div>
-      <div class="s" id="cfgImpRes">Настройки из файла подставятся в форму — проверьте и нажмите «Применить». Чего нет в файле, вернётся к умолчанию.</div></div>
+      <div class="s" id="cfgImpRes">Подставит настройки в форму, запишутся после «Применить». Чего нет в файле — по умолчанию.</div></div>
     <button class="btn small" id="cfgImp">Выбрать файл</button>
     <input type="file" id="cfgFile" style="display:none">
   </div>
   <div class="row wrap">
     <div class="txt"><div class="t">Сбросить все настройки</div>
-      <div class="s">Вернуть к умолчаниям — после «Применить». Свой список сайтов, конфиги WARP и стратегии сетей не трогаются.</div></div>
+      <div class="s">Вернёт умолчания после «Применить». Свой список сайтов, конфиги WARP и стратегии сетей не трогаются.</div></div>
     <button class="btn small" id="resetAll">Сбросить</button>
   </div>
 </div>
@@ -811,7 +865,7 @@ details.more > summary { color: var(--muted); }
 <div class="card">
   <div class="row wrap">
     <div class="txt"><div class="t">Отправить логи</div>
-      <div class="s" id="logSendRes">Журналы и настройки одним файлом в «Загрузки» и сразу в «Поделиться». В файле есть названия сетей Wi-Fi и локальные адреса.</div></div>
+      <div class="s" id="logSendRes">Журналы и настройки одним файлом в «Загрузки» и в «Поделиться». В файле есть имена сетей Wi-Fi и локальные адреса.</div></div>
     <button class="btn small" id="logSend">Отправить</button>
   </div>
   <details id="zevBox">
@@ -832,13 +886,17 @@ details.more > summary { color: var(--muted); }
     <pre class="log" id="log"></pre>
   </details>
 </div>
+
+<h2>Автор и помощь</h2>
+<div class="card links" id="links"></div>
+<p class="foot" id="foot">VPN Tethering Ultra, Kubarev</p>
 </section>
 
 <nav class="tabbar" id="tabbar"><div class="in">
   <button data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg><span>Главная</span></button>
   <button data-tab="bypass"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11l-3-3"/><path d="M20 17H9l3 3"/></svg><span>Обход</span></button>
-  <button data-tab="net"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg><span>Сеть</span></button>
-  <button data-tab="warp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18h10.5a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.6 9.1 4.5 4.5 0 0 0 7 18z"/></svg><span>WARP</span></button>
+  <button data-tab="warp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h6"/><path d="M10 12c3 0 4-6 8-6"/><path d="M10 12c3 0 4 6 8 6"/><circle cx="19" cy="6" r="1.5"/><circle cx="19" cy="18" r="1.5"/></svg><span>Выходы</span></button>
+  <button data-tab="net"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg><span>DNS</span></button>
   <button data-tab="tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>Сервис</span></button>
 </div></nav>
 
@@ -938,9 +996,59 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const errText = (r, def) => r.out.trim().replace(/^ERR /, '') || def;
 const isOk = (r) => /^OK/.test(r.out.trim());
 
+// иконки пути трафика на Главной
+const PIC = {
+  devs: '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h10A1.5 1.5 0 0 1 16 6.5V14H3z"/><path d="M7 18h5"/><rect x="17" y="8" width="5" height="11" rx="1.2"/>',
+  phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M11 18.5h2"/>',
+  vpn: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
+  op: '<path d="M5 19v-6"/><path d="M10 19V9"/><path d="M15 19V6"/><path d="M20 19V3"/>',
+  net: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>'
+};
+const pnode = (cls, ic, nm, cp) => '<div class="node ' + cls + '"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+  PIC[ic] + '</svg></div><div class="nm">' + esc(nm) + '</div><div class="cp">' + esc(cp || '') + '</div></div>';
+let CLIENTS_N = -1;   // устройств в раздаче (loadClients), -1 — ещё не знаем
+// волна: по сторожу или по проверке после смены сети (свежей, до 30 мин), только мобильная сеть
+const isWave = (s) => {
+  const ex = (s.exit || '').split('|'), exw = ex[4] === '000' && ex[5] && ex[5] !== '000' && Date.now() / 1000 - +ex[0] < 1800;
+  return (s.zwave === '1' || exw) && (s.net_key || '').indexOf('mobile:') === 0 && s.mode !== 'vpn';
+};
+function renderTop(s, names, exTxt, exOld) {
+  const run = s.daemon === '1', vpn = s.mode === 'vpn', wave = run && names && isWave(s);
+  document.body.dataset.route = !run || !names ? 'off' : vpn ? 'vpn' : s.mode === 'blocked' ? 'blocked' : wave ? 'wave' : 'direct';
+  // путь трафика: устройства -> телефон -> VPN или оператор -> интернет
+  const ex = (s.exit || '').split('|');
+  const dev = CLIENTS_N > 0 ? CLIENTS_N + ' устр.' : 'Устройства';
+  $('#path').innerHTML = !run || !names ? '' :
+    pnode('', 'devs', dev, names) + '<div class="link"></div>' +
+    pnode('', 'phone', 'Телефон', s.zapret === 'on' && !vpn ? 'с обходом' : '') +
+    '<div class="link' + (s.mode === 'blocked' ? ' dim' : '') + '"></div>' +
+    (vpn || s.mode === 'blocked' ? pnode(s.mode === 'blocked' ? 'dim' : 'out', 'vpn', 'VPN', s.mode === 'blocked' ? 'не подключён' : '')
+      : pnode('out', 'op', s.net_label || 'Оператор', IFNAME(s.wan || '') === s.wan ? (s.wan || '') : '')) +
+    '<div class="link' + (wave ? ' cut' : s.mode === 'blocked' ? ' dim' : '') + '"></div>' +
+    pnode(s.mode === 'blocked' ? 'dim' : '', 'net', 'Интернет', vpn ? 'через VPN' : ex[3] || '');
+  // режим: две кнопки вместо одной «Раздавать …»
+  const tb = $('#toggleBtn');
+  $$('#modeSeg button').forEach((b) => {
+    const on = b.dataset.m === (s.target === 'vpn' ? 'vpn' : 'direct');
+    b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false');
+    b.disabled = tb.disabled;
+  });
+  // выход и волна — под карточкой
+  $('#waveBox').innerHTML = !wave ? '' :
+    '<div class="t">Google не отвечает по HTTPS</div><p>ТСПУ душит Google на этом адресе' + (ex[2] ? ' (' + esc(ex[2]) + ')' : '') +
+    '. Обычно помогает новый адрес: связь пропадёт на 5–20 секунд, точка доступа останется.</p>' +
+    '<button class="btn" data-renew style="background:var(--amber);border-color:var(--amber);color:var(--card)">Переподключить сеть</button>' +
+    '<p class="wl">Новый адрес не помог, и открываются только российские сайты? Похоже на белые списки: оператор пропускает только разрешённое. Здесь поможет VPN, который умеет их обходить.</p>';
+  $('#exitLine').innerHTML = !run || !names || vpn || wave || s.mode === 'blocked' || !(exTxt || exOld) ? '' :
+    '<div class="txt"><div class="t">' + (exOld ? 'Проверяю новый выход и Google…' : esc(exTxt.split(' · ')[0])) + '</div>' +
+    (exOld ? '' : '<div class="s">' + esc(exTxt.split(' · ').slice(1).join(', ')) + '</div>') + '</div>' +
+    '<button class="btn small" data-renew>Новый адрес</button>';
+}
+
 function renderStatus(s) {
   ST = s;
   $('#ver').textContent = s.module_version || '';
+  $('#foot').textContent = 'VPN Tethering Ultra ' + (s.module_version || '') + ', Kubarev';
   const dot = $('#heroDot'), title = $('#heroTitle'), sub = $('#heroSub'), btn = $('#toggleBtn');
   const names = friendly(s.ifaces);
   const up = esc(s.dns_upstream || 'DoH');
@@ -949,12 +1057,14 @@ function renderStatus(s) {
     dot.className = 'dot big amber'; title.textContent = 'Модуль запускается';
     sub.textContent = 'Телефон ещё загружается, это до минуты.';
     $('#kv').innerHTML = ''; $('#health').innerHTML = ''; btn.disabled = true; btn.textContent = 'Переключить';
+    renderTop(s, '', '', false);
     return;
   }
   if (s.daemon !== '1') {
     dot.className = 'dot big red'; title.textContent = 'Модуль не запущен';
     sub.textContent = 'Перезагрузите телефон. Если не поможет — отправьте логи (вкладка «Сервис»).';
     $('#kv').innerHTML = ''; $('#health').innerHTML = ''; btn.disabled = true; btn.textContent = 'Переключить';
+    renderTop(s, '', '', false);
     return;
   }
   btn.disabled = false;
@@ -1069,6 +1179,7 @@ function renderStatus(s) {
   const exOld = renewTs && s.vpn_up !== '1' && !(+ex[0] > renewTs);
   if (exOld && Date.now() / 1000 - renewTs > 120) renewTs = 0;
   if ($('#netExit')) $('#netExit').textContent = exOld ? 'Проверяю новый выход и Google…' : exTxt ? 'Сейчас: ' + exTxt : '';
+  renderTop(s, names, exTxt, exOld);
   if (s.opera && s.opera !== 'disabled') { const o = operaState(s); h += kvRow('Opera', esc(o[1] + (o[2] ? ' · ' + o[2] : '')), o[0]); }
   if (s.quic_uids) h += kvRow('Без QUIC', esc(String(s.quic_uids.split(' ').length)) + ' прил.');
   const bad = (s.conf_note || '').split(' ').filter((x) => x[0] === '!' || x[0] === '?');
@@ -1100,7 +1211,7 @@ function renderHealth(s, w, confBad) {
   if (s.opera && s.opera !== 'disabled') { const o = operaState(s); add('Opera', o[0], o[0] === 'red' || (o[0] === 'amber' && o[2]) ? o[1] + (o[2] ? '. ' + o[2] : '') : ''); }
   // волна: по сторожу или по проверке после смены сети (свежей, до 30 мин)
   const ex = (s.exit || '').split('|'), exw = ex[4] === '000' && ex[5] && ex[5] !== '000' && Date.now() / 1000 - +ex[0] < 1800;
-  if ((s.zwave === '1' || exw) && (s.net_key || '').indexOf('mobile:') === 0) add('Волна', 'amber', 'ТСПУ душит Google на этом адресе. Обычно помогает «Переподключить сеть» на вкладке «Сервис».');
+  if ((s.zwave === '1' || exw) && (s.net_key || '').indexOf('mobile:') === 0) add('Волна', 'amber', s.mode === 'vpn' ? 'ТСПУ душит Google на этом адресе. Без VPN поможет «Переподключить сеть» на вкладке «Сервис».' : '');
   if (s.curl_src === 'none') add('curl', 'red', 'Нет curl: WARP, подбор и проверки сайтов не работают. Отправьте логи (вкладка «Сервис»).');
   if (s.stealth_rivals) add('Лишний модуль', 'amber', s.stealth_rivals + ': подробности в «Подробнее».');
   if (confBad) add('Настройки', 'amber', 'Часть настроек пропущена: подробности в «Подробнее».');
@@ -1151,6 +1262,7 @@ async function loadConf() {
 function renderForm() {
   $$('[data-key]').forEach((el) => {
     const k = el.dataset.key, v = CUR[k] || '';
+    if (el.classList.contains('seg')) return;   // кнопки — в renderDeps
     if (el.type === 'checkbox') el.checked = v === '1';
     else el.value = v;
   });
@@ -1161,13 +1273,100 @@ function renderForm() {
   $('#upSelect').value = opt ? first : 'custom';
   $('#upCustom').style.display = opt ? 'none' : '';
   if (!opt) $('#upCustom').value = first;
+  renderUpAi();
   renderChips();
   renderDeps();
   renderBar();
   renderZnet();
 }
 
+// ---------------------------------------------------------------- что куда идёт (выходы)
+const GROUPS = [['TELEGRAM', 'Telegram', 'Без VPN Telegram закрыт по IP. Через Opera звонки не идут.'],
+  ['GOOGLE', 'Google', 'Поиск, YouTube, Play — если оператор режет Google. Скорость — как у выхода.']];
+const domList = (k) => (CUR[k] || '').split(/\s+/).filter(Boolean);
+const segHtml = (attr, opts, cur, dis) => '<div class="seg" role="radiogroup">' + opts.map(([v, l]) =>
+  '<button ' + attr + ' data-v="' + v + '" role="radio" aria-checked="' + (cur === v) + '" class="' + (cur === v ? 'on' : '') + '"' +
+  (dis[v] ? ' disabled' : '') + '>' + l + '</button>').join('') + '</div>';
+let ROUTE_HTML = '';
+function renderRoutes() {
+  const w = CUR.WARP_ENABLE === '1', o = CUR.OPERA_ENABLE === '1', dis = { warp: !w, opera: !o };
+  const goneTxt = (r) => (r === 'warp' ? 'WARP выключен' : 'Opera выключена') + ', идёт напрямую';
+  const gone = (r) => (r === 'warp' && !w) || (r === 'opera' && !o);
+  const g = GROUPS.map(([k, t, sub]) => {
+    const r = CUR['WARP_' + k] === '1' ? 'warp' : CUR['OPERA_' + k] === '1' ? 'opera' : 'direct';
+    return '<div class="row col route-row"><div class="txt"><div class="t">' + t + '</div><div class="s">' + (gone(r) ? goneTxt(r) : sub) + '</div></div>' +
+      segHtml('data-grp="' + k + '"', [['direct', 'Прямо'], ['warp', 'WARP'], ['opera', 'Opera']], r, dis) + '</div>';
+  }).join('');
+  const item = (kind, id, name, sub, r) => '<div class="row item' + (gone(r) ? ' gone' : '') + '"><div class="txt"><div class="t">' + esc(name) + '</div>' +
+    (gone(r) ? '<div class="s">' + goneTxt(r) + '</div>' : sub ? '<div class="s">' + esc(sub) + '</div>' : '') + '</div>' +
+    segHtml('data-' + kind + '="' + esc(id) + '"', [['warp', 'WARP'], ['opera', 'Opera']], r, {}) +
+    '<button class="x" data-rm' + kind + '="' + esc(id) + '" aria-label="Убрать ' + esc(name) + '">✕</button></div>';
+  const sites = domList('WARP_DOMAINS').map((d) => [d, 'warp']).concat(domList('OPERA_DOMAINS').map((d) => [d, 'opera']));
+  const sh = sites.map(([d, r]) => item('site', d, d.replace(/^!/, ''), /^!/.test(d) ? 'Вместе с соседями по адресу CDN' : '', r)).join('') +
+    '<div class="row col"><div class="inline" style="margin-top:-10px"><input type="text" id="routeSiteIn" placeholder="Сайт, например claude.ai" aria-label="Новый сайт" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="routeSiteAdd">Добавить</button></div>' +
+    '<div class="s">Новый сайт идёт через WARP. Сайты на общих CDN (Cloudflare, Akamai) так не направить; для Opera можно поставить «!» перед именем — тогда пойдут и соседи по адресу.</div></div>';
+  const apps = appKeyList('WARP_APPS').map((p) => [p, 'warp']).concat(appKeyList('OPERA_APPS').map((p) => [p, 'opera']));
+  const ah = apps.map(([p, r]) => item('app', p, label(p), label(p) !== p ? p : '', r)).join('') +
+    '<div class="row col"><div><button class="btn small" id="routeAppAdd">Добавить приложение</button></div>' +
+    '<div class="s mt8">Весь трафик приложения целиком, пока выход поднят. Через Opera — только TCP. Если приложение фильтрует AdGuard, исключите его там: иначе его HTTPS идёт мимо выхода. Клиенты Telegram добавлять не нужно.</div></div>';
+  const html = g + '\u0001' + sh + '\u0001' + ah;
+  if (html === ROUTE_HTML) return;   // перерисовка сбивала бы набор в поле «Новый сайт»
+  const typed = $('#routeSiteIn') ? $('#routeSiteIn').value : '';
+  ROUTE_HTML = html;
+  $('#routeGroups').innerHTML = g; $('#routeSites').innerHTML = sh; $('#routeApps').innerHTML = ah;
+  $('#routeSiteIn').value = typed;
+  $('#routeSitesN').textContent = sites.length || ''; $('#routeAppsN').textContent = apps.length || '';
+}
+function moveItem(kind, id, to) {
+  const [wk, ok] = kind === 'site' ? ['WARP_DOMAINS', 'OPERA_DOMAINS'] : ['WARP_APPS', 'OPERA_APPS'];
+  const lst = kind === 'site' ? domList : appKeyList;
+  const nw = lst(wk).filter((x) => x !== id), no = lst(ok).filter((x) => x !== id);
+  if (to === 'warp') nw.push(kind === 'site' ? id.replace(/^!/, '') : id);
+  if (to === 'opera') no.push(id);
+  CUR[wk] = Array.from(new Set(nw)).join(' '); setCur(ok, Array.from(new Set(no)).join(' '));
+}
+$('#routeGroups').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-grp]'); if (!b || b.disabled) return;
+  const k = b.dataset.grp, v = b.dataset.v;
+  CUR['WARP_' + k] = v === 'warp' ? '1' : '0'; setCur('OPERA_' + k, v === 'opera' ? '1' : '0');
+});
+['#routeSites', '#routeApps'].forEach((id) => $(id).addEventListener('click', async (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.site !== undefined) moveItem('site', b.dataset.site, b.dataset.v);
+  else if (b.dataset.app !== undefined) moveItem('app', b.dataset.app, b.dataset.v);
+  else if (b.dataset.rmsite !== undefined) moveItem('site', b.dataset.rmsite, '');
+  else if (b.dataset.rmapp !== undefined) moveItem('app', b.dataset.rmapp, '');
+  else if (b.id === 'routeSiteAdd') {
+    const raw = $('#routeSiteIn').value.trim().toLowerCase();
+    const bang = raw[0] === '!', d = raw.replace(/^!/, '').replace(/^https?:\/\//, '').replace(/[/?#].*$/, '').replace(/^\.+|\.+$/g, '');
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d)) { toast(raw ? '«' + raw + '» — не сайт' : 'Введите сайт, например claude.ai'); $('#routeSiteIn').focus(); return; }
+    if (domList('WARP_DOMAINS').concat(domList('OPERA_DOMAINS')).some((x) => x.replace(/^!/, '') === d)) { toast(d + ' уже в списке'); return; }
+    $('#routeSiteIn').value = '';
+    moveItem('site', bang ? '!' + d : d, bang ? 'opera' : 'warp');
+  } else if (b.id === 'routeAppAdd') { SHEET_KEY = 'WARP_APPS'; $('#quicAdd').click(); }
+}));
+$('#routeSites').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'routeSiteIn') { e.preventDefault(); $('#routeSiteAdd').click(); } });
+
+// DNS: открывает ли выбранный сервер ИИ-сервисы; что значит выбор «DNS раздачи при VPN»
+function renderUpAi() {
+  const v = upValue(), grp = Array.from($('#upSelect').querySelectorAll('optgroup')[0].children).map((o) => o.value);
+  const ai = grp.includes(v), noGem = /comss|commonnet/.test(v);
+  $('#upAi').innerHTML = !v || $('#upSelect').value === 'custom' ? '' : '<span class="dot ' + (ai ? noGem ? 'amber' : 'green' : '') + '"></span>' +
+    'ИИ-сервисы без VPN: ' + (ai ? noGem ? 'ChatGPT и Claude, Gemini — нет' : 'открываются' : 'нет');
+}
+const DNS_VPN_SUB = {
+  dnat: 'Отвечает VPN-клиент. Нужно, если он выбирает путь по доменам: fake-ip в sing-box, NekoBox, Incy, AmneziaVPN по сайтам.',
+  cache: 'Отвечает VPN-клиент, модуль запоминает ответы: знакомые сайты открываются быстрее.',
+  doh: 'Модуль спрашивает Google и Cloudflare через туннель. Настоящие адреса.',
+  geo: 'Тот же сервер, что выбран выше, через туннель. ChatGPT, Gemini и Claude открываются и сразу после выключения VPN, без сброса кэша. Выбор пути по доменам в VPN-клиенте для раздачи не работает.'
+};
+
 function renderDeps() {
+  renderRoutes();
+  if ($('#dnsVpnSub')) $('#dnsVpnSub').textContent = DNS_VPN_SUB[CUR.DNS_VPN] || 'DNS для устройств раздачи, когда VPN включён.';
+  $$('.seg[data-key]').forEach((g) => g.querySelectorAll('button').forEach((b) => {
+    const on = b.dataset.v === CUR[g.dataset.key]; b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false');
+  }));
   // data-depoff — настройка, которая главнее: включена — эта не действует (гасим)
   $$('[data-dep]').forEach((row) => { row.classList.toggle('off', CUR[row.dataset.dep] !== '1' || (!!row.dataset.depoff && CUR[row.dataset.depoff] === '1')); });
   // главный выключатель — только на Главной; во вкладках подсказка, если он выключен
@@ -1203,12 +1402,15 @@ function setCur(k, v) {
   renderDeps(); renderBar();
 }
 
-$$('[data-key]').forEach((el) => {
+$$('[data-key]:not(.seg)').forEach((el) => {
   const k = el.dataset.key;
   el.addEventListener(el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input', () => {
     setCur(k, el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value.trim());
   });
 });
+$$('.seg[data-key]').forEach((g) => g.addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (b && !b.disabled) setCur(g.dataset.key, b.dataset.v);
+}));
 $('#zlist').addEventListener('input', () => { $('#zlistErr').style.display = 'none'; renderBar(); });
 // для диктора: у переключателя и поля в строке своей подписи нет — берём заголовок строки
 $$('.row input, .row select, .row textarea').forEach((el) => {
@@ -1242,6 +1444,7 @@ function clientRow(f) {
 async function loadClients() {
   const r = await ctl('clients');
   const rows = (r.out || '').split('\n').filter((l) => l.split('|').length >= 7).map((l) => l.split('|'));
+  CLIENTS_N = rows.filter((f) => f[6] !== '1' && f[2] !== '-').length;
   $('#clients').innerHTML = rows.length ? rows.map(clientRow).join('')
     : '<div class="row"><div class="txt"><div class="s">Сейчас никто не подключён к раздаче.</div></div></div>';
 }
@@ -1282,7 +1485,7 @@ $('#upSelect').addEventListener('change', () => {
   const custom = $('#upSelect').value === 'custom';
   $('#upCustom').style.display = custom ? '' : 'none';
   if (custom) $('#upCustom').focus();
-  setCur('DNS_UPSTREAMS', upValue());
+  setCur('DNS_UPSTREAMS', upValue()); renderUpAi();
 });
 $('#upCustom').addEventListener('input', () => setCur('DNS_UPSTREAMS', upValue()));
 
@@ -1294,8 +1497,6 @@ let SHEET_KEY = 'QUIC_BLOCK_APPS';
 const appKeyList = (k) => (CUR[k] || '').split(/\s+/).filter(Boolean);
 const quicList = () => appKeyList(SHEET_KEY);
 const CHIPS = { QUIC_BLOCK_APPS: ['#quicChips', 'Нет приложений — QUIC ни у кого не закрыт.'],
-  WARP_APPS: ['#warpChips', 'Нет — только Telegram, Google и сайты выше.'],
-  OPERA_APPS: ['#operaChips', 'Нет — только группы и сайты выше.'],
   ZAPRET_EXCL_APPS: ['#zexChips', 'Нет — обход для всех приложений телефона.'] };
 
 function renderChips() {
@@ -1306,7 +1507,7 @@ function renderChips() {
       : '<div class="empty">' + CHIPS[k][1] + '</div>';
   });
 }
-['#quicChips', '#warpChips', '#operaChips', '#zexChips'].forEach((id) => $(id).addEventListener('click', (e) => {
+['#quicChips', '#zexChips'].forEach((id) => $(id).addEventListener('click', (e) => {
   const p = e.target.dataset && e.target.dataset.rm, k = e.target.dataset && e.target.dataset.rk;
   if (!p || !k) return;
   setCur(k, appKeyList(k).filter((x) => x !== p).join(' '));
@@ -1359,14 +1560,15 @@ $('#appList').addEventListener('click', (e) => {
   const row = e.target.closest('.app'); if (!row) return;
   const p = row.dataset.pkg, list = quicList();
   setCur(SHEET_KEY, (list.includes(p) ? list.filter((x) => x !== p) : list.concat(p)).join(' '));
+  // у приложения один выход: добавили в WARP — убираем из Opera, и наоборот
+  const other = { WARP_APPS: 'OPERA_APPS', OPERA_APPS: 'WARP_APPS' }[SHEET_KEY];
+  if (other && !list.includes(p) && appKeyList(other).includes(p)) setCur(other, appKeyList(other).filter((x) => x !== p).join(' '));
   row.classList.toggle('sel');
   renderChips();
 });
 function openSheet(on) {
   $('#sheet').classList.toggle('show', on); $('#sheetBg').classList.toggle('show', on);
 }
-$('#warpAdd').addEventListener('click', () => { SHEET_KEY = 'WARP_APPS'; $('#quicAdd').click(); });
-$('#operaAdd').addEventListener('click', () => { SHEET_KEY = 'OPERA_APPS'; $('#quicAdd').click(); });
 $('#zexAdd').addEventListener('click', () => { SHEET_KEY = 'ZAPRET_EXCL_APPS'; $('#quicAdd').click(); });
 $('#quicAdd').addEventListener('click', async (e) => {
   if (e.isTrusted) SHEET_KEY = 'QUIC_BLOCK_APPS';
@@ -1409,7 +1611,11 @@ async function waitAck(token, sec) {
 }
 
 // ошибка сохранения — с названием настройки со страницы, а не с ключом конфига
+const KEY_TITLE = { WARP_TELEGRAM: 'Telegram через WARP', OPERA_TELEGRAM: 'Telegram через Opera', WARP_GOOGLE: 'Google через WARP',
+  OPERA_GOOGLE: 'Google через Opera', WARP_DOMAINS: 'Сайты через WARP', OPERA_DOMAINS: 'Сайты через Opera',
+  WARP_APPS: 'Приложения через WARP', OPERA_APPS: 'Приложения через Opera', OPERA_COUNTRY: 'Регион Opera' };
 function keyTitle(k) {
+  if (KEY_TITLE[k]) return KEY_TITLE[k];
   const el = $('[data-key="' + k + '"]'), t = el && el.closest('.row') && el.closest('.row').querySelector('.t');
   return t ? t.textContent : k;
 }
@@ -1507,9 +1713,18 @@ $('#cfgFile').addEventListener('change', async (e) => {
 });
 
 // ---------------------------------------------------------------- переключение
+$('#modeSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b || b.disabled) return;
+  if (b.dataset.m !== (ST.target === 'vpn' ? 'vpn' : 'direct')) $('#toggleBtn').click();
+});
+['#exitLine', '#waveBox'].forEach((id) => $(id).addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-renew]'); if (!b) return;
+  $('#netRenew').click();
+}));
 $('#toggleBtn').addEventListener('click', async () => {
   if (busy) return;
   busy = true; const btn = $('#toggleBtn'); btn.disabled = true; btn.textContent = 'Переключаю…';
+  $$('#modeSeg button').forEach((x) => { x.disabled = true; });
   try {
     const r = await ctl('toggle');
     const m = /^OK (\S+)/.exec(r.out.trim());
@@ -1577,7 +1792,7 @@ function warpState(s) {
     default: return { d: '', t: 'Выключен', s: '' };
   }
 }
-// [цвет, заголовок, подпись]: карточка на вкладке WARP и строка на Главной
+// [цвет, заголовок, подпись]: плитка на вкладке «Выходы» и строка на Главной
 function operaState(s) {
   const a = (s.opera_endpoint || '').replace(/:\d+$/, '');
   const pause = s.vpn_up === '1', none = s.opera_ips === '0';
@@ -2198,6 +2413,7 @@ function renderZnet() {
     ? 'Нет Wi-Fi или мобильной сети, или модуль её ещё не видел. Работает стратегия по умолчанию.'
     : e ? 'Своя: ' + stratName(e.st, e.args) + (e.note ? ' · ' + e.note : '') + (e.date ? ' · ' + e.date : '')
     : 'Своей нет, работает стратегия по умолчанию. Запустите подбор или выберите вручную.';
+  $('#pickTip').hidden = !!(e && e.st === 'custom' && e.yt);
   const presets = Array.from($('[data-key=ZAPRET_STRATEGY]').options).filter((o) => o.value !== 'custom');
   const sel = $('#znetSel');
   sel.innerHTML = '<option value="">По умолчанию — ' + esc(def) + '</option>' +
@@ -2287,6 +2503,37 @@ $('#znetList').addEventListener('click', async (e) => {
   toast(isOk(r) ? 'Забыто' : errText(r, 'Не получилось')); await loadZnet();
 });
 
+// ---------------------------------------------------------------- автор и помощь
+const LINKS = { tg: 'https://t.me/kubarev_mods', chat: 'https://t.me/+LyVq9jqT-802MGIy',
+  '4pda': 'https://4pda.to/forum/index.php?showtopic=1097835&view=findpost&p=142785848', gh: 'https://github.com/JagKubarev/vpn-tethering-ultra' };
+const LINK_ROWS = [['tg', 'Канал в Telegram', 'Новости и релизы', '<path d="M21 4L3 11l6 2 2 6 3-4 5 4z"/><path d="M9 13l8-6"/>'],
+  ['chat', 'Чат', 'Вопросы, логи, помощь', '<path d="M4 5h16v11H9l-5 4z"/>'],
+  ['4pda', 'Модуль на 4PDA', 'Описание, обсуждение и инструкции', '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h5"/>'],
+  ['gh', 'GitHub', 'Код, релизы, сообщить об ошибке', '<path d="M9 19c-4 1-4-2-6-2m12 4v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1-.3-3.4 1.3a11.6 11.6 0 0 0-6 0C6.8 2.8 5.8 3.1 5.8 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4.4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/>']];
+function renderLinks() {
+  $('#links').innerHTML = LINK_ROWS.map(([k, t, sub, ic]) => '<div class="row" role="link" tabindex="0" data-link="' + esc(LINKS[k]) + '">' +
+    '<span class="lic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + ic + '</svg></span>' +
+    '<div class="txt"><div class="t">' + t + '</div><div class="s">' + sub + '</div></div>' +
+    '<svg class="go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg></div>').join('');
+}
+// свежие ссылки с GitHub (webctl links: «ключ=адрес», проверенные); нет сети — остаются вшитые
+async function loadLinks() {
+  renderLinks();
+  const r = await ctlBg('links');
+  (r.out || '').split('\n').forEach((l) => {
+    const m = /^(tg|chat|4pda|gh)=(https:\/\/(t\.me|4pda\.to|github\.com)\/\S+)$/.exec(l.trim());
+    if (m) LINKS[m[1]] = m[2];
+  });
+  renderLinks();
+}
+const openLink = async (u) => {
+  if (!HAS_KSU) { window.open(u, '_blank', 'noopener'); return; }
+  const r = await ctl('open ' + q(u));
+  if (!isOk(r)) toast(errText(r, 'Не открылась: ' + u));
+};
+$('#links').addEventListener('click', (e) => { const r = e.target.closest('[data-link]'); if (r) openLink(r.dataset.link); });
+$('#links').addEventListener('keydown', (e) => { const r = e.target.closest('[data-link]'); if (r && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openLink(r.dataset.link); } });
+
 // ---------------------------------------------------------------- адреса Meta
 $('#metaBtn').addEventListener('click', async () => {
   const btn = $('#metaBtn'), res = $('#metaRes');
@@ -2313,7 +2560,8 @@ $('#metaBtn').addEventListener('click', async () => {
   // сбой одной загрузки не должен оставить страницу без опроса статуса
   await Promise.all([loadStatus(), loadConf(), loadZ(), loadZnet()].map((p) => p.catch((e) => console.error(e))));
   scRefresh();
-  loadApps().then(renderChips);
+  loadApps().then(() => { renderChips(); ROUTE_HTML = ''; renderRoutes(); });
+  loadLinks();
   setInterval(() => { if (!document.hidden && !busy && !stBusy) loadStatus(); }, 3000);
   loadClients();
   setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="home"]').classList.contains('on')) loadClients(); }, 15000);
@@ -2329,7 +2577,7 @@ $('#metaBtn').addEventListener('click', async () => {
 function mockExec(cmd) {
   const a = cmd.replace(CTL + ' ', '');
   const M = window.__mock || (window.__mock = {
-    target: 'vpn', usr: { DNSPROXY_ENABLE: '1', WARP_ENABLE: '1' }, zlist: '', ack: '',   // WARP включён — вкладка не серая при warp=up
+    target: 'vpn', usr: { DNSPROXY_ENABLE: '1', WARP_ENABLE: '1' }, zlist: '', ack: '', wave: /wave/.test(location.search) ? 1 : 0,   // WARP включён — вкладка не серая при warp=up
   });
   // set/unset/zlist-set запоминаются, чтобы после «Применить» форма не откатывалась
   const mset = /^set ([A-Z_]+) '(.*)'$/.exec(a), munset = /^unset ([A-Z_]+)$/.exec(a);
@@ -2341,7 +2589,7 @@ function mockExec(cmd) {
   }
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=предпросмотр\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
-    '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=wifi:Дом_5G\nnet_label=Дом_5G\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nwarp=up\nwarp_conf=warp-2\nwarp_note=\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
+    '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=' + (M.target === 'vpn' ? 'wifi:Дом_5G' : 'mobile:25011') + '\nnet_label=' + (M.target === 'vpn' ? 'Дом_5G' : 'YOTA') + '\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nwan=rmnet_data1\nexit=' + (Math.floor(Date.now() / 1000) - 120) + '|rmnet_data1|188.162.73.24|RU|' + (M.wave ? '000|204' : '204|204') + '\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nwarp=up\nwarp_conf=warp-2\nwarp_note=\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
   if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://not-a-dns.quic.best/dns-query\nD DNS_FALLBACKS=https://dns.wlrus.cfd/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.commonnet.work/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=1\nD OPERA_API_PROXY=\nD OPERA_COUNTRY=EU\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
     Object.keys(M.usr).map((k) => 'U ' + k + '=' + M.usr[k] + '\n').join('') };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
@@ -2373,7 +2621,8 @@ function mockExec(cmd) {
   if (/^client-(un)?block /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'dnsflush') return { errno: 0, out: 'OK кэш сброшен (dnsproxy перезапущен). На ноутбуке — ещё ipconfig /flushdns' };
   if (a === 'warp-stats') { M.wrx = (M.wrx || 5e6) + 2e5; M.wup = M.wup || Date.now(); return { errno: 0, out: 'hs_age=' + (Math.floor(Date.now() / 1000) % 130) + '\nrx=' + M.wrx + '\ntx=' + Math.round(M.wrx / 9) + '\nendpoint=188.114.96.1:2408\npeer=bmXOC+hWy3/DnZ3VUUTE7y0yOZfVvcRK0Xf4cPfgyo=\nup=' + Math.round((Date.now() - M.wup) / 1000 + 2534) + '\n' }; }
-  if (a === 'net-renew') return { errno: 0, out: 'OK сеть переподключена, внутренний адрес новый' };
+  if (a === 'net-renew') { M.wave = 0; return { errno: 0, out: 'OK сеть переподключена, внутренний адрес новый' }; }
+  if (a === 'links') return { errno: 0, out: 'tg=https://t.me/kubarev_mods\n' };
   if (a === 'warp-reconnect') return { errno: 0, out: 'OK переподключаю' };
   if (a === 'zlist') return { errno: 0, out: M.zlist };
   if (a === 'zdefault') return { errno: 0, out: 'youtube.com\ngooglevideo.com\ndiscord.com\nx.com\n' };

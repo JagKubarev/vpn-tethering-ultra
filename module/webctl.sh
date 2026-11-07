@@ -314,6 +314,26 @@ case "$1" in
             echo "OK $F nosend"
         fi
         ;;
+    links)      # ссылки автора: links.txt из main на GitHub раз в 12 ч, иначе прежние; без них WebUI берёт вшитые
+        L=/data/local/tmp/vpn_tether_links
+        if [ ! -s "$L" ] || [ -n "$(find "$L" -maxdepth 0 -mmin +720 2>/dev/null)" ]; then
+            CA=/apex/com.android.conscrypt/cacerts
+            [ -d "$CA" ] || CA=/system/etc/security/cacerts
+            # только known-ключи и адреса t.me / 4pda.to / github.com, без кавычек и пробелов
+            t=$(curl -s -m 6 --capath "$CA" https://raw.githubusercontent.com/JagKubarev/vpn-tethering-ultra/main/links.txt 2>/dev/null |
+                tr -d '\r' | grep -E '^(tg|chat|4pda|gh)=https://(t\.me|4pda\.to|github\.com)/[A-Za-z0-9_./?=+%&-]+$' | head -n 8)
+            if [ -n "$t" ]; then printf '%s\n' "$t" > "$L"; else touch "$L"; fi
+        fi
+        cat "$L" 2>/dev/null
+        ;;
+    open)       # открыть ссылку автора в браузере: только https на t.me, 4pda.to и github.com
+        case "$2" in
+            https://t.me/*|https://4pda.to/*|https://github.com/*) ;;
+            *) echo "ERR такие ссылки не открываю"; exit 1 ;;
+        esac
+        case "$2" in *[!A-Za-z0-9_./:?=+%\&-]*) echo "ERR такие ссылки не открываю"; exit 1 ;; esac
+        if su 2000 -c "am start -a android.intent.action.VIEW -d '$2'" >/dev/null 2>&1; then echo OK; else echo "ERR браузер не открылся"; fi
+        ;;
     log-prev)   # лог прошлого запуска демона (до ребута/перезапуска)
         tail -n 1000 "$LOG_FILE.prev" 2>/dev/null
         ;;
