@@ -379,6 +379,8 @@ monitor_loop() {
         [ $((_loop_count % 15)) -eq 0 ] && quic_block_apply
         [ $((_loop_count % 15)) -eq 7 ] && meta_eu_watchdog
         [ $((_loop_count % 15)) -eq 3 ] && stealth_reconcile
+        # чужая NFQUEUE (nfqttl и подобные): модули стартуют параллельно — раз в ~5 мин
+        [ $((_loop_count % 150)) -eq 5 ] && nfq_rivals_check
         # Tethering перевешивает BPF-фильтры при смене аплинка: раздача и WAN —
         # каждый цикл (1-2 вызова tc), все интерфейсы — раз в ~30с
         if [ $((_loop_count % 15)) -eq 11 ]; then

@@ -1114,6 +1114,7 @@ function renderStatus(s) {
     const f = +s.ttl_foreign || 0;
     h += kvRow('Скрытие раздачи', f ? (s.stealth_strict === '1' ? 'отбито пакетов с чужим TTL: ' + f : 'чужой TTL у устройства раздачи (' + f + ' пак.) — установите на нём TTL 64') : 'включено, чужого TTL нет', f ? 'amber' : 'green');
   }
+  if (s.nfq_rivals) h += kvRow('Мешает модуль', esc(s.nfq_rivals) + ' — забирает весь трафик через NFQUEUE', 'red');
   if (s.stealth_rivals) h += kvRow('Лишний модуль', esc(s.stealth_rivals) + (s.stealth === 'on'
       ? ' тоже меняет TTL/раздачу и мешает — отключите или удалите его'
       : ' меняет TTL/раздачу (это умеет и переключатель «Скрытие раздачи»)'), s.stealth === 'on' ? 'amber' : '');
@@ -1215,6 +1216,8 @@ function renderHealth(s, w, confBad) {
   if ((s.zwave === '1' || exw) && (s.net_key || '').indexOf('mobile:') === 0) add('Волна', 'amber', s.mode === 'vpn' ? 'ТСПУ душит Google на этом адресе. Без VPN поможет «Переподключить сеть» на вкладке «Сервис».' : '');
   if (s.curl_src === 'none') add('curl', 'red', 'Нет curl: WARP, подбор и проверки сайтов не работают. Отправьте логи (вкладка «Сервис»).');
   if (s.stealth_rivals) add('Лишний модуль', 'amber', s.stealth_rivals + ': подробности в «Подробнее».');
+  // чужая NFQUEUE (nfqttl и подобные) забирает весь трафик: не работают обход, Opera и WARP
+  if (s.nfq_rivals) add('Мешает модуль', 'red', s.nfq_rivals + ' пропускает весь трафик через свою программу: с ним не работают обход, Opera и WARP. Выключите его в менеджере модулей; TTL раздачи умеет «Скрытие раздачи».');
   if (confBad) add('Настройки', 'amber', 'Часть настроек пропущена: подробности в «Подробнее».');
   $('#health').innerHTML = it.join('') + hints.join('');
 }
