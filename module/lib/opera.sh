@@ -64,6 +64,7 @@ OPERA_DOM_RETRY=15      # повтор пустого DNS: 30, 60, 120… 600 с
 OPERA_V6_OK=""          # 0 = ip6tables не работает, IPv6 не трогать и не проверять
 OPERA_V6_SIG=""         # что стоит в IPv6: сотни вызовов ip6tables — только при смене
 OPERA_RULE_ERR=""       # почему не встали правила
+OPERA_HEV_WHY=""        # почему не встал hev-socks5-tproxy (для журнала)
 OPERA_APP_TS=0
 OPERA_APP_UIDS=""
 OPERA_EXCL=""
@@ -135,7 +136,9 @@ opera_start() {
     opera_ca_build || log "WARNING: opera: системные сертификаты не найдены"
     args="-bind-address 127.0.0.1:$OPERA_PORT -socks-mode -country $OPERA_COUNTRY -verbosity 20 -cafile $OPERA_CA"
     args="$args -server-selection fastest -server-selection-timeout 3s -server-selection-test-url http://www.example.com/"
-    args="$args -api-address api2.sec-tunnel.com"
+    # discover за раз часто отдаёт 2–4 сервера, иногда только мёртвые 77.111.247.79/.80
+    # (07.11: 1 запуск из 3); три запроса вместе — 5–6 серверов, +1 с к старту
+    args="$args -api-address api2.sec-tunnel.com -discover-repeat 3"
     OPERA_OWN=0
     if [ -n "$OPERA_API_PROXY" ] && [ "$OPERA_OWN_BAD" != "1" ]; then
         # свой прокси вместо списка; в журнал адрес не пишем: в нём может быть пароль
@@ -194,12 +197,18 @@ misc:
   limit-nofile: 8192
 EOF
     : > "$OPERA_HEV_LOG"
-    setsid "$OPERA_HEV_BIN" "$OPERA_HEV_CONF" </dev/null >/dev/null 2>> "$OPERA_HEV_LOG" &
-    while [ $i -lt 10 ]; do
+    # и stdout: ошибку до открытия своего лога hev пишет туда (07.11: у юзера причина была пустой)
+    setsid "$OPERA_HEV_BIN" "$OPERA_HEV_CONF" </dev/null >> "$OPERA_HEV_LOG" 2>&1 &
+    # до 5 с: на нашем телефоне слушает через 0,1 с, на медленном может дольше
+    while [ $i -lt 25 ]; do
         sleep 0.2
         [ -n "$(opera_hev_pids)" ] && _opera_listening "$OPERA_TP_PORT" && return 0
         i=$((i + 1))
     done
+    # причина для журнала: процесс умер или жив, но порт не слушает
+    if [ -z "$(opera_hev_pids)" ]; then OPERA_HEV_WHY="процесс завершился"
+    else OPERA_HEV_WHY="жив, но не слушает порт $OPERA_TP_PORT"; fi
+    OPERA_HEV_WHY="$OPERA_HEV_WHY; ядро $(uname -r | cut -c1-30); лог: $(tail -n 2 "$OPERA_HEV_LOG" 2>/dev/null | tr '\n' ' ' | cut -c1-120)"
     return 1
 }
 
@@ -516,7 +525,7 @@ opera_reconcile() {
                 return 0
             fi
             opera_started
-            opera_hev_start || { opera_fail "hev-socks5-tproxy не запустился: $(tail -n 1 "$OPERA_HEV_LOG" 2>/dev/null | cut -c1-120)"; return 0; }
+            opera_hev_start || { opera_fail "hev-socks5-tproxy не запустился: $OPERA_HEV_WHY"; return 0; }
             OPERA_STATE="on"
             OPERA_TICK=0
             phone_status_refresh ;;
@@ -525,7 +534,7 @@ opera_reconcile() {
             if [ -z "$(opera_hev_pids)" ]; then
                 opera_rules_off
                 log "WARNING: opera: hev-socks5-tproxy умер, перезапускаю"
-                opera_hev_start || { opera_fail "hev-socks5-tproxy не перезапустился"; return 0; }
+                opera_hev_start || { opera_fail "hev-socks5-tproxy не перезапустился: $OPERA_HEV_WHY"; return 0; }
             fi ;;
     esac
 
