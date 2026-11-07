@@ -816,7 +816,8 @@ warp_routes_apply() {   # ифейсы раздачи
         rm -f "$f"; warp_routes_off force; return 1
     fi
     rm -f "$f"
-    $iptables -t mangle -C OUTPUT -j "$CHAIN_WARP_OUT" 2>/dev/null || $iptables -t mangle -A OUTPUT -j "$CHAIN_WARP_OUT"
+    # первой, как у Opera: чужая цепочка с NFQUEUE в конце таблицы не должна съедать метку WARP
+    $iptables -t mangle -C OUTPUT -j "$CHAIN_WARP_OUT" 2>/dev/null || $iptables -t mangle -I OUTPUT 1 -j "$CHAIN_WARP_OUT"
     $iptables -t mangle -C PREROUTING -j "$CHAIN_WARP_PRE" 2>/dev/null || $iptables -t mangle -A PREROUTING -j "$CHAIN_WARP_PRE"
     $ip rule del fwmark $WARP_MARK/$WARP_MARK lookup $WARP_TABLE pref $WARP_MARK_PREF 2>/dev/null
     $ip rule add fwmark $WARP_MARK/$WARP_MARK lookup $WARP_TABLE pref $WARP_MARK_PREF

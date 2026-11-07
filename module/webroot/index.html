@@ -1013,8 +1013,9 @@ const isWave = (s) => {
   return (s.zwave === '1' || exw) && (s.net_key || '').indexOf('mobile:') === 0 && s.mode !== 'vpn';
 };
 function renderTop(s, names, exTxt, exOld) {
-  const run = s.daemon === '1', vpn = s.mode === 'vpn', wave = run && names && isWave(s);
-  document.body.dataset.route = !run || !names ? 'off' : vpn ? 'vpn' : s.mode === 'blocked' ? 'blocked' : wave ? 'wave' : 'direct';
+  // выход и волна — и без раздачи: адрес и Google у телефона те же, кнопка «Новый адрес» нужна и ему
+  const run = s.daemon === '1', vpn = s.mode === 'vpn', wave = run && isWave(s);
+  document.body.dataset.route = !run ? 'off' : wave ? 'wave' : !names ? 'off' : vpn ? 'vpn' : s.mode === 'blocked' ? 'blocked' : 'direct';
   // путь трафика: устройства -> телефон -> VPN или оператор -> интернет
   const ex = (s.exit || '').split('|');
   const dev = CLIENTS_N > 0 ? CLIENTS_N + ' устр.' : 'Устройства';
@@ -1039,7 +1040,7 @@ function renderTop(s, names, exTxt, exOld) {
     '. Обычно помогает новый адрес: связь пропадёт на 5–20 секунд, точка доступа останется.</p>' +
     '<button class="btn" data-renew style="background:var(--amber);border-color:var(--amber);color:var(--card)">Переподключить сеть</button>' +
     '<p class="wl">Новый адрес не помог, и открываются только российские сайты? Похоже на белые списки: оператор пропускает только разрешённое. Здесь поможет VPN, который умеет их обходить.</p>';
-  $('#exitLine').innerHTML = !run || !names || vpn || wave || s.mode === 'blocked' || !(exTxt || exOld) ? '' :
+  $('#exitLine').innerHTML = !run || vpn || wave || s.mode === 'blocked' || !(exTxt || exOld) ? '' :
     '<div class="txt"><div class="t">' + (exOld ? 'Проверяю новый выход и Google…' : esc(exTxt.split(' · ')[0])) + '</div>' +
     (exOld ? '' : '<div class="s">' + esc(exTxt.split(' · ').slice(1).join(', ')) + '</div>') + '</div>' +
     '<button class="btn small" data-renew>Новый адрес</button>';
