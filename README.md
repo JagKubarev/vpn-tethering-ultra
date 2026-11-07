@@ -161,6 +161,17 @@ cd vpn-tethering-ultra/module && zip -r ../vpn-tethering-ultra.zip .
 `TETHER_TTL_STRICT=1` отбивает пакеты с «чужим» TTL, а у Windows он 127. Выключите эту опцию
 или настройте TTL на самом устройстве. По умолчанию она выключена.
 
+**Через VPN у устройств раздачи нет интернета, а у самого телефона есть (своё или самосборное ядро).**
+У пользователя с самосборным ядром ([#23](https://github.com/JagKubarev/vpn-tethering-ultra/issues/23))
+в ядре не оказалось `connbytes` и учёта трафика conntrack; после включения и пересборки раздача заработала.
+Проверить:
+
+```sh
+su -c 'zcat /proc/config.gz | grep -E "CONNBYTES|CONNTRACK_ACCT"'
+# нужно: CONFIG_NETFILTER_XT_MATCH_CONNBYTES=y и CONFIG_NF_CONNTRACK_ACCT=y
+su -c 'iptables -m connbytes -h'   # должна быть справка, а не «Couldn't load match»
+```
+
 **VPN-клиент маршрутизирует по доменам (fakeip), а через раздачу сайты не открываются.**
 Оставьте `DNS_VPN=dnat` (по умолчанию): тогда DNS раздачи идёт в DNS самого VPN-клиента.
 
