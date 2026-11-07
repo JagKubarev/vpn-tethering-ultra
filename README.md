@@ -35,13 +35,13 @@
 ## Скриншоты
 
 <p align="center">
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/home-dark.png"><img src="docs/screenshots/home-light.png" width="19%" alt="Главная: режим раздачи и основные выключатели"></picture>
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/bypass-dark.png"><img src="docs/screenshots/bypass-light.png" width="19%" alt="Обход: стратегия для каждой сети"></picture>
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/net-dark.png"><img src="docs/screenshots/net-light.png" width="19%" alt="Сеть: сервер DNS, DNS для телефона и раздачи"></picture>
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/warp-dark.png"><img src="docs/screenshots/warp-light.png" width="19%" alt="WARP: туннель, для кого и что через него идёт"></picture>
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/tools-dark.png"><img src="docs/screenshots/tools-light.png" width="19%" alt="Сервис: диагностика сети и проверки"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/home-dark.png"><img src="docs/screenshots/home-light.png" width="19%" alt="Главная: путь трафика, режим раздачи и основные выключатели"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/bypass-dark.png"><img src="docs/screenshots/bypass-light.png" width="19%" alt="Обход: стратегия для каждой сети и подсказка про подбор"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/warp-dark.png"><img src="docs/screenshots/warp-light.png" width="19%" alt="Выходы: WARP и Opera, для кого и что через них идёт"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/net-dark.png"><img src="docs/screenshots/net-light.png" width="19%" alt="DNS: сервер DoH, открывает ли он ИИ-сервисы, DNS для телефона и раздачи"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/tools-dark.png"><img src="docs/screenshots/tools-light.png" width="19%" alt="Сервис: переподключение сети, проверка оператора и сайтов"></picture>
 </p>
-<p align="center"><sub>Главная · Обход · Сеть · WARP · Сервис</sub></p>
+<p align="center"><sub>Главная · Обход · Выходы · DNS · Сервис</sub></p>
 
 ## Возможности
 
