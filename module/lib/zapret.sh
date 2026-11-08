@@ -189,14 +189,18 @@ ZAPRET_EXCL_RUN=""
 # connbytes не вставало, обход не работал вовсе, а сторож каждые 15 с ставил
 # правила заново). Пробуем один раз в пустой, ни к чему не подключённой цепочке.
 #   нет NFQUEUE   — обход невозможен (состояние nokernel, без повторов);
-#   нет connbytes — в nfqws все исходящие HTTPS-пакеты (не первые 9), ответы
+#   нет connbytes — в nfqws все исходящие HTTPS-пакеты (не первые 20), ответы
 #                   не идут (это была бы вся закачка): нет автосписка и
 #                   подстройки по ответу сервера (autottl, --wssize);
 #   нет string    — нет «мимо кэшей оператора» и отбоя мёртвых серверов YouTube.
 # Итог — и в файл: проверка сайта, подбор и регистрация WARP ставят свои правила.
 ZAPRET_CAPS=""                  # «cb=1 str=1 nfq=1», пусто — ещё не проверяли
 ZAPRET_CAPS_FILE=/data/local/tmp/vpn_tether_zcaps
-ZAPRET_CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9"
+# Первые 20 исходящих пакетов соединения (было 9). В счёт идут и подделки nfqws: у YouTube
+# (fake ×6 + разрез) окно 9 кончалось на первом же ClientHello, и повтор потерянной части
+# уходил мимо обхода с открытым именем — ТСПУ резал, сервер молчал. 08.11, netem (RTT ~380 мс,
+# потери 4%): живых среди отбитых «принял ClientHello и молчит» 5 из 22 против 10–13 при 9
+ZAPRET_CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:20"
 
 ZAPRET_CAPS_TRIES=0
 rm -f "$ZAPRET_CAPS_FILE" 2>/dev/null   # от прошлой загрузки: /data/local/tmp её переживает

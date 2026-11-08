@@ -552,6 +552,13 @@ warp_reconcile() {
                     WARP_TG_TS=$now
                     if warp_tg_dead; then
                         WARP_TG_TRIES=$((WARP_TG_TRIES + 1))
+                        # через туннель сейчас идёт видео (отбой YouTube вёл туда адреса) —
+                        # снос оборвал бы его: 08.11 ролик висел 11 с. Попытка не в счёт
+                        if warp_yt_busy; then
+                            WARP_TG_TRIES=$((WARP_TG_TRIES - 1))
+                            log "WARP: Telegram DC2/DC4 через туннель молчат, но через него идёт видео YouTube — переподключу на следующей проверке"
+                            return 0
+                        fi
                         if [ $WARP_TG_TRIES -gt $WARP_TG_MAX ]; then
                             log "WARP: Telegram DC2/DC4 через туннель молчат — $WARP_TG_MAX переподключений подряд не помогли, жду $((WARP_TG_PAUSE / 60)) мин"
                             WARP_TG_TRIES=0; WARP_TG_HOLD=$((now + WARP_TG_PAUSE))
@@ -751,6 +758,16 @@ warp_kill_sockets() {   # причина [сети — по умолчанию �
     return 0
 }
 
+# Через туннель идёт видео YouTube: в conntrack есть установленные соединения с обеими
+# метками — видео (YT_CTMARK, googlevideo в ClientHello) и WARP. И адреса из отбоя
+# (YT_WARP_SIG), и группа Google (WARP_GOOGLE), и телефон, и раздача
+warp_yt_busy() {
+    local m
+    [ -n "$CONNTRACK_BIN" ] || return 1
+    m=$(printf '0x%x' $((YT_CTMARK | WARP_MARK)))
+    $CONNTRACK_BIN -L -p tcp --mark "$m/$m" 2>/dev/null | grep -q ' ESTABLISHED '
+}
+
 warp_routes_off() {   # [force] — снять, даже если по флагу не стоят
     local t c _n
     [ "$WARP_RT_ON" = "1" ] || [ "$1" = "force" ] || return 0
@@ -774,7 +791,10 @@ warp_routes_off() {   # [force] — снять, даже если по флаг�
     $ip6tables -F "$CHAIN_WARP_V6F" 2>/dev/null; $ip6tables -X "$CHAIN_WARP_V6F" 2>/dev/null
     if [ "$WARP_RT_ON" = "1" ]; then
         log "WARP: маршруты в туннель сняты"
-        warp_kill_sockets "туннель снят"
+        # и видеосерверы, которые отбой YouTube сам вёл в WARP (YT_WARP_SIG): их
+        # соединения после сноса туннеля идут мимо со старым NAT и молча висят до
+        # тайм-аута плеера. 08.11: переподключения из-за Telegram DC2/DC4 — 5 раз за 2 мин
+        warp_kill_sockets "туннель снят" "$(warp_dst4) $YT_WARP_SIG"
     fi
     WARP_RT_ON=0; WARP_RT_SIG=""
 }
