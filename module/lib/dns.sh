@@ -829,7 +829,8 @@ dns_try_alt() {     # 0 = перешли на запасной DoH и он от�
         i=0
         for c in $cands; do
             i=$((i + 1))
-            ( if dns_doh_alive "$c" any; then : > "$d.$i.y"; else : > "$d.$i.n"; fi ) &
+            # DoT/DoQ (tls://, quic://) curl-ом не проверить — «жив», решит проба dnsproxy
+            ( case "$c" in https://*) dns_doh_alive "$c" any ;; esac && : > "$d.$i.y" || : > "$d.$i.n" ) &
             pids="$pids $!"
         done
         t0=$(uptime_ms)
@@ -844,6 +845,13 @@ dns_try_alt() {     # 0 = перешли на запасной DoH и он от�
             [ $(( $(uptime_ms) - t0 )) -ge 5000 ] && break
             sleep 0.1
         done
+        # вышло время, а кто-то раньше по списку ещё висит (su + curl -m 4) — первый
+        # уже ответивший живой, где бы он ни стоял
+        i=0
+        [ -n "$ok" ] || for c in $cands; do
+            i=$((i + 1))
+            [ -e "$d.$i.y" ] && { ok="$c"; j=$i; break; }
+        done
         [ -n "$ok" ] || DNS_ALT_SCAN_DEAD=$now
     fi
     [ -n "$ok" ] || for c in $cands; do ok="$c"; break; done
@@ -853,10 +861,13 @@ dns_try_alt() {     # 0 = перешли на запасной DoH и он от�
         DNS_ALT_UPS="$ok"
         if dnsproxy_start "direct-doh" "$ok" && dnsproxy_probe_cold; then
             local keep="" hold="$DNS_ALT_HOLD"
-            [ -n "$pids" ] && { kill $pids 2>/dev/null; rm -f "$d".*; }
+            dns_alt_reap $pids; rm -f "$d".*
             now=$(date +%s)
             for t in $DNS_ALT_TRIPS; do [ $((now - t)) -lt 1800 ] && keep="$keep $t"; done
-            DNS_ALT_TRIPS="$keep $now"
+            # уход с основного — «поездка»; смена одного запасного на другой — нет:
+            # иначе основной считался бы «дёргающимся» и ждал 30 мин вместо 10
+            [ -n "$cur" ] || keep="$keep $now"
+            DNS_ALT_TRIPS="$keep"
             [ "$(echo $DNS_ALT_TRIPS | wc -w)" -ge 2 ] && hold="$DNS_ALT_HOLD_FLAP"
             log "WARNING: DoH-апстрим не отвечает ($why) — DNS через запасные DoH ($(dns_hosts_of $ok)); на $(dns_hosts_of $DNS_UPSTREAMS) вернусь не раньше чем через $((hold / 60)) мин$([ "$hold" = "$DNS_ALT_HOLD_FLAP" ] && echo ' (он дёргается)')"
             DNS_ALT_LAST=$now
@@ -872,12 +883,22 @@ dns_try_alt() {     # 0 = перешли на запасной DoH и он от�
             [ "$i" -gt "$j" ] && [ -e "$d.$i.y" ] && { ok="$c"; j=$i; break; }
         done
     done
-    # недождавшиеся не нужны: их curl доработает сам (-m 4), метки не пишутся
-    [ -n "$pids" ] && { kill $pids 2>/dev/null; rm -f "$d".*; }
+    dns_alt_reap $pids; rm -f "$d".*
+    # curl их видел, а dnsproxy на них не поднялся (фронтенд жив, DoH нет) — тоже
+    # 5 мин без проверки: иначе в откате каждые 30 с снова проверка и два запуска
+    [ -n "$pids" ] && DNS_ALT_SCAN_DEAD=$now
     # запасные тоже молчат — обратно на основной, дальше откат к оператору
     DNS_ALT_UPS=""
     dnsproxy_start "direct-doh" $DNS_UPSTREAMS
     return 1
+}
+
+# Недождавшиеся проверки запасных — не нужны: их curl доработает сам (-m 4).
+# -9, как в yt_dead_off: TERM подоболочке «( … ) &» доходит до trap демона ->
+# cleanup_on_exit (правила, dnsproxy, WARP сняты, а демон работает дальше)
+dns_alt_reap() {
+    local p
+    for p in "$@"; do yt_bg_alive "$p" && kill -9 "$p" 2>/dev/null; done
 }
 
 # DoH-сервер отвечает? Напрямую curl-ом, от группы dnsproxy (мимо AdGuard).

@@ -58,6 +58,7 @@ WARP_ENSURE_AT=0         # не вышло (нет сети при загруз�
 WARP_TG_SECS=300         # Telegram DC2/DC4 через туннель — проверка раз в 5 мин (warp_tg_dead)
 WARP_TG_TS=0             # последняя такая проверка (0 — на первой проверке сессии)
 WARP_TG_TRIES=0          # переподключений подряд из-за DC2/DC4
+WARP_TG_YTW=0            # откладываний подряд из-за видео YouTube в туннеле (не больше 2 = 10 мин)
 WARP_TG_MAX=5
 WARP_TG_PAUSE=1800       # не помогли WARP_TG_MAX подряд — 30 мин не переподключать
 WARP_TG_HOLD=0           # до этого времени (epoch) не переподключать
@@ -553,12 +554,17 @@ warp_reconcile() {
                     if warp_tg_dead; then
                         WARP_TG_TRIES=$((WARP_TG_TRIES + 1))
                         # через туннель сейчас идёт видео (отбой YouTube вёл туда адреса) —
-                        # снос оборвал бы его: 08.11 ролик висел 11 с. Попытка не в счёт
-                        if warp_yt_busy; then
+                        # снос оборвал бы его: 08.11 ролик висел 11 с. Попытка не в счёт.
+                        # Не больше 2 раз подряд: warp_yt_busy видит и простаивающие
+                        # соединения (conntrack держит ESTABLISHED до 2 ч) — без предела
+                        # Telegram через WARP мог не ожить вовсе (облачное ревью 08.11)
+                        if [ "$WARP_TG_YTW" -lt 2 ] && warp_yt_busy; then
+                            WARP_TG_YTW=$((WARP_TG_YTW + 1))
                             WARP_TG_TRIES=$((WARP_TG_TRIES - 1))
                             log "WARP: Telegram DC2/DC4 через туннель молчат, но через него идёт видео YouTube — переподключу на следующей проверке"
                             return 0
                         fi
+                        WARP_TG_YTW=0
                         if [ $WARP_TG_TRIES -gt $WARP_TG_MAX ]; then
                             log "WARP: Telegram DC2/DC4 через туннель молчат — $WARP_TG_MAX переподключений подряд не помогли, жду $((WARP_TG_PAUSE / 60)) мин"
                             WARP_TG_TRIES=0; WARP_TG_HOLD=$((now + WARP_TG_PAUSE))
@@ -569,7 +575,7 @@ warp_reconcile() {
                         fi
                     else
                         [ $WARP_TG_TRIES -gt 0 ] && log "WARP: Telegram DC2/DC4 через туннель отвечают (переподключений: $WARP_TG_TRIES)"
-                        WARP_TG_TRIES=0
+                        WARP_TG_TRIES=0; WARP_TG_YTW=0
                     fi
                 fi
             elif [ "$WARP_NETCHG" = 1 ]; then

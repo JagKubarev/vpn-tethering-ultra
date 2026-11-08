@@ -120,7 +120,7 @@ bypass_on() {
     wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
     [ -n "$wan" ] && [ -x "$NQ" ] || return 0
     # ядро без connbytes (zapret_caps демона) — без него
-    CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9"
+    CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:20"   # как у демона (ZAPRET_CB_OUT)
     grep -q '^cb=0' /data/local/tmp/vpn_tether_zcaps 2>/dev/null && CB_OUT=""
     RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
     iptables -w 2 -t mangle -I POSTROUTING 1 $RULE_NFQ

@@ -295,7 +295,7 @@ yt_warp_fast() {
         yt_bg_alive "$YT_WARP_SPD_PID" || {
             (
                 v=$(su -g "$DNSPROXY_GID" -c "$CURL_BIN -s -o /dev/null -m 3 --interface $WARP_IF -w '%{speed_download}' https://dl.google.com/android/repository/platform-tools-latest-windows.zip" 2>/dev/null)
-                echo "$(date +%s) $(echo "$v" | awk '{ printf "%d", $1 * 8 / 1e6 }') $WARP_CUR" > "$YT_WARP_SPD.tmp"
+                echo "$(date +%s) $(echo "$v" | awk '{ x = $1 * 8 / 1e6; if ($1 > 0 && x < 1) x = 1; printf "%d", x }') $WARP_CUR" > "$YT_WARP_SPD.tmp"
                 mv -f "$YT_WARP_SPD.tmp" "$YT_WARP_SPD"
             ) </dev/null >/dev/null 2>&1 &
             YT_WARP_SPD_PID=$!
@@ -471,7 +471,7 @@ yt_dead_who() {
 # проверка не прошла; прошедшие 5 мин не проверяем снова.
 yt_dead_scan() {
     [ "$YT_DEAD_STATE" = "on" ] || return 0
-    local now out dip hit n t keep="" changed=0 sil res tag cnt b qo qh="" qsil="" qst k sa da
+    local now out dip hit n t keep="" changed=0 sil res tag cnt b qo qh="" qsil="" qst k sa da ds
     # не ip: локальная ip затирала бы $ip (/system/bin/ip) — адрес WAN ниже не узнавался
     now=$(date +%s)
     # Пороги от RTT канала. 08.11, «медленный Wi-Fi» (netem: RTT ~380 мс, потери 4%): за 8 мин
@@ -554,8 +554,10 @@ yt_dead_scan() {
             k = src ":" sp ">" dst
             t0 = (k in seen) ? seen[k] : now
             d = (k in rep) ? rep[k] : 0
-            # видео идёт: хоть один видеосервер прислал больше рукопожатия (для отбоя застрявших)
-            if (yt && br > smax && br > 80 * pr) data = 1
+            # видео идёт: сумма байт от видеосерверов (больше рукопожатия) — для отбоя
+            # застрявших; шелл сравнит с прошлым кругом: важен прирост, а не накопленное
+            # за жизнь соединения (старое простаивающее держало бы «видео идёт» вечно)
+            if (yt && br > smax && br > 80 * pr) dsum += br
             # молчит после запроса: данные от сервера были (рукопожатие), но
             # мало, и safter ни байта нового -> кандидат на проверку (каждый
             # раз: повторы отсекают отбой и «живой» на 5 мин у демона)
@@ -586,6 +588,9 @@ yt_dead_scan() {
             if (kind == "stuck" && gv && !yt) kind = "dead"
             # застрявшие (отбой и сигнал сторожу) — только точно googlevideo.com
             if (kind == "stuck" && !yt) next
+            # и не в WARP (connmark WARP_MARK 0x20000000): там застревает туннель, а не
+            # стойка — отбой с ss -K порвал бы живое видео через WARP к тому же серверу
+            if (kind == "stuck" && int(mk / 536870912) % 2 == 1) next
             # застрявшему свой срок, короче: ответ на ClientHello — 0,1–0,5 с.
             # Раздача (src не телефон) — +2 с: Wi-Fi до клиента в RTT телефона (ss) не виден,
             # а отсчёт идёт от появления соединения, ClientHello клиента сам может опоздать
@@ -594,7 +599,7 @@ yt_dead_scan() {
             if (now - t0 >= lim && d == 0) { print "HIT", kind, dst, tag; d = 1 }
             ns[k] = t0 " " kind " " d " " br " " now
         }
-        END { for (k in ns) print k, ns[k] > (sf ".new"); if (data) print "DATA" }
+        END { for (k in ns) print k, ns[k] > (sf ".new"); printf "DATA %.0f\n", dsum }
     ' "$YT_GRANGES" "$YT_SEEN_FILE" - 2>/dev/null)
     if [ -f "$YT_SEEN_FILE.new" ]; then mv -f "$YT_SEEN_FILE.new" "$YT_SEEN_FILE"; else : > "$YT_SEEN_FILE"; fi
 
@@ -624,7 +629,9 @@ $dip playch"*) ;; *) YT_PLAY_PEND="$YT_PLAY_PEND$dip playch
     # Только пока видео где-то идёт (данные от видеосервера за последнюю минуту): застряло
     # всё подряд — это сломанная стратегия (новая сеть, ТСПУ сменил правила), а не стойки;
     # тогда только сторож, иначе до 11 живых адресов в минуту ушли бы в отбой (ревью 08.11)
-    printf '%s\n' "$out" | grep -qx DATA && YT_DATA_TS=$now
+    ds=$(printf '%s\n' "$out" | sed -n 's/^DATA //p')
+    [ "${ds:-0}" -gt "$YT_DATA_SUM" ] && YT_DATA_TS=$now
+    YT_DATA_SUM=${ds:-0}
     if [ $((now - YT_DATA_TS)) -le 60 ]; then
         for dip in $(printf '%s\n' "$out" | awk '$1 == "HIT" && $2 == "stuck" && !s[$3]++ {print $3}'); do
             yt_dead_add "$dip" "$(yt_dead_who yt)" "не подтвердил ClientHello ${sa}с" "$now" 1 nowarp && changed=1
