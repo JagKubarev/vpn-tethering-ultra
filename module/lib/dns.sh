@@ -200,7 +200,10 @@ dnsproxy_spawn() {
 META_EU_PORT=5355
 META_EU_LOG="/data/local/tmp/vpn_tether_dnsproxy_meta.log"
 META_EU_UPS_FILE="/data/local/tmp/vpn_tether_meta_upstreams"
-META_DOMAINS="instagram.com cdninstagram.com instagr.am ig.me facebook.com fbcdn.net fbsbx.com facebook.net fb.com fb.me messenger.com threads.net threads.com meta.com"
+# whatsapp — 08.11, YOTA: web/www.whatsapp.com на адресах обычного DoH (31.13.72.52 от wlrus,
+# 157.240.205.60 от Google) — тайм-аут, с ECS — 57.144.75.32: 302/200 за 0,5–2,8 с (тот же
+# приём, что адреса 57.144.x в hosts.ini magisk-zapret2)
+META_DOMAINS="instagram.com cdninstagram.com instagr.am ig.me facebook.com fbcdn.net fbsbx.com facebook.net fb.com fb.me messenger.com threads.net threads.com meta.com whatsapp.com whatsapp.net wa.me"
 DNSPROXY_META_ON=0
 
 meta_eu_stop() {

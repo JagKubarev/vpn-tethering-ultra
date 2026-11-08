@@ -715,7 +715,11 @@ DNS_UPSTREAMS="https://not-a-dns.quic.best/dns-query"
 # адресу; прокси 5.129.221.64 для всех трёх ИИ, Gemini и ChatGPT через него — 200 за ~2 с).
 # us.geohide.ru и dns.malw.link не добавлены: сами отвечают, но их прокси с YOTA молчат —
 # хуже мёртвого. commonnet убран (08.11: 94.181.44.39 не принимает TCP ни напрямую, ни через WARP)
-DNS_FALLBACKS="https://dns.wlrus.cfd/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.zapret.moe/dns-query"
+# MagicDNS — вторым (08.11 вечер, YOTA: DoH 0,35–0,75 с напрямую; прокси 45.88.163.92 для
+# всех трёх ИИ напрямую с YOTA — Gemini 200 за 4,2 с, ChatGPT за 2,1 с, как not-a-dns; YouTube,
+# google.com, GitHub — настоящие адреса). Выше обоих GeoHide: те 08.11 не принимали TCP.
+# keyoneday не взят: через прокси и www.google.com, а прокси не докачивает страницу за 8 с
+DNS_FALLBACKS="https://dns.wlrus.cfd/dns-query https://api.magicdns.ru/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.zapret.moe/dns-query"
 # Апстримы для DNS_VPN=doh (идут через туннель)
 DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Чем резолвить имена самих апстримов (dns.wlrus.cfd и т.д.). Подмена тут не

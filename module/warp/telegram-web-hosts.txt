@@ -6,3 +6,6 @@
 149.154.167.220 web.telegram.org telegram.org t.me
 149.154.167.220 kws2.web.telegram.org kws2-1.web.telegram.org kws4.web.telegram.org kws4-1.web.telegram.org
 149.154.167.220 venus.web.telegram.org vesta.web.telegram.org
+# 08.11 (список Flowseal из magisk-zapret2): через warp0 на .220 отвечают и zws2/zws4 (404 на /apiws,
+# как kws2/kws4). kws1/kws5, zws1/zws5, pluto, flora (ДЦ 1 и 5) на .220 рвут TLS — их не подставлять
+149.154.167.220 zws2.web.telegram.org zws2-1.web.telegram.org zws4.web.telegram.org zws4-1.web.telegram.org
