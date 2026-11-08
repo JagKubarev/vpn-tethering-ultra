@@ -411,6 +411,8 @@ case "$1" in
 
     clients)
         # Устройства в раздаче: "ip|mac|состояние|имя|соединений|байт|1=заблокировано|↓|↑".
+        # Последней строкой "T|мс от загрузки" — когда сняты счётчики: по нему WebUI считает
+        # скорость (время ответа ksu.exec плавает на 100–300 мс).
         # IP и MAC — ip neigh по интерфейсам раздачи; имя — из журнала DHCP
         # раздачи (dumpsys network_stack); соединения и байты — открытые
         # записи conntrack от этого IP. ↓/↑ — накопленные: Wi-Fi — iw station dump
@@ -451,6 +453,7 @@ case "$1" in
                     else if (!(ifc[m] in wif) && nif[ifc[m]] == 1 && (ifc[m] in idn)) { d = idn[ifc[m]]; u = iup[ifc[m]] }
                     print ip[m] "|" m "|" st[m] "|" nm[m] "|" (c[ip[m]] + 0) "|" (by[ip[m]] + 0) "|" (bl[m] ? 1 : 0) "|" d "|" u }
                 for (m in bl) if (!seen[m]) print "|" m "|-|" nm[m] "|0|0|1||"
+                if (now > 0) print "T|" now
             }'
         ;;
     client-block|client-unblock)

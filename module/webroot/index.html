@@ -327,6 +327,9 @@ details > summary::after { border-color: currentColor; }
 }
 @media (prefers-reduced-motion: reduce) { #statusCard { transition: none; } }
 .mt8 { margin-top: 8px; }
+/* устройства в раздаче: «всего» и «скорость» колонками — числа меняются раз в 3 с, текст не прыгает */
+#clients .cn { display: inline-block; min-width: 4.9em; font-variant-numeric: tabular-nums; }
+#clients .cu { min-width: 0; }   /* ↑ — последняя колонка: правее ничего не сдвинется */
 </style>
 <script>
 // тема до первой отрисовки, иначе тёмная мигала бы светлой. Пусто — как в системе
@@ -413,7 +416,7 @@ details > summary::after { border-color: currentColor; }
 <div class="card">
   <div id="clients"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
 </div>
-<div class="hint">Заблокированное устройство остаётся в точке доступа, но без интернета; новый «случайный» MAC блокировку обходит. ↓ ↑ — трафик с подключения, а если телефон его не даёт — в открытых сейчас соединениях.</div>
+<div class="hint">Заблокированное устройство остаётся в точке доступа, но без интернета; новый «случайный» MAC блокировку обходит. «Всего» — трафик с подключения, а если телефон его не даёт — в открытых сейчас соединениях; «скорость» — между двумя последними обновлениями (раз в 3 секунды).</div>
 <div class="hint">Остальные настройки — во вкладках «Обход», «Выходы» и «DNS», проверки и журналы — в «Сервисе».</div>
 
 </section>
@@ -633,10 +636,10 @@ details > summary::after { border-color: currentColor; }
       <option value="https://not-a-dns.quic.best/dns-query">not-a-dns.quic.best</option>
       <option value="https://dns.wlrus.cfd/dns-query">wlrus.cfd</option>
       <option value="https://api.magicdns.ru/dns-query">magicdns.ru</option>
+      <option value="https://dns.zapret.moe/dns-query">zapret.moe</option>
       <option value="https://dns.geohide.ru:444/dns-query">dns.geohide.ru:444</option>
       <option value="https://geohide.ru/dns-query">geohide.ru</option>
       <option value="https://dns.comss.one/dns-query">comss.one</option>
-      <option value="https://dns.zapret.moe/dns-query">zapret.moe</option>
       </optgroup>
       <optgroup label="Обычные, для приватности">
       <option value="https://dns.google/dns-query">Google</option>
@@ -1457,27 +1460,51 @@ $$('.row input, .row select, .row textarea').forEach((el) => {
 // ↓/↑ — накопленные с подключения (Wi-Fi) или с подъёма USB, пусто — не знаем
 // неразрывный пробел: «64.6 МБ» на узком экране не рвётся
 const fmtBytes = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' ГБ' : b >= 1048576 ? (b / 1048576).toFixed(1) + ' МБ' : b >= 1024 ? Math.round(b / 1024) + ' КБ' : b + ' Б';
+// Скорость устройства — разница накопленных ↓/↑ между двумя опросами (раз в 3 с)
+const CL_PREV = {};
+let clBusy = false;
 function clientRow(f) {
   const [ip, mac, st, name, c, by, bl, dn, up] = f, blocked = bl === '1';
   const nm = name && name !== 'null' ? name : 'Без имени';
   const on = st === 'REACHABLE' || st === 'DELAY' || st === 'PROBE';
   // строки: адрес · состояние · трафик (одной строкой переносилось посреди чисел)
   const ln = [(ip ? ip + ' · ' : '') + mac];
+  let tr = '';   // «всего» и «скорость» — HTML: числа в колонках постоянной ширины, строка не прыгает
   if (blocked) ln.push('заблокировано');
   else if (st === '-') ln.push('не подключено');
   else {
     ln.push((on ? 'в сети' : 'был недавно') + (+c ? ' · соединений: ' + c : ''));
-    if (dn) ln.push('↓ ' + fmtBytes(+dn) + ' · ↑ ' + fmtBytes(+up || 0));
+    if (dn) {
+      // скорость всегда, 0 — простой или первый опрос: строка не появляется и не пропадает
+      const r = (CL_PREV[mac] && CL_PREV[mac].r) || [0, 0];
+      const cell = (t, u) => '<span class="cn' + (u ? ' cu' : '') + '">' + esc(t) + '</span>';
+      tr = '<br>всего<br>↓ ' + cell(fmtBytes(+dn)) + ' ↑ ' + cell(fmtBytes(+up || 0), 1) +
+        '<br>скорость<br>↓ ' + cell(fmtBytes(Math.round(r[0])) + '/с') + ' ↑ ' + cell(fmtBytes(Math.round(r[1])) + '/с', 1);
+    }
     else if (+c && +by) ln.push(fmtBytes(+by) + ' в открытых соединениях');
   }
   return '<div class="row wrap" style="gap:8px"><span class="dot ' + (blocked ? 'red' : on ? 'green' : '') + '"></span>' +
-    '<div class="txt"><div class="t">' + esc(nm) + '</div><div class="s">' + ln.map(esc).join('<br>') + '</div></div>' +
+    '<div class="txt"><div class="t">' + esc(nm) + '</div><div class="s">' + ln.map(esc).join('<br>') + tr + '</div></div>' +
     '<button class="btn small" data-cmac="' + esc(mac) + '" data-cname="' + esc(nm) + '" data-cbl="' + (blocked ? '1' : '0') + '">' +
     (blocked ? 'Разблокировать' : 'Блок') + '</button></div>';
 }
 async function loadClients() {
-  const r = await ctl('clients');
+  if (clBusy) return;
+  clBusy = true;
+  let r;
+  try { r = await ctl('clients'); } catch (e) { return; } finally { clBusy = false; }
   const rows = (r.out || '').split('\n').filter((l) => l.split('|').length >= 7).map((l) => l.split('|'));
+  // время замера из webctl (мс от загрузки телефона); старый webctl без него — время ответа
+  const tm = /(?:^|\n)T\|(\d+)/.exec(r.out || ''), now = tm ? +tm[1] : Date.now();
+  rows.forEach((f) => {
+    const mac = f[1], d = +f[7], u = +f[8] || 0, p = CL_PREV[mac];
+    if (!f[7]) { delete CL_PREV[mac]; return; }
+    const dt = p ? (now - p.t) / 1000 : 0;
+    // счётчик сбросился (переподключение) — скорость не считаем, только запоминаем
+    const r2 = p && dt >= 1 && dt <= 30 && d >= p.d && u >= p.u ? [(d - p.d) / dt, (u - p.u) / dt] : null;
+    // другие часы (сменился источник времени) — dt вне 1..30 с, скорость просто не считается
+    CL_PREV[mac] = { t: now, d, u, r: r2 };
+  });
   CLIENTS_N = rows.filter((f) => f[6] !== '1' && f[2] !== '-').length;
   $('#clients').innerHTML = rows.length ? rows.map(clientRow).join('')
     : '<div class="row"><div class="txt"><div class="s">Сейчас никто не подключён к раздаче.</div></div></div>';
@@ -1838,6 +1865,16 @@ function warpState(s) {
     default: return { d: '', t: 'Выключен', s: '' };
   }
 }
+// где выход Opera: площадка Cloudflare (как у WARP) или страна; не узнали — регион из настроек
+function operaWhere(s) {
+  if (s.opera_colo && COLO[s.opera_colo]) return 'Выход: ' + coloName(s.opera_colo);
+  if (s.opera_loc) {
+    let cn = s.opera_loc;
+    try { if (REGION_RU) cn = REGION_RU.of(s.opera_loc) || cn; } catch (e) { /* кодом */ }
+    return 'Выход: ' + cn;
+  }
+  return { EU: 'Европа', AS: 'Азия', AM: 'Америка' }[s.opera_country] || '';
+}
 // [цвет, заголовок, подпись]: плитка на вкладке «Выходы» и строка на Главной
 function operaState(s) {
   const a = (s.opera_endpoint || '').replace(/:\d+$/, '');
@@ -1845,7 +1882,7 @@ function operaState(s) {
   return {
     on: pause ? ['', 'Пауза: включён VPN', 'Без VPN включится сам']
       : none ? ['amber', 'Сайты не направлены', s.opera_skip !== '0' ? 'Они на общих CDN: поставьте «!» перед именем' : 'Проверьте список и выключатели «телефон» и «раздача»']
-      : ['green', 'Работает', [{ EU: 'Европа', AS: 'Азия', AM: 'Америка' }[s.opera_country], a && 'сервер ' + a].filter(Boolean).join(', ')],
+      : ['green', 'Работает', [operaWhere(s), a && 'сервер ' + a].filter(Boolean).join(', ')],
     starting: ['amber', 'Подключается', 'Обычно несколько секунд'],
     fail: ['red', 'Не запустился', s.opera_err || 'Повтор идёт сам'],
     off: s.vpn_up === '1' ? ['', 'Пауза: включён VPN', 'Без VPN включится сам'] : ['', 'Ждёт список сайтов или сеть', ''],
@@ -2610,7 +2647,8 @@ $('#metaBtn').addEventListener('click', async () => {
   loadLinks();
   setInterval(() => { if (!document.hidden && !busy && !stBusy) loadStatus(); }, 3000);
   loadClients();
-  setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="home"]').classList.contains('on')) loadClients(); }, 15000);
+  // со сдвигом 1,5 с от статуса: ksu.exec синхронный, два вызова подряд — заметная пауза страницы
+  setTimeout(() => setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="home"]').classList.contains('on')) loadClients(); }, 3000), 1500);
   loadWarp();
   setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="warp"]').classList.contains('on')) loadWarp(); }, 10000);
   // 3 с, а не 1 с, как в WG Tunnel: ksu.exec синхронный, каждый вызов (~80 мс) — пауза страницы
@@ -2636,7 +2674,7 @@ function mockExec(cmd) {
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=предпросмотр\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
     '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=' + (M.target === 'vpn' ? 'wifi:Дом_5G' : 'mobile:25011') + '\nnet_label=' + (M.target === 'vpn' ? 'Дом_5G' : 'YOTA') + '\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nwan=rmnet_data1\nexit=' + (Math.floor(Date.now() / 1000) - 120) + '|rmnet_data1|188.162.73.24|RU|' + (M.wave ? '000|204' : '204|204') + '\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nwarp=up\nwarp_conf=warp-2\nwarp_note=\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://not-a-dns.quic.best/dns-query\nD DNS_FALLBACKS=https://dns.wlrus.cfd/dns-query https://api.magicdns.ru/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.zapret.moe/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=1\nD OPERA_API_PROXY=\nD OPERA_COUNTRY=EU\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://not-a-dns.quic.best/dns-query\nD DNS_FALLBACKS=https://dns.wlrus.cfd/dns-query https://api.magicdns.ru/dns-query https://dns.zapret.moe/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=1\nD OPERA_API_PROXY=\nD OPERA_COUNTRY=EU\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
     Object.keys(M.usr).map((k) => 'U ' + k + '=' + M.usr[k] + '\n').join('') };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +
@@ -2663,7 +2701,7 @@ function mockExec(cmd) {
     return { errno: 0, out: t.split('\n').filter(Boolean).map((l) => { const k = l.split('=')[0]; return (KEYS.includes(k) ? (k === 'ZAPRET_ALT_MIN' && !/^\d+$/.test(l.split('=')[1]) ? 'BAD ' : 'OK ') : 'UNK ') + k; }).join('\n') };
   }
   if (a === 'warp-saveall') return { errno: 0, out: 'OK /storage/emulated/0/Download/warp-configs_20261027_1040.zip 3' };
-  if (a === 'clients') return { errno: 0, out: '192.168.43.77|e0:2b:e9:75:60:84|REACHABLE|DESKTOP-LAPTOP|31|21545980|0|1243512870|67710170\n192.168.43.67|42:96:f4:ac:3a:91|STALE|realme-9-Pro-5G|2|7553|0||\n|00:27:15:ec:84:bd|-|android-tv|0|0|1||\n' };
+  if (a === 'clients') return { errno: 0, out: '192.168.43.77|e0:2b:e9:75:60:84|REACHABLE|DESKTOP-LAPTOP|31|21545980|0|' + (1243512870 + Math.floor(Date.now() / 1000 % 86400) * 2400000) + '|' + (67710170 + Math.floor(Date.now() / 1000 % 86400) * 90000) + '\n192.168.43.67|42:96:f4:ac:3a:91|STALE|realme-9-Pro-5G|2|7553|0||\n|00:27:15:ec:84:bd|-|android-tv|0|0|1||\nT|' + Date.now() + '\n' };
   if (/^client-(un)?block /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'dnsflush') return { errno: 0, out: 'OK кэш сброшен (dnsproxy перезапущен). На ноутбуке — ещё ipconfig /flushdns' };
   if (a === 'warp-stats') { M.wrx = (M.wrx || 5e6) + 2e5; M.wup = M.wup || Date.now(); return { errno: 0, out: 'hs_age=' + (Math.floor(Date.now() / 1000) % 130) + '\nrx=' + M.wrx + '\ntx=' + Math.round(M.wrx / 9) + '\nendpoint=188.114.96.1:2408\npeer=bmXOC+hWy3/DnZ3VUUTE7y0yOZfVvcRK0Xf4cPfgyo=\nup=' + Math.round((Date.now() - M.wup) / 1000 + 2534) + '\n' }; }

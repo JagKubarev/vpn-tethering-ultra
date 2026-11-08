@@ -44,6 +44,9 @@ OPERA_DOM_SECS=600
 OPERA_STATE="off"       # off | starting | on | fail
 OPERA_ENDPOINT=""       # сервер Opera, выбранный opera-proxy
 OPERA_CUR_COUNTRY=""    # регион этого запуска: OPERA_COUNTRY или запасной
+OPERA_COLO=""           # где выход: площадка Cloudflare (colo=) и страна (loc=) из trace через прокси
+OPERA_LOC=""
+OPERA_WHERE_N=0         # попыток узнать выход за этот запуск (не больше 3: trace может не отвечать)
 OPERA_ERR=""            # почему fail
 OPERA_OWN=0             # этот запуск идёт через свой прокси (OPERA_API_PROXY)
 OPERA_OWN_BAD=0         # свой прокси не ответил: до смены сети или выключения — бесплатный список
@@ -195,6 +198,7 @@ opera_start() {
     OPERA_START_TS=$(date +%s)
     OPERA_STATE="starting"
     OPERA_ENDPOINT=""
+    OPERA_COLO=""; OPERA_LOC=""; OPERA_WHERE_N=0
     OPERA_ERR=""
     log "opera: запускаю opera-proxy$how"
     phone_status_refresh
@@ -477,6 +481,22 @@ opera_probe() {
     [ -n "$code" ] && [ "$code" != "000" ]
 }
 
+# Где выход Opera: trace Cloudflare через её прокси (как площадка у WARP). Один раз после
+# запуска и при проверках, пока не узнали, но не больше 3 раз: каждая попытка держит цикл
+# демона до 6 с, а trace через Opera может и не отвечать. Не узнали — просто без подписи
+opera_where() {
+    local g="sh -c" out
+    [ -n "$CURL_BIN" ] && [ "$OPERA_WHERE_N" -lt 3 ] || return 0
+    OPERA_WHERE_N=$((OPERA_WHERE_N + 1))
+    [ "$OPERA_SU_G" = "1" ] && g="su -g $OPERA_GID -c"
+    out=$($g "$CURL_BIN -s -m 6 --socks5-hostname 127.0.0.1:$OPERA_PORT https://1.1.1.1/cdn-cgi/trace" 2>/dev/null)
+    OPERA_COLO=$(echo "$out" | sed -n 's/^colo=\([A-Z]*\).*/\1/p' | head -n 1)
+    OPERA_LOC=$(echo "$out" | sed -n 's/^loc=\([A-Z]*\).*/\1/p' | head -n 1)
+    [ -n "$OPERA_COLO$OPERA_LOC" ] || return 0
+    log "opera: выход ${OPERA_LOC:-?} (площадка Cloudflare ${OPERA_COLO:-?})"
+    phone_status_refresh
+}
+
 opera_fail() {   # причина
     local p
     opera_rules_off
@@ -490,6 +510,7 @@ opera_fail() {   # причина
     OPERA_STATE="fail"
     OPERA_ERR="$1"
     OPERA_ENDPOINT=""
+    OPERA_COLO=""; OPERA_LOC=""
     log "WARNING: opera: $1 — сайты напрямую, повтор через ~$((p * 2)) с"
     phone_status_refresh
 }
@@ -503,6 +524,7 @@ opera_down() {   # [quiet]
     OPERA_STATE="off"
     OPERA_ENDPOINT=""
     OPERA_CUR_COUNTRY=""
+    OPERA_COLO=""; OPERA_LOC=""
     OPERA_ERR=""
     OPERA_RETRY=0
     OPERA_FAILS=0
@@ -574,7 +596,8 @@ opera_reconcile() {
             opera_hev_start || { opera_fail "hev-socks5-tproxy не запустился: $OPERA_HEV_WHY"; return 0; }
             OPERA_STATE="on"
             OPERA_TICK=0
-            phone_status_refresh ;;
+            phone_status_refresh
+            opera_where ;;
         on)
             [ -n "$(opera_proxy_pids)" ] || { opera_fail "opera-proxy завершился"; return 0; }
             if [ -z "$(opera_hev_pids)" ]; then
@@ -594,6 +617,7 @@ opera_reconcile() {
         if [ "$want" = "1" ]; then
             if opera_probe; then
                 OPERA_BAD=0
+                [ -n "$OPERA_COLO$OPERA_LOC" ] || opera_where
             else
                 OPERA_BAD=$((OPERA_BAD + 1))
                 [ "$OPERA_BAD" -ge 3 ] && { opera_fail "прокси не отвечает"; return 0; }
