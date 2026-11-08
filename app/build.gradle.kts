@@ -14,6 +14,7 @@ val ks = Properties().apply {
     System.getenv("VT_KEYSTORE")?.let { setProperty("storeFile", it) }
     System.getenv("VT_KEYSTORE_PASS")?.let { setProperty("storePassword", it); setProperty("keyPassword", it) }
     System.getenv("VT_KEY_ALIAS")?.let { setProperty("keyAlias", it) }
+    System.getenv("VT_KEY_PASS")?.takeIf { it.isNotEmpty() }?.let { setProperty("keyPassword", it) }   // если у ключа свой пароль
 }
 val hasKey = ks.getProperty("storeFile")?.let { file(it).isFile } == true
 

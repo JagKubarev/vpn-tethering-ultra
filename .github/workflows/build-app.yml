@@ -1,5 +1,6 @@
 # Приложение «VPN Tether» — WebUI модуля без менеджера KernelSU (app/, GPL-3.0).
-# Подпись: секреты VT_KEYSTORE_B64 (keystore в base64), VT_KEYSTORE_PASS, VT_KEY_ALIAS.
+# Подпись: секреты VT_KEYSTORE_B64 (keystore в base64), VT_KEYSTORE_PASS, VT_KEY_ALIAS
+# (+ VT_KEY_PASS, если пароль ключа другой).
 # Без них APK подписан отладочным ключом раннера — ставится, но поверх такого
 # же APK из другого запуска не встанет (другой ключ): тогда удалить и поставить заново.
 name: build-app
@@ -29,10 +30,11 @@ jobs:
           KS_B64: ${{ secrets.VT_KEYSTORE_B64 }}
           KS_PASS: ${{ secrets.VT_KEYSTORE_PASS }}
           KS_ALIAS: ${{ secrets.VT_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.VT_KEY_PASS }}
         run: |
           if [ -n "$KS_B64" ]; then
             echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/vt.jks"
-            { echo "VT_KEYSTORE=$RUNNER_TEMP/vt.jks"; echo "VT_KEYSTORE_PASS=$KS_PASS"; echo "VT_KEY_ALIAS=$KS_ALIAS"; } >> "$GITHUB_ENV"
+            { echo "VT_KEYSTORE=$RUNNER_TEMP/vt.jks"; echo "VT_KEYSTORE_PASS=$KS_PASS"; echo "VT_KEY_ALIAS=$KS_ALIAS"; echo "VT_KEY_PASS=$KEY_PASS"; } >> "$GITHUB_ENV"
           else
             echo "::warning::нет секрета VT_KEYSTORE_B64 — APK подписан отладочным ключом"
           fi

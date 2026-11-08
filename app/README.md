@@ -66,7 +66,8 @@ gradle assembleRelease      # Gradle 8.7
 
 Подпись release: `app/keystore.properties` (`storeFile`, `storePassword`, `keyAlias`,
 `keyPassword`) или переменные `VT_KEYSTORE`, `VT_KEYSTORE_PASS`, `VT_KEY_ALIAS`
-(в Actions — секреты `VT_KEYSTORE_B64`, `VT_KEYSTORE_PASS`, `VT_KEY_ALIAS`).
+(в Actions — секреты `VT_KEYSTORE_B64`, `VT_KEYSTORE_PASS`, `VT_KEY_ALIAS`; если у ключа
+свой пароль — ещё `VT_KEY_PASS`).
 Без ключа APK подписывается отладочным: ставится, но обновление поверх APK с другим
 ключом не встанет — удалить и поставить заново.
 
@@ -74,4 +75,4 @@ gradle assembleRelease      # Gradle 8.7
 
 GPL-3.0, как модуль. Идеи моста — из менеджера KernelSU и
 [KsuWebUIStandalone](https://github.com/5ec1cff/KsuWebUIStandalone) (оба GPL-3.0);
-значок — «wifi_tethering» из Material Icons (Apache-2.0).
+значок — тот же, что в шапке WebUI.
