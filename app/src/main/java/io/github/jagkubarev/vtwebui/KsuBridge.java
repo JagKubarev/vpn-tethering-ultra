@@ -60,20 +60,18 @@ final class KsuBridge {
         queue.shutdown();
     }
 
-    private static String quote(String s) { return "'" + s.replace("'", "'\\''") + "'"; }
-
     private static String withOptions(String cmd, String options) {
         StringBuilder sb = new StringBuilder();
         if (!TextUtils.isEmpty(options)) {
             try {
                 JSONObject o = new JSONObject(options);
                 String cwd = o.optString("cwd");
-                if (!TextUtils.isEmpty(cwd)) sb.append("cd ").append(quote(cwd)).append(" || exit 1\n");
+                if (!TextUtils.isEmpty(cwd)) sb.append("cd ").append(RootShell.quote(cwd)).append(" || exit 1\n");
                 JSONObject env = o.optJSONObject("env");
                 if (env != null) for (Iterator<String> it = env.keys(); it.hasNext(); ) {
                     String k = it.next();
                     if (!k.matches("[A-Za-z_][A-Za-z0-9_]*")) continue;   // не имя переменной — не код
-                    sb.append("export ").append(k).append('=').append(quote(env.optString(k))).append('\n');
+                    sb.append("export ").append(k).append('=').append(RootShell.quote(env.optString(k))).append('\n');
                 }
             } catch (JSONException ignored) { }
         }

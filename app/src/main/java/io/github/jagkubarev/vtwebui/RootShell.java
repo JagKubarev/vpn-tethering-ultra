@@ -160,6 +160,9 @@ final class RootShell {
         return new Result(r.code, o, chop(r.err));
     }
 
+    /** Строка в одинарных кавычках для sh: внутри ничего не раскрывается, ' — как '\'' . */
+    static String quote(String s) { return "'" + s.replace("'", "'\\''") + "'"; }
+
     /** Как libsu в KernelSU: строки через \n, без перевода строки в конце. */
     private static String chop(String s) {
         return s.endsWith("\n") ? s.substring(0, s.length() - 1) : s;
@@ -168,7 +171,7 @@ final class RootShell {
     /** Файл через root целиком, байт в байт (для webroot). null — не прочитался. */
     synchronized byte[] readFile(String path) {
         // cat, а не base64: base64 в toybox Android 8 есть не везде (см. webctl.sh)
-        String p = "'" + path.replace("'", "'\\''") + "'";
+        String p = quote(path);
         Raw r = runRaw("[ -f " + p + " ] && cat " + p, 60);
         return r.out != null && r.code == 0 ? r.out : null;
     }
