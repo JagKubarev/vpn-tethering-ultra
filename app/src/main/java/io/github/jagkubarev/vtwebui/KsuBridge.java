@@ -16,10 +16,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -41,14 +39,26 @@ final class KsuBridge {
     private final RootShell sh;
     private final String modDir;
     private final ExecutorService queue = Executors.newSingleThreadExecutor();
-    /** Команды в очереди, ещё не начатые: такая же команда не встаёт второй раз, а ждёт тот же ответ. */
-    private final Map<String, List<String>> pending = new HashMap<>();
+
+    /** Команда в очереди и все, кто ждёт её ответа. */
+    private static final class Job {
+        final String script;
+        final List<String> cbs = new ArrayList<>();
+        Job(String script) { this.script = script; }
+    }
+    /** Последняя поставленная и ещё не начатая команда: точно такая же следом — склеивается с ней. */
+    private Job tail;
+    private volatile boolean closed;
 
     KsuBridge(Activity act, WebView web, RootShell sh, String modDir) {
         this.act = act; this.web = web; this.sh = sh; this.modDir = modDir;
     }
 
-    void shutdown() { queue.shutdownNow(); }
+    /** Окно закрывается: идущая команда доработает (не рвём на полпути), ждущие не начнутся. */
+    void close() {
+        closed = true;
+        queue.shutdown();
+    }
 
     private static String quote(String s) { return "'" + s.replace("'", "'\\''") + "'"; }
 
@@ -87,26 +97,33 @@ final class KsuBridge {
     public void exec(String cmd, String options, String callback) {
         final String script = withOptions(cmd, options);
         // Таймеры страницы (статистика WARP раз в 3 с, клиенты, конфиги) не ждут
-        // ответа: пока медленная команда держит очередь, повторы склеиваются в одну.
-        synchronized (pending) {
-            List<String> cbs = pending.get(script);
-            if (cbs != null) { cbs.add(callback); return; }
-            cbs = new ArrayList<>();
-            cbs.add(callback);
-            pending.put(script, cbs);
+        // ответа: пока медленная команда держит очередь, повтор подряд склеивается с
+        // последней ждущей. Только с последней — иначе «вкл, выкл, вкл» стало бы
+        // «вкл, выкл» и порядок разошёлся бы с KernelSU.
+        final Job job;
+        synchronized (this) {
+            if (tail != null && tail.script.equals(script)) { tail.cbs.add(callback); return; }
+            job = new Job(script);
+            job.cbs.add(callback);
+            tail = job;
         }
         try {
             queue.execute(() -> {
                 List<String> cbs;
-                synchronized (pending) { cbs = pending.remove(script); }
+                synchronized (KsuBridge.this) {
+                    if (tail == job) tail = null;   // началась — к ней больше не клеим
+                    cbs = new ArrayList<>(job.cbs);
+                }
+                if (closed) return;
                 RootShell.Result r = sh.run(script, TIMEOUT_SEC);
+                if (closed) return;
                 String args = r.code + "," + JSONObject.quote(r.out) + "," + JSONObject.quote(r.err);
                 StringBuilder js = new StringBuilder();
                 for (String cb : cbs) js.append("(function(){try{").append(cb).append('(').append(args).append(");}catch(e){console.error(e);}})();");
                 web.post(() -> web.evaluateJavascript(js.toString(), null));
             });
         } catch (java.util.concurrent.RejectedExecutionException e) {   // окно уже закрывается
-            synchronized (pending) { pending.remove(script); }
+            synchronized (this) { if (tail == job) tail = null; }
         }
     }
 

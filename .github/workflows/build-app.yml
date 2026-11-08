@@ -53,6 +53,8 @@ jobs:
           KEY_PASS: ${{ secrets.VT_KEY_PASS }}
         run: |
           if [ -n "$KS_B64" ]; then
+            # ключ есть, а пароля или alias нет — ошибка, а не тихая отладочная подпись
+            [ -n "$KS_PASS" ] && [ -n "$KS_ALIAS" ] || { echo "::error::есть VT_KEYSTORE_B64, но нет VT_KEYSTORE_PASS или VT_KEY_ALIAS"; exit 1; }
             echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/vt.jks"
             { echo "VT_KEYSTORE=$RUNNER_TEMP/vt.jks"; echo "VT_KEYSTORE_PASS=$KS_PASS"; echo "VT_KEY_ALIAS=$KS_ALIAS"; echo "VT_KEY_PASS=$KEY_PASS"; } >> "$GITHUB_ENV"
           else
@@ -69,6 +71,8 @@ jobs:
           mkdir -p out
           cp app/build/outputs/apk/release/VPN_Tether_WebUI-release.apk "out/VPN_Tether_WebUI_v$v.apk"
           bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          # проверка отдельно от вывода: через | head код ошибки apksigner терялся бы
+          "$bt"/apksigner verify out/*.apk
           "$bt"/apksigner verify --print-certs out/*.apk | head -3
           sha256sum out/*.apk | tee out/SHA256
 

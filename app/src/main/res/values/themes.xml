@@ -4,7 +4,8 @@
     <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/bg</item>
         <item name="android:statusBarColor">@color/bg</item>
-        <item name="android:navigationBarColor">@color/bg</item>
+        <!-- Android 8.0: светлой полосы навигации ещё нет (windowLightNavigationBar с 8.1, values-v27) —
+             кнопки белые, поэтому полоса остаётся тёмной по умолчанию -->
         <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

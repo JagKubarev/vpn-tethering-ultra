@@ -20,8 +20,13 @@ val ks = Properties().apply {
 }
 fun ksProp(k: String): String? = ks.getProperty(k)?.takeIf { it.isNotEmpty() }   // без trim: пробел может быть частью пароля
 val hasKey = ksProp("storeFile")?.let { file(it).isFile } == true && ksProp("storePassword") != null && ksProp("keyAlias") != null
-if (!hasKey && (ksProp("storeFile") != null || file("keystore.properties").isFile))
-    logger.warn("Подпись: нет файла ключа, пароля или alias — release подписывается отладочным ключом")
+// Ключ задан, но не полностью (нет файла, пароля или alias) — release не собираем:
+// иначе тихо вышел бы APK с отладочной подписью, и следующая версия не встала бы поверх.
+// Отладочная подпись — только когда ключ не задан совсем.
+val keyConfigured = env("VT_KEYSTORE") != null || file("keystore.properties").isFile
+val releaseRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+if (keyConfigured && !hasKey && releaseRequested)
+    throw GradleException("Подпись: ключ задан не полностью (нет файла ключа, пароля или alias) — проверьте keystore.properties или секреты VT_KEYSTORE_*")
 
 android {
     namespace = "io.github.jagkubarev.vtwebui"

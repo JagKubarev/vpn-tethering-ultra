@@ -50,7 +50,9 @@ public class MainActivity extends Activity {
     private static final String HOST = "mui.kernelsu.org";
     private static final int REQ_FILE = 1;
 
-    private final RootShell sh = new RootShell();
+    // root-шелл переживает пересоздание окна (смена темы): идущая команда не рвётся,
+    // Magisk не спрашивает/не тостит заново
+    private RootShell sh;
     // значки для списка приложений: поиск перерисовывает список и снова просит их; не больше 2 МБ
     private final LruCache<String, byte[]> icons = new LruCache<String, byte[]>(2 << 20) {
         @Override protected int sizeOf(String k, byte[] v) { return v.length; }
@@ -65,6 +67,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        Object kept = getLastNonConfigurationInstance();
+        sh = kept instanceof RootShell ? (RootShell) kept : new RootShell();
         FrameLayout root = new FrameLayout(this);
 
         web = new WebView(this);
@@ -305,10 +309,15 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    public Object onRetainNonConfigurationInstance() { return sh; }
+
+    @Override
     protected void onDestroy() {
-        bridge.shutdown();
+        bridge.close();
         web.destroy();
-        new Thread(sh::close).start();
+        // смена темы и т. п. — шелл достанется новому окну; закрыли совсем — гасим
+        // (close ждёт идущую команду: не рвём запись настроек на полпути)
+        if (!isChangingConfigurations()) new Thread(sh::close).start();
         super.onDestroy();
     }
 }
