@@ -1,0 +1,56 @@
+# Приложение «VPN Tether» — WebUI модуля без менеджера KernelSU (app/, GPL-3.0).
+# Подпись: секреты VT_KEYSTORE_B64 (keystore в base64), VT_KEYSTORE_PASS, VT_KEY_ALIAS.
+# Без них APK подписан отладочным ключом раннера — ставится, но поверх такого
+# же APK из другого запуска не встанет (другой ключ): тогда удалить и поставить заново.
+name: build-app
+
+on:
+  workflow_dispatch:
+  push:
+    paths: ['app/**', '.github/workflows/build-app.yml']
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Ключ подписи
+        env:
+          KS_B64: ${{ secrets.VT_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.VT_KEYSTORE_PASS }}
+          KS_ALIAS: ${{ secrets.VT_KEY_ALIAS }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/vt.jks"
+            { echo "VT_KEYSTORE=$RUNNER_TEMP/vt.jks"; echo "VT_KEYSTORE_PASS=$KS_PASS"; echo "VT_KEY_ALIAS=$KS_ALIAS"; } >> "$GITHUB_ENV"
+          else
+            echo "::warning::нет секрета VT_KEYSTORE_B64 — APK подписан отладочным ключом"
+          fi
+
+      - name: Сборка
+        working-directory: app
+        run: gradle --no-daemon assembleRelease
+
+      - name: Имя с версией
+        run: |
+          v=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
+          mkdir -p out
+          cp app/build/outputs/apk/release/VPN_Tether_WebUI-release.apk "out/VPN_Tether_WebUI_v$v.apk"
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$bt"/apksigner verify --print-certs out/*.apk | head -3
+          sha256sum out/*.apk | tee out/SHA256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vpn-tether-webui
+          path: out/

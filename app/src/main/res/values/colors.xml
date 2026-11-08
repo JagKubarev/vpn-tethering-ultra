@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- как переменные bg и accent страницы (webroot/index.html) -->
+    <color name="bg">#e8ecea</color>
+    <color name="icon_bg">#2246c4</color>
+</resources>
