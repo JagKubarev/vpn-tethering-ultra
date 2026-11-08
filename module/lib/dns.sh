@@ -813,8 +813,31 @@ dns_try_alt() {     # 0 = перешли на запасные DoH и они о�
     # "разблокирующих" адресов
     # первый запасной, которого нет среди основных (выбран zapret.moe основным —
     # тогда запасной не он же, а следующий)
-    DNS_ALT_UPS=$(for u in $DNS_FALLBACKS; do case " $DNS_UPSTREAMS " in *" $u "*) ;; *) echo "$u"; break ;; esac; done)
+    # Первый живой по списку: раньше брали только первый, и если он лежал — сразу
+    # к оператору (08.11 16:24: not-a-dns молчал 75 с, первым запасным стоял
+    # мёртвый dns.geohide.ru:444, а живой zapret.moe — четвёртым). Кандидатов
+    # проверяем curl-ом параллельно (до ~4 с на всех); не ответил никто или
+    # проверить нечем — первый, как раньше (решит проба dnsproxy ниже)
+    local cands c i=0 pids="" d="/data/local/tmp/vpn_tether_alt.$$"
+    cands=$(for c in $DNS_FALLBACKS; do case " $DNS_UPSTREAMS " in *" $c "*) ;; *) echo "$c" ;; esac; done)
+    # первый — без set --: $1 функции (причина) нужен в журнале ниже
+    for c in $cands; do DNS_ALT_UPS="$c"; break; done
     [ -n "$DNS_ALT_UPS" ] || return 1
+    if [ "$DNS_ALT_UPS" != "$(echo $cands)" ] && command -v curl >/dev/null 2>&1; then
+        rm -f "$d".*
+        for c in $cands; do
+            i=$((i + 1))
+            ( dns_primary_alive "$c" && : > "$d.$i" ) &
+            pids="$pids $!"
+        done
+        wait $pids
+        i=0
+        for c in $cands; do
+            i=$((i + 1))
+            [ -e "$d.$i" ] && { DNS_ALT_UPS="$c"; break; }
+        done
+        rm -f "$d".*
+    fi
     if dnsproxy_start "direct-doh" $DNS_ALT_UPS && dnsproxy_probe_cold; then
         local now t keep="" hold="$DNS_ALT_HOLD"
         now=$(date +%s)
@@ -835,10 +858,10 @@ dns_try_alt() {     # 0 = перешли на запасные DoH и они о�
 }
 
 # Основной DoH отвечает? Напрямую curl-ом, от группы dnsproxy (мимо AdGuard).
+# С адресом — проверяет его (запасные в dns_try_alt).
 dns_primary_alive() {
-    local u code
-    set -- $DNS_UPSTREAMS
-    u="$1"
+    local u="$1" code
+    [ -n "$u" ] || { set -- $DNS_UPSTREAMS; u="$1"; }
     # проверить нечем (не https / нет curl) — «не жив»: запасной работает, а
     # «жив» гонял бы на мёртвый основной раз в ~30 мин (сценарное ревью)
     case "$u" in https://*) ;; *) return 1 ;; esac
