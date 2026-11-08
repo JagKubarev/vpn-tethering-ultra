@@ -804,64 +804,88 @@ dns_operator_dead() {
 
 dns_hosts_of() { echo $* | sed -E 's#[a-z0-9]+://([^/: ]+)[^ ]*#\1#g'; }
 
-dns_try_alt() {     # 0 = перешли на запасные DoH и они отвечают
-    [ -z "$DNS_ALT_UPS" ] || return 1
+dns_try_alt() {     # 0 = перешли на запасной DoH и он отвечает
+    local why="$1" cur="$DNS_ALT_UPS" cands c t i j=0 n=0 st ok="" now t0 pids="" d="/data/local/tmp/vpn_tether_alt.$$"
     [ -n "$DNS_FALLBACKS" ] || return 1
     case "$DNSPROXY_SIG" in "direct-doh|"*) ;; *) return 1 ;; esac
-    # основным — только первый запасной (dns.zapret.moe): несколько -u dnsproxy
-    # опрашивает по очереди, и часть ответов пришла бы от Google без
-    # "разблокирующих" адресов
-    # первый запасной, которого нет среди основных (выбран zapret.moe основным —
-    # тогда запасной не он же, а следующий)
+    # основным — только один запасной: несколько -u dnsproxy опрашивает по
+    # очереди, и часть ответов пришла бы от Google без "разблокирующих" адресов.
+    # Кандидаты — запасные, которых нет среди основных (выбран zapret.moe
+    # основным — запасной не он же) и кроме текущего: уже на запасном и он
+    # замолчал — следующий, а не сразу к оператору.
     # Первый живой по списку: раньше брали только первый, и если он лежал — сразу
     # к оператору (08.11 16:24: not-a-dns молчал 75 с, первым запасным стоял
     # мёртвый dns.geohide.ru:444, а живой zapret.moe — четвёртым). Кандидатов
-    # проверяем curl-ом параллельно (до ~4 с на всех); не ответил никто или
-    # проверить нечем — первый, как раньше (решит проба dnsproxy ниже)
-    local cands c i=0 pids="" d="/data/local/tmp/vpn_tether_alt.$$"
-    cands=$(for c in $DNS_FALLBACKS; do case " $DNS_UPSTREAMS " in *" $c "*) ;; *) echo "$c" ;; esac; done)
-    # первый — без set --: $1 функции (причина) нужен в журнале ниже
-    for c in $cands; do DNS_ALT_UPS="$c"; break; done
-    [ -n "$DNS_ALT_UPS" ] || return 1
-    if [ "$DNS_ALT_UPS" != "$(echo $cands)" ] && command -v curl >/dev/null 2>&1; then
+    # проверяем curl-ом параллельно и ждём, пока не станет известен первый
+    # живой по порядку (до ~5 с). Не поднялся на нём dnsproxy — следующий
+    # живой по curl (к этому времени проверки закончились), не больше двух
+    # попыток. Не ответил никто — 5 мин без проверки curl-ом (белые списки:
+    # откат проверяется раз в 30 с) и первый по списку, как раньше.
+    cands=$(for c in $DNS_FALLBACKS; do case " $DNS_UPSTREAMS $cur " in *" $c "*) ;; *) echo "$c" ;; esac; done)
+    [ -n "$cands" ] || return 1
+    now=$(date +%s)
+    if [ $((now - DNS_ALT_SCAN_DEAD)) -ge 300 ] && command -v curl >/dev/null 2>&1; then
         rm -f "$d".*
-        for c in $cands; do
-            i=$((i + 1))
-            ( dns_primary_alive "$c" && : > "$d.$i" ) &
-            pids="$pids $!"
-        done
-        wait $pids
         i=0
         for c in $cands; do
             i=$((i + 1))
-            [ -e "$d.$i" ] && { DNS_ALT_UPS="$c"; break; }
+            ( if dns_doh_alive "$c" any; then : > "$d.$i.y"; else : > "$d.$i.n"; fi ) &
+            pids="$pids $!"
         done
-        rm -f "$d".*
+        t0=$(uptime_ms)
+        while :; do
+            i=0; st=dead
+            for c in $cands; do
+                i=$((i + 1))
+                if [ -e "$d.$i.y" ]; then ok="$c"; j=$i; st=done; break; fi
+                [ -e "$d.$i.n" ] || { st=wait; break; }
+            done
+            [ "$st" = wait ] || break
+            [ $(( $(uptime_ms) - t0 )) -ge 5000 ] && break
+            sleep 0.1
+        done
+        [ -n "$ok" ] || DNS_ALT_SCAN_DEAD=$now
     fi
-    if dnsproxy_start "direct-doh" $DNS_ALT_UPS && dnsproxy_probe_cold; then
-        local now t keep="" hold="$DNS_ALT_HOLD"
-        now=$(date +%s)
-        for t in $DNS_ALT_TRIPS; do [ $((now - t)) -lt 1800 ] && keep="$keep $t"; done
-        DNS_ALT_TRIPS="$keep $now"
-        [ "$(echo $DNS_ALT_TRIPS | wc -w)" -ge 2 ] && hold="$DNS_ALT_HOLD_FLAP"
-        log "WARNING: DoH-апстрим не отвечает ($1) — DNS через запасные DoH ($(dns_hosts_of $DNS_ALT_UPS)); на $(dns_hosts_of $DNS_UPSTREAMS) вернусь не раньше чем через $((hold / 60)) мин$([ "$hold" = "$DNS_ALT_HOLD_FLAP" ] && echo ' (он дёргается)')"
-        DNS_ALT_LAST=$now
-        DNS_ALT_SINCE=$now
-        DNS_ALT_OKS=0
-        phone_status_refresh
-        return 0
-    fi
+    [ -n "$ok" ] || for c in $cands; do ok="$c"; break; done
+    while [ -n "$ok" ] && [ "$n" -lt 2 ]; do
+        n=$((n + 1))
+        # до dnsproxy_start: по нему он собирает фолбэки запасного
+        DNS_ALT_UPS="$ok"
+        if dnsproxy_start "direct-doh" "$ok" && dnsproxy_probe_cold; then
+            local keep="" hold="$DNS_ALT_HOLD"
+            [ -n "$pids" ] && { kill $pids 2>/dev/null; rm -f "$d".*; }
+            now=$(date +%s)
+            for t in $DNS_ALT_TRIPS; do [ $((now - t)) -lt 1800 ] && keep="$keep $t"; done
+            DNS_ALT_TRIPS="$keep $now"
+            [ "$(echo $DNS_ALT_TRIPS | wc -w)" -ge 2 ] && hold="$DNS_ALT_HOLD_FLAP"
+            log "WARNING: DoH-апстрим не отвечает ($why) — DNS через запасные DoH ($(dns_hosts_of $ok)); на $(dns_hosts_of $DNS_UPSTREAMS) вернусь не раньше чем через $((hold / 60)) мин$([ "$hold" = "$DNS_ALT_HOLD_FLAP" ] && echo ' (он дёргается)')"
+            DNS_ALT_LAST=$now
+            DNS_ALT_SINCE=$now
+            DNS_ALT_OKS=0
+            phone_status_refresh
+            return 0
+        fi
+        # следующий живой по curl после него (без проверки curl-ом j=0 — некого)
+        ok=""; i=0
+        [ "$j" -gt 0 ] && for c in $cands; do
+            i=$((i + 1))
+            [ "$i" -gt "$j" ] && [ -e "$d.$i.y" ] && { ok="$c"; j=$i; break; }
+        done
+    done
+    # недождавшиеся не нужны: их curl доработает сам (-m 4), метки не пишутся
+    [ -n "$pids" ] && { kill $pids 2>/dev/null; rm -f "$d".*; }
     # запасные тоже молчат — обратно на основной, дальше откат к оператору
     DNS_ALT_UPS=""
     dnsproxy_start "direct-doh" $DNS_UPSTREAMS
     return 1
 }
 
-# Основной DoH отвечает? Напрямую curl-ом, от группы dnsproxy (мимо AdGuard).
-# С адресом — проверяет его (запасные в dns_try_alt).
-dns_primary_alive() {
+# DoH-сервер отвечает? Напрямую curl-ом, от группы dnsproxy (мимо AdGuard).
+# dns_doh_alive <url> [any]; any — жив при любом ответе HTTP (TLS с этим именем
+# прошёл, сервер на месте): для выбора запасного, geohide.ru по HTTP/1.1 даёт
+# 503, а dnsproxy (HTTP/2) отвечает (30.10) — решит проба dnsproxy.
+dns_doh_alive() {
     local u="$1" code
-    [ -n "$u" ] || { set -- $DNS_UPSTREAMS; u="$1"; }
     # проверить нечем (не https / нет curl) — «не жив»: запасной работает, а
     # «жив» гонял бы на мёртвый основной раз в ~30 мин (сценарное ревью)
     case "$u" in https://*) ;; *) return 1 ;; esac
@@ -881,8 +905,12 @@ dns_primary_alive() {
         code=$(curl -s -o /dev/null -m 4 --no-alpn --capath $ca -H 'accept: application/dns-message' -w '%{http_code} %{errormsg}' "$u" 2>/dev/null)
     fi
     case "$code" in 200*|505*|*"HTTP/0.9"*) return 0 ;; esac
+    [ "$2" = "any" ] && case "$code" in ""|000*) ;; *) return 0 ;; esac
     return 1
 }
+
+# Основной DoH отвечает? (первый из DNS_UPSTREAMS)
+dns_primary_alive() { set -- $DNS_UPSTREAMS; dns_doh_alive "$1"; }
 
 dns_alt_recheck() {
     local hold="$DNS_ALT_HOLD"

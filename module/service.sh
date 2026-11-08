@@ -1473,6 +1473,7 @@ DNS_ALT_LAST=0         # когда последний раз проверяли
 DNS_ALT_SINCE=0        # когда ушли на запасные
 DNS_ALT_OKS=0          # удачных проверок основного подряд
 DNS_ALT_TRIPS=""       # время уходов на запасные (за 30 мин) — признак "дёргается"
+DNS_ALT_SCAN_DEAD=0    # когда curl-проверка запасных не нашла живых (5 мин не повторяем)
 DNS_EXEMPT_TICK=0      # исключение AdGuard проверяем раз в ~10с
 DHCP_IFACES_CACHE=""   # ss -lun раз в ~6с (раздача и так видна по ip rule netd)
 DHCP_IFACES_TICK=0
@@ -1619,7 +1620,7 @@ dnsproxy_kill_strays
 warp_routes_off force      # туннель и его маршруты от убитого демона
 warp_down
 phone_dns_rules_off
-rm -f "$DNSPROXY_PID_FILE" /data/local/tmp/vpn_tether_probe.*
+rm -f "$DNSPROXY_PID_FILE" /data/local/tmp/vpn_tether_probe.* /data/local/tmp/vpn_tether_alt.*
 # /data/local/tmp переживает перезагрузку, а tun после неё часто с тем же
 # ifindex — старая метка срезала бы ретраи первого поиска таблицы (ревью PR #21)
 rm -f "$RT_MISS_FILE"
