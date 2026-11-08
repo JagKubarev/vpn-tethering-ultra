@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" id="metaScheme" content="light dark">
 <title>VPN Tethering</title>
 <style>
 :root {
@@ -33,8 +33,11 @@
   --tabbar-h: 60px;   /* от неё отсчитываются плашка «Применить» и тост */
   --tabbar-pad: 8px;  /* поля панели снизу и по бокам (.in) — подальше от скруглённых углов экрана */
 }
-@media (prefers-color-scheme: dark) {
-  :root {
+/* Тема: data-theme на <html> ставит скрипт в <head> до отрисовки — «как в системе»
+   (по умолчанию), светлая или тёмная; выбор в «Сервис → Модуль» (localStorage vtTheme) */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] {
+    color-scheme: dark;
     --bg: #0d1311;
     --card: #151d1a;
     --text: #e2e9e6;
@@ -54,7 +57,6 @@
     --vpn: #8aa3ff;    --vpn-soft: #1a2448;
     --direct: #bfcc6e; --direct-soft: #262c12;
     --wave: #f2a640;   --wave-soft: #33260f;
-  }
 }
 body[data-route="direct"] { --route: var(--direct); --route-soft: var(--direct-soft); }
 body[data-route="wave"], body[data-route="blocked"] { --route: var(--wave); --route-soft: var(--wave-soft); }
@@ -168,7 +170,7 @@ textarea { resize: vertical; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo
 .st-line > .dot { margin-right: 8px; vertical-align: -1px; }
 details.off { opacity: .45; pointer-events: none; }
 /* в тёмной теме серый текст на .45 почти сливался с карточкой */
-@media (prefers-color-scheme: dark) { .row.off, details.off { opacity: .55; } }
+:root[data-theme="dark"] .row.off, :root[data-theme="dark"] details.off { opacity: .55; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 select:disabled { opacity: .6; }
 .inline { display: flex; flex-wrap: wrap; gap: 0 8px; align-items: flex-start; }
@@ -326,6 +328,25 @@ details > summary::after { border-color: currentColor; }
 @media (prefers-reduced-motion: reduce) { #statusCard { transition: none; } }
 .mt8 { margin-top: 8px; }
 </style>
+<script>
+// тема до первой отрисовки, иначе тёмная мигала бы светлой. Пусто — как в системе
+(function () {
+  var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null, pref = '';
+  try { pref = localStorage.getItem('vtTheme') || ''; } catch (e) { /* без хранилища — как в системе */ }
+  window.vtTheme = function (p) {
+    if (p !== undefined) pref = p;
+    var t = pref || (mq && mq.matches ? 'dark' : 'light'), m = document.getElementById('metaScheme');
+    document.documentElement.setAttribute('data-theme', t);
+    // и meta: иначе при «Светлой» в тёмной системе WebView красит фон тёмным до стилей
+    if (m) m.setAttribute('content', pref ? t : 'light dark');
+    return pref;
+  };
+  window.vtTheme();
+  // «как в системе» — следить и за сменой темы телефона, пока WebUI открыт
+  var f = function () { if (!pref) window.vtTheme(); };
+  if (mq && mq.addEventListener) mq.addEventListener('change', f); else if (mq && mq.addListener) mq.addListener(f);
+})();
+</script>
 </head>
 <body>
 
@@ -748,7 +769,7 @@ details > summary::after { border-color: currentColor; }
 <div class="card">
   <div class="row col" data-dep="OPERA_ENABLE">
     <div class="txt"><div class="t">Регион</div>
-      <div class="s">Амстердам, Сингапур или Вашингтон. Азия и Америка дальше и обычно медленнее.</div></div>
+      <div class="s">Амстердам, Сингапур или Вашингтон. Азия и Америка дальше и обычно медленнее. Если серверы региона закрыты, модуль сам попробует последний рабочий сервер, потом другие регионы.</div></div>
     <div class="seg" data-key="OPERA_COUNTRY" role="radiogroup" aria-label="Регион Opera" style="margin-top:10px"><button data-v="EU" role="radio">Европа</button><button data-v="AS" role="radio">Азия</button><button data-v="AM" role="radio">Америка</button></div>
   </div>
   <div class="row" data-dep="OPERA_ENABLE">
@@ -824,7 +845,7 @@ details > summary::after { border-color: currentColor; }
   </div>
   <div class="row col">
     <div class="head">
-      <div class="txt"><div class="t">Проверка адресов Meta</div><div class="s">Адреса Instagram и Facebook с европейским ECS. Рабочие обычно на 57.144.</div></div>
+      <div class="txt"><div class="t">Проверка адресов Meta</div><div class="s">Адреса Instagram, Facebook и WhatsApp с европейским ECS. Рабочие обычно на 57.144.</div></div>
       <button class="btn small" id="metaBtn">Проверить</button>
     </div>
     <div id="metaRes" style="font-size:14px"></div>
@@ -842,6 +863,11 @@ details > summary::after { border-color: currentColor; }
     <div class="txt"><div class="t">Состояние в описании модуля</div>
       <div class="s">Режим виден в списке модулей KernelSU и Magisk.</div></div>
     <label class="sw"><input type="checkbox" data-key="STATUS_IN_DESCRIPTION"><span></span></label>
+  </div>
+  <div class="row col">
+    <div class="txt"><div class="t">Оформление</div>
+      <div class="s">Сразу, без «Применить». Запоминается отдельно в этом окне: у WebUI в KernelSU и у приложения VPN Tether выбор свой.</div></div>
+    <div class="seg" id="themeSeg" role="radiogroup" aria-label="Оформление" style="margin-top:10px"><button data-t="" role="radio">Системная</button><button data-t="light" role="radio">Светлая</button><button data-t="dark" role="radio">Тёмная</button></div>
   </div>
 </div>
 
@@ -1156,9 +1182,9 @@ function renderStatus(s) {
   else if (s.zapret === 'nokernel') h += kvRow('Обход блокировок', 'ядро телефона не поддерживает NFQUEUE — обход невозможен, нужен VPN', 'red');
   else if (s.zapret === 'wl') h += kvRow('Обход блокировок', 'пауза: похоже, белые списки оператора — обход не поможет, нужен VPN', 'amber');
   if (s.dnsproxy_enable === '1' && s.meta_eu === '1') {
-    if (s.meta_eu_on === '1') h += kvRow('Instagram и Facebook', 'как из Европы (ECS ' + esc(s.meta_ecs) + ')', 'green');
-    else if (s.vpn_up === '1') h += kvRow('Instagram и Facebook', 'через VPN, Европа не нужна', '');
-    else h += kvRow('Instagram и Facebook', 'обычный: DoH без VPN сейчас не используется', '');
+    if (s.meta_eu_on === '1') h += kvRow('Instagram, Facebook, WhatsApp', 'как из Европы (ECS ' + esc(s.meta_ecs) + ')', 'green');
+    else if (s.vpn_up === '1') h += kvRow('Instagram, Facebook, WhatsApp', 'через VPN, Европа не нужна', '');
+    else h += kvRow('Instagram, Facebook, WhatsApp', 'обычный: DoH без VPN сейчас не используется', '');
   }
   if (s.zapret_per_net === '1' && s.net_key && s.net_key !== ZN.cur && !znetLoading) loadZnet();
   const w = warpState(s);
@@ -1482,6 +1508,18 @@ $$('[data-offnote]').forEach((n) => {
 let _tab0 = 'home';
 try { _tab0 = localStorage.getItem('vtTab') || 'home'; } catch (e) { /* по умолчанию — Главная */ }
 showTab(_tab0);
+
+// оформление: не настройка модуля (без «Применить»), а этого WebUI — в localStorage
+function themeSegSync(p) {
+  $$('#themeSeg button').forEach((b) => { b.classList.toggle('on', b.dataset.t === p); b.setAttribute('aria-checked', b.dataset.t === p ? 'true' : 'false'); });
+}
+themeSegSync(window.vtTheme());
+$('#themeSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  const p = b.dataset.t;
+  try { localStorage.setItem('vtTheme', p); } catch (err) { /* не запомнится — только до закрытия */ }
+  themeSegSync(window.vtTheme(p));
+});
 
 $('#directDoh').addEventListener('change', (e) => setCur('DNS_DIRECT', e.target.checked ? 'doh' : 'plain'));
 
