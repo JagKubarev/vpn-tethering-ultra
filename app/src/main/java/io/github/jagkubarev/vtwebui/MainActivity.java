@@ -13,6 +13,7 @@ import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
+import android.util.LruCache;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -50,7 +51,10 @@ public class MainActivity extends Activity {
     private static final int REQ_FILE = 1;
 
     private final RootShell sh = new RootShell();
-    private final Map<String, byte[]> icons = new HashMap<>();
+    // значки для списка приложений: поиск перерисовывает список и снова просит их; не больше 2 МБ
+    private final LruCache<String, byte[]> icons = new LruCache<String, byte[]>(2 << 20) {
+        @Override protected int sizeOf(String k, byte[] v) { return v.length; }
+    };
     private WebView web;
     private KsuBridge bridge;
     private LinearLayout msgBox;
@@ -138,8 +142,14 @@ public class MainActivity extends Activity {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest req) {
                 Uri u = req.getUrl();
-                if ("ksu".equals(u.getScheme()) && "icon".equals(u.getHost())) return icon(u.getLastPathSegment());
-                if (!HOST.equals(u.getHost())) return null;
+                String sc = u.getScheme();
+                if ("ksu".equals(sc)) return "icon".equals(u.getHost()) ? icon(u.getLastPathSegment()) : notFound();
+                // В окне есть root-мост ksu: в сеть отсюда ничего не уходит, чужое не грузится.
+                // Странице сеть не нужна — всё через webctl.sh.
+                if (!HOST.equals(u.getHost()) || !"https".equals(sc)) {
+                    return "http".equals(sc) || "https".equals(sc) || "ws".equals(sc) || "wss".equals(sc) || "ftp".equals(sc)
+                            ? forbidden() : null;
+                }
                 String p = u.getPath();
                 if (p == null || p.isEmpty() || p.equals("/")) p = "/index.html";
                 if (p.contains("..") || p.contains("'")) return notFound();
@@ -227,8 +237,8 @@ public class MainActivity extends Activity {
     }
 
     private WebResourceResponse icon(String pkg) {
-        byte[] png;
-        synchronized (icons) { png = icons.get(pkg); }
+        if (pkg == null) return notFound();
+        byte[] png = icons.get(pkg);
         if (png == null) {
             try {
                 Drawable d = getPackageManager().getApplicationIcon(pkg);
@@ -240,7 +250,7 @@ public class MainActivity extends Activity {
                 bm.compress(Bitmap.CompressFormat.PNG, 100, o);
                 bm.recycle();
                 png = o.toByteArray();
-                synchronized (icons) { icons.put(pkg, png); }
+                icons.put(pkg, png);
             } catch (Exception e) {
                 return notFound();
             }
@@ -250,6 +260,10 @@ public class MainActivity extends Activity {
 
     private static WebResourceResponse notFound() {
         return new WebResourceResponse("text/plain", "utf-8", 404, "Not Found", null, new ByteArrayInputStream(new byte[0]));
+    }
+
+    private static WebResourceResponse forbidden() {
+        return new WebResourceResponse("text/plain", "utf-8", 403, "Forbidden", null, new ByteArrayInputStream(new byte[0]));
     }
 
     private static String mime(String p) {

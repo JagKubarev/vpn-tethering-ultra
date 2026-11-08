@@ -10,6 +10,10 @@ on:
   push:
     paths: ['app/**', '.github/workflows/build-app.yml']
 
+env:
+  GRADLE_VER: '8.7'
+  GRADLE_SHA256: 544c35d6bd849ae8a5ed0bcea39ba677dc40f49df7d1835561582da2009b961d
+
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -21,9 +25,25 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: gradle/actions/setup-gradle@v4
+      # Gradle — сами, с кэшем: дистрибутив лежит только в релизах GitHub
+      # (gradle/gradle-distributions), а они 08.11 часами отдавали 504.
+      # Скачался один раз — дальше берётся из кэша Actions.
+      - uses: actions/cache@v4
         with:
-          gradle-version: '8.7'
+          path: ~/gradle-dist
+          key: gradle-${{ env.GRADLE_VER }}-bin
+
+      - name: Gradle
+        run: |
+          d=~/gradle-dist; z="$d/gradle-$GRADLE_VER-bin.zip"
+          mkdir -p "$d"
+          if [ ! -d "$d/gradle-$GRADLE_VER" ]; then
+            curl -fsSL --retry 6 --retry-delay 20 --retry-all-errors -o "$z" \
+              "https://services.gradle.org/distributions/gradle-$GRADLE_VER-bin.zip"
+            echo "$GRADLE_SHA256  $z" | sha256sum -c -
+            unzip -q "$z" -d "$d" && rm -f "$z"
+          fi
+          echo "$d/gradle-$GRADLE_VER/bin" >> "$GITHUB_PATH"
 
       - name: Ключ подписи
         env:

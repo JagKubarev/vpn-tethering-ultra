@@ -41,9 +41,15 @@ final class RootShell {
     private Drain out, err;
 
     /** Читает поток в буфер в своём потоке: иначе большой stderr забьёт трубу, пока ждём stdout. */
+    /** ByteArrayOutputStream с доступом к массиву — без копии буфера на каждый кусок вывода. */
+    private static final class Buf extends ByteArrayOutputStream {
+        byte[] raw() { return buf; }
+    }
+
     private static final class Drain extends Thread {
         private final InputStream s;
-        private final ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        private Buf buf = new Buf();
+        private int scanned;   // до этого места метки точно нет — новый кусок ищем с хвоста
         private boolean eof;
         byte[] body;   // вывод до метки
         String tail;   // остаток строки метки (код возврата)
@@ -62,20 +68,23 @@ final class RootShell {
         /** Ждёт "\n" + mark [+ " код"] + "\n" до deadline; true — дождались (body/tail заполнены). */
         synchronized boolean await(String mark, long deadline) throws InterruptedException {
             byte[] m = ("\n" + mark).getBytes(StandardCharsets.US_ASCII);
+            scanned = 0;
             while (true) {
-                byte[] a = buf.toByteArray();
-                int i = indexOf(a, m);
+                byte[] a = buf.raw();
+                int len = buf.size();
+                int i = indexOf(a, len, m, Math.max(0, scanned - m.length));
                 if (i >= 0) {
                     int e = i + m.length;
-                    while (e < a.length && a[e] != '\n') e++;
-                    if (e < a.length) {   // строка метки дочитана
+                    while (e < len && a[e] != '\n') e++;
+                    if (e < len) {   // строка метки дочитана
                         body = Arrays.copyOf(a, i);
                         tail = new String(a, i + m.length, e - i - m.length, StandardCharsets.US_ASCII).trim();
-                        buf.reset();
-                        buf.write(a, e + 1, a.length - e - 1);
+                        Buf rest = new Buf();
+                        rest.write(a, e + 1, len - e - 1);
+                        buf = rest;
                         return true;
                     }
-                }
+                } else scanned = len;
                 if (eof) return false;
                 long w = deadline - System.currentTimeMillis();
                 if (w <= 0) return false;
@@ -83,9 +92,9 @@ final class RootShell {
             }
         }
 
-        private static int indexOf(byte[] a, byte[] m) {
+        private static int indexOf(byte[] a, int len, byte[] m, int from) {
             outer:
-            for (int i = 0; i + m.length <= a.length; i++) {
+            for (int i = from; i + m.length <= len; i++) {
                 for (int j = 0; j < m.length; j++) if (a[i + j] != m[j]) continue outer;
                 return i;
             }

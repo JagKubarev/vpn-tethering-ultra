@@ -15,8 +15,11 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -25,16 +28,21 @@ import java.util.concurrent.Executors;
  * (KernelSU manager WebViewInterface, KsuWebUIStandalone, оба GPL-3.0):
  * exec, toast, fullScreen, moduleInfo, listPackages, getPackagesInfo.
  * Отличие: exec(cmd, options, callback) не держит страницу — команда уходит в
- * свой поток (одна очередь, порядок как у KernelSU), ответ — через callback.
+ * свою очередь (по одной, порядок как у KernelSU), ответ — через callback.
  */
 final class KsuBridge {
-    private static final long TIMEOUT_SEC = 300;   // ctlBg на стороне страницы ждёт 5 мин
+    // Долгое страница запускает в фоне (ctlBg: команда в фоне + опрос раз в 0,5 с),
+    // синхронные ctl короткие; самые долгие — warp-save/warp-import (запрос к Cloudflare).
+    // Больше 2 мин — зависла: шелл перезапускается, очередь идёт дальше.
+    private static final long TIMEOUT_SEC = 120;
 
     private final Activity act;
     private final WebView web;
     private final RootShell sh;
     private final String modDir;
     private final ExecutorService queue = Executors.newSingleThreadExecutor();
+    /** Команды в очереди, ещё не начатые: такая же команда не встаёт второй раз, а ждёт тот же ответ. */
+    private final Map<String, List<String>> pending = new HashMap<>();
 
     KsuBridge(Activity act, WebView web, RootShell sh, String modDir) {
         this.act = act; this.web = web; this.sh = sh; this.modDir = modDir;
@@ -42,40 +50,64 @@ final class KsuBridge {
 
     void shutdown() { queue.shutdownNow(); }
 
+    private static String quote(String s) { return "'" + s.replace("'", "'\\''") + "'"; }
+
     private static String withOptions(String cmd, String options) {
         StringBuilder sb = new StringBuilder();
         if (!TextUtils.isEmpty(options)) {
             try {
                 JSONObject o = new JSONObject(options);
                 String cwd = o.optString("cwd");
-                if (!TextUtils.isEmpty(cwd)) sb.append("cd ").append(cwd).append(";\n");
+                if (!TextUtils.isEmpty(cwd)) sb.append("cd ").append(quote(cwd)).append(" || exit 1\n");
                 JSONObject env = o.optJSONObject("env");
                 if (env != null) for (Iterator<String> it = env.keys(); it.hasNext(); ) {
                     String k = it.next();
-                    sb.append("export ").append(k).append('=').append(env.optString(k)).append(";\n");
+                    if (!k.matches("[A-Za-z_][A-Za-z0-9_]*")) continue;   // не имя переменной — не код
+                    sb.append("export ").append(k).append('=').append(quote(env.optString(k))).append('\n');
                 }
             } catch (JSONException ignored) { }
         }
         return sb.append(cmd).toString();
     }
 
+    /** Синхронно, но через ту же очередь — не обгоняет команды, отправленные раньше. */
     @JavascriptInterface
-    public String exec(String cmd) {
-        RootShell.Result r = sh.run(cmd, TIMEOUT_SEC);
-        return r.out;
+    public String exec(final String cmd) {
+        try {
+            return queue.submit(() -> sh.run(cmd, TIMEOUT_SEC).out).get();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     @JavascriptInterface
     public void exec(String cmd, String callback) { exec(cmd, null, callback); }
 
     @JavascriptInterface
-    public void exec(final String cmd, final String options, final String callback) {
-        queue.execute(() -> {
-            RootShell.Result r = sh.run(withOptions(cmd, options), TIMEOUT_SEC);
-            final String js = "(function(){try{" + callback + "(" + r.code + "," + JSONObject.quote(r.out) + ","
-                    + JSONObject.quote(r.err) + ");}catch(e){console.error(e);}})();";
-            web.post(() -> web.evaluateJavascript(js, null));
-        });
+    public void exec(String cmd, String options, String callback) {
+        final String script = withOptions(cmd, options);
+        // Таймеры страницы (статистика WARP раз в 3 с, клиенты, конфиги) не ждут
+        // ответа: пока медленная команда держит очередь, повторы склеиваются в одну.
+        synchronized (pending) {
+            List<String> cbs = pending.get(script);
+            if (cbs != null) { cbs.add(callback); return; }
+            cbs = new ArrayList<>();
+            cbs.add(callback);
+            pending.put(script, cbs);
+        }
+        try {
+            queue.execute(() -> {
+                List<String> cbs;
+                synchronized (pending) { cbs = pending.remove(script); }
+                RootShell.Result r = sh.run(script, TIMEOUT_SEC);
+                String args = r.code + "," + JSONObject.quote(r.out) + "," + JSONObject.quote(r.err);
+                StringBuilder js = new StringBuilder();
+                for (String cb : cbs) js.append("(function(){try{").append(cb).append('(').append(args).append(");}catch(e){console.error(e);}})();");
+                web.post(() -> web.evaluateJavascript(js.toString(), null));
+            });
+        } catch (java.util.concurrent.RejectedExecutionException e) {   // окно уже закрывается
+            synchronized (pending) { pending.remove(script); }
+        }
     }
 
     @JavascriptInterface
