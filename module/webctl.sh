@@ -114,7 +114,7 @@ zscan_busy() {
 warpgen_busy() { [ -n "$(find /data/local/tmp/vpn_tether_warpgen.lock -maxdepth 0 -mmin -3 2>/dev/null)" ]; }
 
 # ядро без connbytes (демон проверил, zapret_caps) — правило проверки без него
-CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9"
+CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:20"   # как у демона (ZAPRET_CB_OUT)
 grep -q '^cb=0' /data/local/tmp/vpn_tether_zcaps 2>/dev/null && CB_OUT=""
 
 # Текущая сеть: "<ключ>|<название>" (zapret/netid.sh по WAN из status)

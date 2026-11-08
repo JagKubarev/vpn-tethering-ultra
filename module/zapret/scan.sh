@@ -215,7 +215,7 @@ event() {
 # трогают — иначе его новые соединения во время подбора резались/ломались
 # ядро без connbytes (zapret_caps демона): в очередь — все пакеты сканера,
 # ответы — тоже все, но только его соединений (connmark), трафика мало
-CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9"
+CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:20"   # как у демона (ZAPRET_CB_OUT)
 CB_IN="-m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3"
 grep -q '^cb=0' /data/local/tmp/vpn_tether_zcaps 2>/dev/null && { CB_OUT=""; CB_IN=""; }
 RULE="-o $WAN -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"

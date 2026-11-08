@@ -398,10 +398,34 @@ details > summary::after { border-color: currentColor; }
 </section>
 
 <section class="tab" data-tab="bypass">
+<h2>Подбор стратегии</h2>
+<div class="card">
+  <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
+  <div class="pad">
+  <div class="s muted" style="font-size:13px;margin-top:2px">Ищет рабочую стратегию для этой сети по сайтам ниже, в фоне. При сбое автопроверка запускает его сама.</div>
+  <textarea id="scSites" rows="3" aria-label="Сайты для подбора" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+  <div class="btn-row eq mt8">
+    <button class="btn" id="scQuick">Быстрый · ~2 мин</button>
+    <button class="btn" id="scFull">Полный · ~7 мин</button>
+    <button class="btn" id="scStop" style="display:none">Остановить</button>
+  </div>
+  <div class="s muted" style="font-size:13px;margin-top:10px">YouTube и Discord часто работают лучше со своей стратегией: запустите подбор, дождитесь конца и примените лучшую в таблице. Общая не меняется, замер скачивает до 110 МБ.</div>
+  <div class="btn-row eq mt8">
+    <button class="btn" id="scYt">YouTube · ~4 мин</button>
+    <button class="btn" id="scDc">Discord · ~4 мин</button>
+  </div>
+  <div class="btn-row eq mt8">
+    <button class="btn" id="scQ">Проверить QUIC · ~30 с</button>
+  </div>
+  <div id="scProg" class="mt8" style="font-size:14px"></div>
+  <div id="scRes" class="mt8"></div>
+  </div>
+</div>
+
 <h2>Стратегия</h2>
 <div class="card">
   <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
-  <div class="tip" id="pickTip">Для лучшей работы подберите стратегию под свою сеть, отдельно для YouTube и Discord: кнопки в «Подборе стратегии» ниже.</div>
+  <div class="tip" id="pickTip">Для лучшей работы подберите стратегию под свою сеть, отдельно для YouTube и Discord: кнопки в «Подборе стратегии» выше.</div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Стратегия для каждой сети</div>
       <div class="s">Своя для каждой сети Wi-Fi и оператора, переключается сама.</div></div>
@@ -450,27 +474,6 @@ details > summary::after { border-color: currentColor; }
       <div class="s">Сам меняет общую стратегию, YouTube и Discord. Выключено — меняете только вы: подбор показывает таблицу, автопроверка пишет в журнал.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_AUTOPICK"><span></span></label>
   </div>
-</div>
-
-<h2>Подбор стратегии</h2>
-<div class="card pad">
-  <div class="s muted" style="font-size:13px;margin-top:2px">Ищет рабочую стратегию для этой сети по сайтам ниже, в фоне. При сбое автопроверка запускает его сама.</div>
-  <textarea id="scSites" rows="3" aria-label="Сайты для подбора" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
-  <div class="btn-row eq mt8">
-    <button class="btn" id="scQuick">Быстрый · ~2 мин</button>
-    <button class="btn" id="scFull">Полный · ~7 мин</button>
-    <button class="btn" id="scStop" style="display:none">Остановить</button>
-  </div>
-  <div class="s muted" style="font-size:13px;margin-top:10px">YouTube и Discord часто работают лучше со своей стратегией: запустите подбор, дождитесь конца и примените лучшую в таблице. Общая не меняется, замер скачивает до 110 МБ.</div>
-  <div class="btn-row eq mt8">
-    <button class="btn" id="scYt">YouTube · ~4 мин</button>
-    <button class="btn" id="scDc">Discord · ~4 мин</button>
-  </div>
-  <div class="btn-row eq mt8">
-    <button class="btn" id="scQ">Проверить QUIC · ~30 с</button>
-  </div>
-  <div id="scProg" class="mt8" style="font-size:14px"></div>
-  <div id="scRes" class="mt8"></div>
 </div>
 
 <h2>Сайты</h2>
