@@ -703,15 +703,19 @@ DNS_UPSTREAMS="https://not-a-dns.quic.best/dns-query"
 # Был dagami (23.10 первым — not-a-dns тогда отвечал 1-2.6с),
 # 30.10 мёртв: «Couldn't connect» напрямую, тишина через WARP, у dnsproxy
 # SERVFAIL — после него DNS уходил к оператору. comss — последним: Gemini через
-# него уже нет; commonnet — самым последним (30.10: прокси ChatGPT/Claude,
-# Gemini — Google /sorry, другой владелец). Google/Cloudflare убраны (3.17):
+# него уже нет; commonnet был самым последним (30.10: прокси ChatGPT/Claude,
+# Gemini — Google /sorry, другой владелец; 08.11 убран — сервер лежит). Google/Cloudflare убраны (3.17):
 # гео-блок не обходят, а dnsproxy при задержке основного (> --timeout)
 # опрашивает запасные разом и берёт самый быстрый ответ — им мог оказаться
 # Google с настоящими адресами ChatGPT/Claude/Gemini, и тот сидел в кэше
 # (25.10: «регион недоступен» на ноуте, переподключение Wi-Fi не помогало;
 # причина вероятная, в логе не поймана). Молчат
 # все — модуль и так уводит DNS к оператору (проверка dns_health).
-DNS_FALLBACKS="https://dns.wlrus.cfd/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.commonnet.work/dns-query"
+# dns.zapret.moe — в конец (08.11: напрямую с YOTA снова отвечает, 03.11 был закрыт по
+# адресу; прокси 5.129.221.64 для всех трёх ИИ, Gemini и ChatGPT через него — 200 за ~2 с).
+# us.geohide.ru и dns.malw.link не добавлены: сами отвечают, но их прокси с YOTA молчат —
+# хуже мёртвого. commonnet убран (08.11: 94.181.44.39 не принимает TCP ни напрямую, ни через WARP)
+DNS_FALLBACKS="https://dns.wlrus.cfd/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.zapret.moe/dns-query"
 # Апстримы для DNS_VPN=doh (идут через туннель)
 DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Чем резолвить имена самих апстримов (dns.wlrus.cfd и т.д.). Подмена тут не
