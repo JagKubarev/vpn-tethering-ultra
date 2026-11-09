@@ -670,8 +670,12 @@ warp_dq() {
     # Android 8 (нет /apex): toybox nc не принимает эти ключи, у busybox nc нет UDP.
     # На новых пустой ответ — сбой DNS: обычный DNS мимо dnsproxy дал бы чужие адреса
     [ -d /apex ] && return 0
-    [ -n "$BUSYBOX" ] && "$BUSYBOX" nslookup "$d" 8.8.8.8 2>/dev/null | \
-        sed -n 's/^Address[ 0-9]*: *\([0-9.]*\).*/\1/p' | grep -v '^8\.8\.8\.8$'
+    # busybox nslookup умеет «сервер:порт» — тот же dnsproxy, что у приложений. 09.11 на MT6580
+    # через 8.8.8.8 провайдер отдал 4pda.to 8.6.112.0/8.47.69.0, Chrome по DoH — 104.20.39.144:
+    # правила Opera стояли не на тех адресах, 4pda шёл напрямую (451). Адреса — после «Name:»,
+    # строки выше — сам сервер
+    [ -n "$BUSYBOX" ] && timeout 4 "$BUSYBOX" nslookup "$d" "$srv:$port" 2>/dev/null | \
+        sed -n '/^Name/,$ s/^Address[ 0-9]*: *\([0-9.]*\).*/\1/p' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
 }
 
 # Адреса WARP_DOMAINS без общих CDN -> WARP_DOM_IPS (вместе с прошлым набором:

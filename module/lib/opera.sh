@@ -490,7 +490,9 @@ opera_where() {
     [ -n "$CURL_BIN" ] && [ "$OPERA_WHERE_N" -lt 3 ] || return 0
     OPERA_WHERE_N=$((OPERA_WHERE_N + 1))
     [ "$OPERA_SU_G" = "1" ] && g="su -g $OPERA_GID -c"
-    out=$($g "$CURL_BIN -s -m 6 --socks5-hostname 127.0.0.1:$OPERA_PORT https://1.1.1.1/cdn-cgi/trace" 2>/dev/null)
+    # -k, как у WARP (warp_probe): нужна только площадка, а корня сертификата 1.1.1.1 нет в
+    # хранилище Android 8 (09.11 MT6580: «unable to get local issuer certificate», выход пустой)
+    out=$($g "$CURL_BIN -s -k -m 6 --socks5-hostname 127.0.0.1:$OPERA_PORT https://1.1.1.1/cdn-cgi/trace" 2>/dev/null)
     OPERA_COLO=$(echo "$out" | sed -n 's/^colo=\([A-Z]*\).*/\1/p' | head -n 1)
     OPERA_LOC=$(echo "$out" | sed -n 's/^loc=\([A-Z]*\).*/\1/p' | head -n 1)
     [ -n "$OPERA_COLO$OPERA_LOC" ] || return 0
