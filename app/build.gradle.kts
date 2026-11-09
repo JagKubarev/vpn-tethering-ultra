@@ -29,11 +29,11 @@ if (keyConfigured && !hasKey && releaseRequested)
     throw GradleException("Подпись: ключ задан не полностью (нет файла ключа, пароля или alias) — проверьте keystore.properties или секреты VT_KEYSTORE_*")
 
 android {
-    namespace = "io.github.jagkubarev.vtwebui"
+    namespace = "io.github.jagkubarev.vpntether"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "io.github.jagkubarev.vtwebui"
+        applicationId = "io.github.jagkubarev.vpntether"
         minSdk = 26          // Android 8.0 (MT6580 — 8.1)
         targetSdk = 34
         versionCode = 1
@@ -70,4 +70,4 @@ android {
     }
 }
 
-base.archivesName.set("VPN_Tether_WebUI")
+base.archivesName.set("VPN_Tether")

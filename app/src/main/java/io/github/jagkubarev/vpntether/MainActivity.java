@@ -1,4 +1,4 @@
-package io.github.jagkubarev.vtwebui;
+package io.github.jagkubarev.vpntether;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;

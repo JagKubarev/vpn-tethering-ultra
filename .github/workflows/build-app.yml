@@ -69,7 +69,7 @@ jobs:
         run: |
           v=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
           mkdir -p out
-          cp app/build/outputs/apk/release/VPN_Tether_WebUI-release.apk "out/VPN_Tether_WebUI_v$v.apk"
+          cp app/build/outputs/apk/release/VPN_Tether-release.apk "out/VPN_Tether_v$v.apk"
           bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           # проверка отдельно от вывода: через | head код ошибки apksigner терялся бы
           "$bt"/apksigner verify out/*.apk
@@ -78,5 +78,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: vpn-tether-webui
+          name: vpn-tether
           path: out/

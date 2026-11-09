@@ -1,4 +1,4 @@
-package io.github.jagkubarev.vtwebui;
+package io.github.jagkubarev.vpntether;
 
 import android.app.Activity;
 import android.content.pm.ApplicationInfo;
