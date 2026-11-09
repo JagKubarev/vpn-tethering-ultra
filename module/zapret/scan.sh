@@ -30,8 +30,9 @@ PATH="$PATH:$MODDIR/bin"; export PATH   # curl: нет системного — 
 BB=/data/adb/ksu/bin/busybox
 [ -x "$BB" ] || BB=/data/adb/magisk/busybox
 [ -x "$BB" ] || BB=/data/adb/ap/bin/busybox
-# в Android 8 нет awk (MT6580, 04.11): этот скрипт идёт под mksh, не под busybox
-command -v awk >/dev/null 2>&1 || awk() { "$BB" awk "$@"; }
+# в Android 8 нет awk (MT6580, 04.11): этот скрипт идёт под mksh, не под busybox. А awk 20121220
+# (Android 9, Redmi 4X, 09.11) падает (SIGSEGV) на любом унарном «!»: !s[$1]++, !/…/, exit !(…)
+( echo x | awk '!/y/' ) >/dev/null 2>&1 || awk() { "$BB" awk "$@"; }
 ZDIR="$MODDIR/zapret"
 OUT=/data/local/tmp/vpn_tether_zscan
 Q=203

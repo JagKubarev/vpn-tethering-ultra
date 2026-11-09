@@ -72,8 +72,9 @@ ZSKIP=/data/adb/vpn_tether_zapret_altskip   # ключ|сайт|epoch — не �
 BB=/data/adb/ksu/bin/busybox
 [ -x "$BB" ] || BB=/data/adb/magisk/busybox
 [ -x "$BB" ] || BB=/data/adb/ap/bin/busybox
-# в Android 8 нет awk (MT6580, 04.11): этот скрипт идёт под mksh, не под busybox
-command -v awk >/dev/null 2>&1 || awk() { "$BB" awk "$@"; }
+# в Android 8 нет awk (MT6580, 04.11): этот скрипт идёт под mksh, не под busybox. А awk 20121220
+# (Android 9, Redmi 4X, 09.11) падает (SIGSEGV) на любом унарном «!»: !s[$1]++, !/…/, exit !(…)
+( echo x | awk '!/y/' ) >/dev/null 2>&1 || awk() { "$BB" awk "$@"; }
 
 # адрес через DoH. 1.1.1.1 в Android 8 не проходит проверку: корня SSL.com нет в
 # cacerts (MT6580, rc=60), тогда 8.8.8.8
@@ -616,7 +617,8 @@ case "$1" in
         # видно по байтам в direct. "probe <tcp 0|1> <tls_нейтральное 0|1>"
         case "$d" in
             "000 "*|*" 28 "*|*" 35 "*|*" 56 "*)
-                tcp=0; curl -v -s -o /dev/null -m 4 --interface "$wan" "http://$ip:443/" 2>&1 | grep -q "Connected to" && tcp=1
+                # curl 8.23 (свой в модуле) пишет «Established connection to», системный — «Connected to»
+                tcp=0; curl -v -s -o /dev/null -m 4 --interface "$wan" "http://$ip:443/" 2>&1 | grep -qE "Connected to|Established connection to" && tcp=1
                 neu=0; [ "$tcp" = 1 ] && curl -v -sk -o /dev/null -m 5 --interface "$wan" --resolve "example.com:443:$ip" \
                     https://example.com/ 2>&1 | grep -qiE "Server hello|SSL connection using|TLS handshake, Finished|alert" && neu=1
                 # «ответил сервер» — и ServerHello, и alert (Cloudflare на чужое имя): блок по
