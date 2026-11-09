@@ -41,7 +41,6 @@
 #   webctl.sh net-renew               коротко 2G и обратно: новая сессия и адрес у оператора
 #   webctl.sh warp-list|warp-gen [N]|warp-import ИМЯ BASE64|warp-del ИМЯ|warp-export ИМЯ|warp-save ИМЯ|warp-saveall
 #   webctl.sh warp-stats              туннель: последнее рукопожатие и трафик (awg show)
-#   webctl.sh opera-stats             Opera: время работы и последняя удачная проверка
 #   webctl.sh warp-reconnect          тот же конфиг заново (новая сессия Cloudflare)
 #                                     конфиги WARP (AmneziaWG) — см. warp/warp.sh
 # ============================================================================
@@ -923,17 +922,6 @@ case "$1" in
         st=$([ -n "$p" ] && sed 's/.*) //' "/proc/$p/stat" 2>/dev/null | cut -d' ' -f20)
         "$MODDIR/bin/awg-$c" show warp0 dump 2>/dev/null | awk -v now="$(date +%s)" -v st="${st:-0}" -v ut="$(cut -d' ' -f1 /proc/uptime)" \
             'NR == 2 { printf "hs_age=%s\nrx=%s\ntx=%s\nendpoint=%s\npeer=%s\nup=%s\n", ($5 > 0 ? now - $5 : -1), $6, $7, $3, $1, (st > 0 ? int(ut - st / 100) : -1) }'
-        ;;
-
-    opera-stats)
-        # как warp-stats: время работы — от запуска opera-proxy (starttime из /proc/PID/stat),
-        # проверка — «время мс» последнего удачного запроса демона через прокси (раз в ~30 с)
-        case "$(uname -m 2>/dev/null)" in armv*|arm) c=arm ;; *) c=arm64 ;; esac
-        p=$(pidof "opera-proxy-$c" 2>/dev/null | cut -d' ' -f1)
-        st=$([ -n "$p" ] && sed 's/.*) //' "/proc/$p/stat" 2>/dev/null | cut -d' ' -f20)
-        set -- $(cat /data/local/tmp/vpn_tether_op_probe 2>/dev/null)
-        awk -v now="$(date +%s)" -v st="${st:-0}" -v ut="$(cut -d' ' -f1 /proc/uptime)" -v pt="${1:-0}" -v pm="${2:-0}" \
-            'BEGIN { printf "up=%s\nprobe_age=%s\nprobe_ms=%s\n", (st > 0 ? int(ut - st / 100) : -1), (pt > 0 ? now - pt : -1), pm }'
         ;;
 
     net-renew)
