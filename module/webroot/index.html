@@ -75,8 +75,8 @@ body {
   height: calc(100% - 1px); overflow-y: auto; overscroll-behavior: none;
 }
 h1 { font-size: 20px; font-weight: 600; margin: 4px 2px 14px; display: flex; align-items: center; gap: 10px; }
-h1 .logo { width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; flex: none; }
-h1 .logo svg { width: 18px; height: 18px; }
+h1 .logo { width: 36px; height: 36px; border-radius: 10px; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; flex: none; }
+h1 .logo svg { width: 26px; height: 26px; }
 h1 small { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--muted); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }   /* длинная версия (тестовые сборки) — с многоточием, а не за край экрана */
 h1 small:empty { display: none; }
 h2 small { font-size: 13px; font-weight: 400; color: var(--muted); margin-left: 6px; }
@@ -353,7 +353,7 @@ details > summary::after { border-color: currentColor; }
 </head>
 <body>
 
-<h1><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1" fill="currentColor"/><path d="M12 3v4M9.5 5.5 12 3l2.5 2.5"/></svg></span>VPN Tethering <small id="ver"></small></h1>
+<h1><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.93 13.33a10 10 0 0 1 14.14 0"/><path d="M8.46 16.86a5 5 0 0 1 7.08 0"/><circle cx="12" cy="20.4" r="1.7" fill="currentColor" stroke="none"/><path d="M12 2.5v4M9.6 4.9 12 2.5l2.4 2.4"/></svg></span>VPN Tethering <small id="ver"></small></h1>
 
 <section class="tab" data-tab="home">
 <div class="card pad" id="statusCard">
