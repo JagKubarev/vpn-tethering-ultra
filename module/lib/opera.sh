@@ -33,6 +33,7 @@ OPERA_API_FILE="/data/adb/vpn_tether_op_api.txt"   # удачные прокси
 OPERA_API_URL="https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt"
 OPERA_DQ_DIR="/data/adb/vpn_tether_op_dq"
 OPERA_EP_FILE="/data/adb/vpn_tether_op_ep"        # «регион адрес:порт» — на чём Opera последний раз работала
+OPERA_PROBE_FILE="/data/local/tmp/vpn_tether_op_probe"   # «время мс» последней удачной проверки (webctl opera-stats)
 CHAIN_OPERA_IN="VPN_OPERA_IN"     # mangle PREROUTING
 CHAIN_OPERA_OUT="VPN_OPERA_OUT"   # mangle OUTPUT
 CHAIN_OPERA_TP="VPN_OPERA_TP"     # адреса сайтов -> TPROXY
@@ -197,6 +198,7 @@ opera_start() {
         setsid $OPERA_BIN $args </dev/null >> "$OPERA_LOG" 2>&1 &
     fi
     OPERA_START_TS=$(date +%s)
+    rm -f "$OPERA_PROBE_FILE"
     OPERA_STATE="starting"
     OPERA_ENDPOINT=""
     OPERA_COLO=""; OPERA_LOC=""; OPERA_WHERE_N=0
@@ -475,11 +477,15 @@ opera_rules_ok() {
 
 # Прокси пропускает? Через SOCKS opera-proxy, от его группы: мимо перенаправления
 opera_probe() {
-    local code g="sh -c"
+    local code t g="sh -c"
     [ -n "$CURL_BIN" ] || return 0      # нечем проверить — не перезапускать рабочий прокси
     [ "$OPERA_SU_G" = "1" ] && g="su -g $OPERA_GID -c"
-    code=$($g "$CURL_BIN -s -o /dev/null -m 6 --socks5-hostname 127.0.0.1:$OPERA_PORT -w %{http_code} http://www.example.com/" 2>/dev/null)
-    [ -n "$code" ] && [ "$code" != "000" ]
+    code=$($g "$CURL_BIN -s -o /dev/null -m 6 --socks5-hostname 127.0.0.1:$OPERA_PORT -w '%{http_code} %{time_total}' http://www.example.com/" 2>/dev/null)
+    t=${code#* }; code=${code%% *}
+    [ -n "$code" ] && [ "$code" != "000" ] || return 1
+    # для WebUI, как «последнее подключение» у WARP: когда прокси последний раз ответил и за сколько
+    echo "$(date +%s) $(echo "$t" | awk '{ printf "%d", $1 * 1000 }')" > "$OPERA_PROBE_FILE" 2>/dev/null
+    return 0
 }
 
 # Где выход Opera: trace Cloudflare через её прокси (как площадка у WARP). Один раз после
@@ -521,6 +527,7 @@ opera_down() {   # [quiet | nonet — тихо и с адресами сайто
     _opera_kill $(opera_hev_pids)
     _opera_kill $(opera_proxy_pids)
     opera_exempt_down
+    rm -f "$OPERA_PROBE_FILE"
     [ "$OPERA_STATE" != "off" ] && [ -z "$1" ] && log "opera: выключен"
     OPERA_STATE="off"
     OPERA_ENDPOINT=""

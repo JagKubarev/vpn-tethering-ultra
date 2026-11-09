@@ -736,7 +736,7 @@ details > summary::after { border-color: currentColor; }
   </div>
   <div class="tile">
     <div class="hd"><span class="nm">Opera</span><label class="sw"><input type="checkbox" data-key="OPERA_ENABLE" aria-label="Opera"><span></span></label></div>
-    <div class="st"><span class="dot" id="operaDot"></span><div><b id="operaTitle">—</b><div id="operaSub"></div></div></div>
+    <div class="st"><span class="dot" id="operaDot"></span><div><b id="operaTitle">—</b><div id="operaSub"></div><div id="operaStats" hidden></div></div></div>
   </div>
 </div>
 <div class="hint">WARP — бесплатный туннель Cloudflare, Opera — прокси браузера Opera. Работают, когда VPN на телефоне выключен: для того, что не открывает обход.</div>
@@ -1212,8 +1212,8 @@ function renderStatus(s) {
     const g = ex[4] === 'warp' || ex[4] === 'opera' ? 'идёт через ' + (ex[4] === 'warp' ? 'WARP' : 'Opera') + ', не проверяю'
       : ex[4] && ex[4] !== '000' ? 'работает' : ex[5] && ex[5] !== '000' ? 'HTTPS молчит, HTTP отвечает' : 'не отвечает';
     const age = Math.round((Date.now() / 1000 - +ex[0]) / 60);
+    // в «Подробнее» не дублируем: то же — в плашке с кнопкой «Новый адрес» под карточкой
     exTxt = (ex[2] || 'адрес не узнан') + (ex[3] ? ' (' + ex[3] + ')' : '') + ' · Google: ' + g + (age > 1 ? ' · ' + age + ' мин назад' : '');
-    h += kvRow('Выход', esc(exTxt), g === 'работает' ? 'green' : /^идёт/.test(g) ? '' : 'amber');
   }
   // после нажатия «Переподключить сеть» — пока не пришла свежая проверка, старое не показываем
   const exOld = renewTs && s.vpn_up !== '1' && !(+ex[0] > renewTs);
@@ -1931,6 +1931,22 @@ async function loadWarpStats() {
     'последнее подключение: ' + hs + (dead ? ' — похоже, не работает' : '') + '\n' +
     'конечная точка: ' + (s.endpoint || '—');
   const r = $('#warpRunStats'); if (r) r.textContent = WARP_RUN_TXT;
+}
+
+// Opera: как у WARP — сколько работает и когда прокси последний раз ответил на проверку
+// демона (раз в ~30 с; пока включён VPN, проверок нет)
+async function loadOperaStats() {
+  const el = $('#operaStats');
+  if (ST.opera !== 'on') { el.hidden = true; return; }
+  const s = parseKV((await ctl('opera-stats')).out || '');
+  if (s.up === undefined) { el.hidden = true; return; }
+  const up = +s.up, a = +s.probe_age, ms = +s.probe_ms;
+  // как строка WARP: «подпись: значение» через « · », давность — без «назад»
+  const pr = ST.vpn_up === '1' ? 'последняя проверка: пауза, включён VPN'
+    : a < 0 ? 'последняя проверка: ещё не было'
+    : 'последняя проверка: ' + fmtDur(a) + ' · ответ за ' + (ms / 1000).toFixed(1).replace('.', ',') + ' с';
+  el.textContent = (up >= 0 ? 'в работе: ' + fmtDur(up) + ' · ' : '') + pr;
+  el.hidden = false;
 }
 
 // "имя|endpoint|gen/import|дата" (webctl warp-list)
@@ -2657,7 +2673,7 @@ $('#metaBtn').addEventListener('click', async () => {
   loadWarp();
   setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="warp"]').classList.contains('on')) loadWarp(); }, 10000);
   // 3 с, а не 1 с, как в WG Tunnel: ksu.exec синхронный, каждый вызов (~80 мс) — пауза страницы
-  setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="warp"]').classList.contains('on')) loadWarpStats(); }, 3000);
+  setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="warp"]').classList.contains('on')) { loadWarpStats(); loadOperaStats(); } }, 3000);
   // вернулись на страницу — сразу свежий статус, не ждать тика
   document.addEventListener('visibilitychange', () => { if (!document.hidden && !busy) { loadStatus(); scRefresh(); } });
 })();
@@ -2709,6 +2725,7 @@ function mockExec(cmd) {
   if (a === 'clients') return { errno: 0, out: '192.168.43.77|e0:2b:e9:75:60:84|REACHABLE|DESKTOP-LAPTOP|31|21545980|0|' + (1243512870 + Math.floor(Date.now() / 1000 % 86400) * 2400000) + '|' + (67710170 + Math.floor(Date.now() / 1000 % 86400) * 90000) + '\n192.168.43.67|42:96:f4:ac:3a:91|STALE|realme-9-Pro-5G|2|7553|0||\n|00:27:15:ec:84:bd|-|android-tv|0|0|1||\nT|' + Date.now() + '\n' };
   if (/^client-(un)?block /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'dnsflush') return { errno: 0, out: 'OK кэш сброшен (dnsproxy перезапущен). На ноутбуке — ещё ipconfig /flushdns' };
+  if (a === 'opera-stats') { M.oup = M.oup || Date.now(); return { errno: 0, out: 'up=' + Math.round((Date.now() - M.oup) / 1000 + 1312) + '\nprobe_age=' + (Math.floor(Date.now() / 1000) % 30) + '\nprobe_ms=640\n' }; }
   if (a === 'warp-stats') { M.wrx = (M.wrx || 5e6) + 2e5; M.wup = M.wup || Date.now(); return { errno: 0, out: 'hs_age=' + (Math.floor(Date.now() / 1000) % 130) + '\nrx=' + M.wrx + '\ntx=' + Math.round(M.wrx / 9) + '\nendpoint=188.114.96.1:2408\npeer=bmXOC+hWy3/DnZ3VUUTE7y0yOZfVvcRK0Xf4cPfgyo=\nup=' + Math.round((Date.now() - M.wup) / 1000 + 2534) + '\n' }; }
   if (a === 'net-renew') { M.wave = 0; return { errno: 0, out: 'OK сеть переподключена, внутренний адрес новый' }; }
   if (a === 'links') return { errno: 0, out: 'tg=https://t.me/kubarev_mods\n' };
