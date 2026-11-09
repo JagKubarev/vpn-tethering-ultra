@@ -1111,9 +1111,11 @@ zapret_strategy_args() {
     case "$st" in
         md5sig)   echo "--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@$g" ;;
         md5sig2)  echo "--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@$g" ;;
-        badseq)   echo "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=badseq --dpi-desync-fake-tls=@$g" ;;
+        # badseq и seqovl — только ack (seq не трогаем): 09.11 на YOTA со сдвигом seq (любым, и в паре
+        # с md5sig) facebook, rutracker, linkedin, medium, patreon не открывались 3 круга из 3, только ack — 10 из 10
+        badseq)   echo "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=0 --dpi-desync-fake-tls=@$g" ;;
         disorder) echo "--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld" ;;
-        seqovl)   echo "--dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=@$g --dpi-desync-fake-tls=@$g" ;;
+        seqovl)   echo "--dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=0 --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=@$g --dpi-desync-fake-tls=@$g" ;;
         custom)
             if [ -n "$za" ]; then
                 echo "$za" | sed "s#=@G#=@$g#g; s#=@Q#=@$1/quic_initial_www_google_com.bin#g"
