@@ -451,23 +451,29 @@ zapret_nfqws_log_trim() {
     rm -f "$ZAPRET_LOG.tmp"
 }
 
-# DoH/DoT-серверы из настроек для обхода (DNS_VIA_ZAPRET): «имена|адреса|порты», каждое через
-# запятую. Имя из URL — dns_hosts_of (lib/dns.sh); порт — из URL, иначе 443 у https:// и 853 у
+# DoH/DoT-серверы из настроек для обхода (DNS_VIA_ZAPRET): «имена|адреса|порты|имена без обхода»,
+# каждое через запятую. Имя из URL — dns_hosts_of (lib/dns.sh); порт — из URL, иначе 443 у https:// и 853 у
 # tls://. Адреса — серверы, заданные адресом, и запасной bootstrap DoH (DNS_BOOTSTRAP_ENC)
+# DoH, которые обход ломает: любой fake доходит до сервера и рвёт TLS (09.11, YOTA: LibreDNS
+# напрямую 3/3, через обход 0/3 с md5sig и badseq; без fake открывается, но без fake не
+# открывается dns.zapret.moe). Им — пустой профиль первым: соединение идёт как есть
+ZAPRET_DOH_ASIS="doh.libredns.gr"
 zapret_doh_targets() {
-    local u h hp p n="" i="" ps=""
+    local u h hp p n="" i="" ps="" x=""
     for u in $DNS_UPSTREAMS $DNS_FALLBACKS $DNS_META_UPSTREAMS $DNS_BOOTSTRAP_ENC; do
         case "$u" in https://*) p=443 ;; tls://*) p=853 ;; *) continue ;; esac
         h=$(dns_hosts_of "$u")
         hp=${u#*://}; hp=${hp%%/*}
         case "$hp" in *:[0-9]*) p=${hp##*:} ;; esac
-        case "$h" in '') continue ;; *[!0-9.]*) n="$n $h" ;; *) i="$i $h" ;; esac
+        case "$h" in '') continue ;; esac
         ps="$ps $p"
+        case " $ZAPRET_DOH_ASIS " in *" $h "*) x="$x $h"; continue ;; esac
+        case "$h" in *[!0-9.]*) n="$n $h" ;; *) i="$i $h" ;; esac
     done
     # без повторов, через запятую
     _zdt_j() { echo "$@" | tr ' ' '\n' | awk 'NF && !s[$0]++' | tr '\n' ',' | sed 's/,$//'; }
     # shellcheck disable=SC2086
-    printf '%s|%s|%s\n' "$(_zdt_j $n)" "$(_zdt_j $i)" "$(_zdt_j $ps)"
+    printf '%s|%s|%s|%s\n' "$(_zdt_j $n)" "$(_zdt_j $i)" "$(_zdt_j $ps)" "$(_zdt_j $x)"
 }
 
 zapret_args() {
@@ -513,12 +519,13 @@ zapret_args() {
     # Серверы, заданные адресом (и bootstrap DoH 1.1.1.1/8.8.8.8), — отдельным профилем по
     # адресу: в режиме «всё» иначе они шли бы стратегией сети. Порты — из URL (dns.geohide.ru:444)
     if [ "$DNS_VIA_ZAPRET" = "1" ]; then
-        local dt dn di dpp ds
+        local dt dn di dpp dx ds
         dt=$(zapret_doh_targets)
-        dn=${dt%%"|"*}; dt=${dt#*"|"}; di=${dt%%"|"*}; dpp=${dt#*"|"}
+        dn=${dt%%"|"*}; dt=${dt#*"|"}; di=${dt%%"|"*}; dt=${dt#*"|"}; dpp=${dt%%"|"*}; dx=${dt#*"|"}
         ds=$(zapret_strategy_args "$ZAPRET_DIR" md5sig)
         [ -n "$dn" ] && dp="--filter-tcp=$dpp $ex --hostlist-domains=$dn $ds --new "
         [ -n "$di" ] && dp="$dp--filter-tcp=$dpp --ipset-ip=$di $ds --new "
+        [ -n "$dx" ] && dp="--filter-tcp=$dpp --hostlist-domains=$dx --new $dp"
     fi
     if [ -n "$ZAPRET_EFF_YT" ] && grep -q '[a-z0-9]' "$ZAPRET_LIST_YT" 2>/dev/null; then
         echo "$a $q$dp$alt--filter-tcp=443 $ex --hostlist=$ZAPRET_LIST_YT $(zapret_strategy_args "$ZAPRET_DIR" custom "$ZAPRET_EFF_YT") --new $rup$g"
