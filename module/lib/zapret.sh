@@ -451,8 +451,27 @@ zapret_nfqws_log_trim() {
     rm -f "$ZAPRET_LOG.tmp"
 }
 
+# DoH/DoT-серверы из настроек для обхода (DNS_VIA_ZAPRET): «имена|адреса|порты», каждое через
+# запятую. Имя из URL — dns_hosts_of (lib/dns.sh); порт — из URL, иначе 443 у https:// и 853 у
+# tls://. Адреса — серверы, заданные адресом, и запасной bootstrap DoH (DNS_BOOTSTRAP_ENC)
+zapret_doh_targets() {
+    local u h hp p n="" i="" ps=""
+    for u in $DNS_UPSTREAMS $DNS_FALLBACKS $DNS_META_UPSTREAMS $DNS_BOOTSTRAP_ENC; do
+        case "$u" in https://*) p=443 ;; tls://*) p=853 ;; *) continue ;; esac
+        h=$(dns_hosts_of "$u")
+        hp=${u#*://}; hp=${hp%%/*}
+        case "$hp" in *:[0-9]*) p=${hp##*:} ;; esac
+        case "$h" in '') continue ;; *[!0-9.]*) n="$n $h" ;; *) i="$i $h" ;; esac
+        ps="$ps $p"
+    done
+    # без повторов, через запятую
+    _zdt_j() { echo "$@" | tr ' ' '\n' | awk 'NF && !s[$0]++' | tr '\n' ',' | sed 's/,$//'; }
+    # shellcheck disable=SC2086
+    printf '%s|%s|%s\n' "$(_zdt_j $n)" "$(_zdt_j $i)" "$(_zdt_j $ps)"
+}
+
 zapret_args() {
-    local a="--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6" ex="" g alt rup="" rux="" q
+    local a="--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6" ex="" g alt rup="" rux="" q dp=""
     # банки и Госуслуги — мимо обхода в любом профиле (и в автосписок не попадут)
     grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
     # .ru/.su/.рф: основной профиль их не трогает и в автосписок не берёт;
@@ -484,10 +503,27 @@ zapret_args() {
     if [ -n "$ZAPRET_EFF_DC" ] && grep -q '[a-z0-9]' "$ZAPRET_LIST_DC" 2>/dev/null; then
         rup="--filter-tcp=443 $ex --hostlist=$ZAPRET_LIST_DC $(zapret_strategy_args "$ZAPRET_DIR" custom "$ZAPRET_EFF_DC") --new $rup"
     fi
+    # DoH через обход (DNS_VIA_ZAPRET): серверы из настроек — своим профилем первым. Отдельно
+    # от основного: тот не трогает .ru (MagicDNS, GeoHide тоже могут резать), и в режиме «всё»
+    # тоже. Стратегия своя, постоянная — md5sig, а не стратегия сети: 09.11 из 31 стратегии
+    # подбора одна (multisplit с --dup) ломала весь DoH, три не открывали dns.zapret.moe, md5sig
+    # прошла все 8 серверов (так же устроено в nfqws2-android-ext). Имена — прямо в аргументах:
+    # смена серверов в настройках меняет аргументы, и nfqws перезапускается сам. Адреса без
+    # имени (8.8.4.4) — мимо
+    # Серверы, заданные адресом (и bootstrap DoH 1.1.1.1/8.8.8.8), — отдельным профилем по
+    # адресу: в режиме «всё» иначе они шли бы стратегией сети. Порты — из URL (dns.geohide.ru:444)
+    if [ "$DNS_VIA_ZAPRET" = "1" ]; then
+        local dt dn di dpp ds
+        dt=$(zapret_doh_targets)
+        dn=${dt%%"|"*}; dt=${dt#*"|"}; di=${dt%%"|"*}; dpp=${dt#*"|"}
+        ds=$(zapret_strategy_args "$ZAPRET_DIR" md5sig)
+        [ -n "$dn" ] && dp="--filter-tcp=$dpp $ex --hostlist-domains=$dn $ds --new "
+        [ -n "$di" ] && dp="$dp--filter-tcp=$dpp --ipset-ip=$di $ds --new "
+    fi
     if [ -n "$ZAPRET_EFF_YT" ] && grep -q '[a-z0-9]' "$ZAPRET_LIST_YT" 2>/dev/null; then
-        echo "$a $q$alt--filter-tcp=443 $ex --hostlist=$ZAPRET_LIST_YT $(zapret_strategy_args "$ZAPRET_DIR" custom "$ZAPRET_EFF_YT") --new $rup$g"
+        echo "$a $q$dp$alt--filter-tcp=443 $ex --hostlist=$ZAPRET_LIST_YT $(zapret_strategy_args "$ZAPRET_DIR" custom "$ZAPRET_EFF_YT") --new $rup$g"
     else
-        echo "$a $q$alt$rup$g"
+        echo "$a $q$dp$alt$rup$g"
     fi
 }
 
@@ -646,12 +682,20 @@ zapret_rules_on() {
         # метку выше на rmnet стирает qcom_qos_reset — дублируем по группе сокета.
         # own=0: любое такое правило забрало бы весь трафик до NFQUEUE
         zapret_cap own && $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$ZAPRET_GID" -j RETURN 2>/dev/null
+        # DoH через обход: dnsproxy — в очередь с любым портом TCP (443, :444 GeoHide, 853 DoT) и при
+        # обходе только для раздачи. В nfqws его соединения ловят только профили DoH (имена,
+        # адреса, порты), остальное nfqws пропускает как есть
+        # shellcheck disable=SC2086
+        [ "$DNS_VIA_ZAPRET" = "1" ] && [ -n "$DNSPROXY_GID" ] && zapret_cap own && \
+            $t -t mangle -A "$CHAIN_ZAPRET" -p tcp -m owner --gid-owner "$DNSPROXY_GID" $ZAPRET_CB_OUT \
+                -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
         if [ "$ZAPRET_PHONE" = "1" ]; then
             if zapret_cap own; then
                 for u in $excl; do
                     $t -t mangle -A "$CHAIN_ZAPRET" -m owner --uid-owner "$u" -j RETURN 2>/dev/null
                 done
-                [ -n "$DNSPROXY_GID" ] && \
+                # dnsproxy — мимо, если не просили DoH через обход (DNS_VIA_ZAPRET)
+                [ -n "$DNSPROXY_GID" ] && [ "$DNS_VIA_ZAPRET" != "1" ] && \
                     $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$DNSPROXY_GID" -j RETURN 2>/dev/null
                 # opera-proxy: его TLS к серверам Opera обход не трогает
                 $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$OPERA_GID" -j RETURN 2>/dev/null
@@ -943,7 +987,7 @@ zapret_reconcile() {
     if [ "$ZAPRET_STATE" != "on" ] || [ "$excl" != "$ZAPRET_EXCL_RUN" ] || [ "$_hooks_bad" = 1 ]; then
         zapret_rules_on "$excl"
         if [ "$ZAPRET_STATE" != "on" ]; then
-            log "zapret: включён (режим $ZAPRET_MODE, телефон: $ZAPRET_PHONE, QUIC раздачи: $(if [ "$ZAPRET_QF_ON" = 1 ]; then echo подделка; elif [ "$ZAPRET_QUIC_BLOCK" = 1 ]; then echo закрыт; else echo открыт; fi); в исключениях (VPN-клиенты и «мимо обхода»): ${excl:-нет})"
+            log "zapret: включён (режим $ZAPRET_MODE, телефон: $ZAPRET_PHONE, QUIC раздачи: $(if [ "$ZAPRET_QF_ON" = 1 ]; then echo подделка; elif [ "$ZAPRET_QUIC_BLOCK" = 1 ]; then echo закрыт; else echo открыт; fi); в исключениях (VPN-клиенты и «мимо обхода»): ${excl:-нет}$([ "$DNS_VIA_ZAPRET" = 1 ] && echo "; DoH через обход: $(zapret_doh_targets | cut -d'|' -f1,2 | tr ',|' '\n\n' | grep -c .) серверов, порты $(zapret_doh_targets | cut -d'|' -f3)"))"
         elif [ "$excl" != "$ZAPRET_EXCL_RUN" ]; then
             log "zapret: исключения (VPN-клиенты и «мимо обхода»): ${excl:-нет}"
         else
