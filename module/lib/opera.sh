@@ -59,6 +59,7 @@ OPERA_TICK=0
 OPERA_SU_G=""           # "" = не проверяли, 1 = su -g работает, 0 = нет
 OPERA_NOSUPPORT=0       # 1 = ядро без TPROXY или нет бинарей: не пытаться до перечитывания
 OPERA_WAN=""
+OPERA_NONET=0           # 1 = сети не было на прошлом круге
 OPERA_DOM_TS=0
 OPERA_DOM_IPS=""
 OPERA_DOM_LAST=""
@@ -515,12 +516,12 @@ opera_fail() {   # причина
     phone_status_refresh
 }
 
-opera_down() {   # [quiet]
+opera_down() {   # [quiet | nonet — тихо и с адресами сайтов: после обрыва сеть та же]
     opera_rules_off
     _opera_kill $(opera_hev_pids)
     _opera_kill $(opera_proxy_pids)
     opera_exempt_down
-    [ "$OPERA_STATE" != "off" ] && [ "$1" != "quiet" ] && log "opera: выключен"
+    [ "$OPERA_STATE" != "off" ] && [ -z "$1" ] && log "opera: выключен"
     OPERA_STATE="off"
     OPERA_ENDPOINT=""
     OPERA_CUR_COUNTRY=""
@@ -530,10 +531,9 @@ opera_down() {   # [quiet]
     OPERA_FAILS=0
     OPERA_BAD=0
     OPERA_OWN_BAD=0
-    OPERA_DOM_TS=0
-    OPERA_DOM_IPS=""
-    OPERA_DOM_LAST=""
-    OPERA_DOM_FLAST=""
+    if [ "$1" != "nonet" ]; then
+        OPERA_DOM_TS=0; OPERA_DOM_IPS=""; OPERA_DOM_LAST=""; OPERA_DOM_FLAST=""
+    fi
     phone_status_refresh
 }
 
@@ -560,6 +560,21 @@ opera_reconcile() {
         log "WARNING: opera: $OPERA_ERR"; phone_status_refresh
         return 0
     fi
+    # Нет сети — не запускаем и не проверяем. 09.11 на машине за минуту без сети было три
+    # пустых старта, третий уже ушёл в запасной регион. Работающий прокси держим 15 с:
+    # в метро сеть моргает на 1–3 с, а новый старт — 6–10 с без сайтов из списка. Дольше —
+    # снимаем (неудачи без сети не в счёт), адреса сайтов оставляем: сеть вернётся та же
+    if wan_gone; then
+        OPERA_NONET=1
+        case "$OPERA_STATE" in
+            off) ;;
+            on) [ $(( $(date +%s) - WAN_DOWN_TS )) -ge 15 ] && { opera_down nonet; log "opera: остановлен (нет сети)"; } ;;
+            *) opera_down nonet ;;
+        esac
+        return 0
+    fi
+    # сеть вернулась, прокси жив — проверить сразу
+    [ "$OPERA_NONET" = "1" ] && { OPERA_NONET=0; OPERA_TICK=15; }
     # появление VPN снимает перенаправление сразу, без второго замера
     [ "$PHONE_VPN_STABLE" = "0" ] && [ "$PHONE_VPN_SEEN" = "0" ] && want=1
     # первые 3 минуты после старта — каждый круг: AdGuard встаёт позже и ставит свой

@@ -410,7 +410,7 @@ warp_reconcile() {
     # WARP впереди guard открыл бы клиентам Telegram/Google — «VPN или ничего»
     elif [ "$VPN_TETHER_MODE" = "blocked" ]; then why="пауза kill-switch"
     elif [ "$VPN_TETHER_MODE" != "off" ]; then why="поднят VPN"
-    elif [ "$WAN_DOWN_LOGGED" = "1" ] || [ -z "$LAST_WAN_IFACE" ]; then why="нет сети"
+    elif wan_gone; then why="нет сети"
     fi
     # первые конфиги — только при сети (иначе регистрация падает до перезагрузки)
     [ -z "$why" ] && warp_ensure
