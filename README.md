@@ -109,7 +109,8 @@
 2. Установите zip через менеджер KernelSU, Magisk или APatch и перезагрузите телефон.
 3. Включите раздачу Wi-Fi или USB как обычно. Режим переключается кнопкой **Action** у модуля,
    настройки — в **WebUI**. В KernelSU и APatch WebUI открывается из менеджера, в Magisk —
-   через отдельное приложение для WebUI модулей (например, WebUI X).
+   через приложение **VPN Tether** (`VPN_Tether_v*.apk` в том же релизе, Android 8.0+;
+   подробнее — [app/README.md](app/README.md)). Оно же открывает WebUI и на KernelSU без менеджера.
 
 При первой установке создаётся `/data/adb/vpn_tether.conf` с закомментированными примерами.
 При обновлении модуля этот файл не трогается — настройки сохраняются.
@@ -270,6 +271,7 @@ su -c 'iptables -m connbytes -h'   # должна быть справка, а н
 | 3.25.0 | Новый WebUI: путь трафика на Главной, вкладка «Выходы» (что куда идёт через WARP и Opera), DNS для ИИ, ссылки автора; Opera: повтор discover и причина сбоя hev |
 | 3.25.1 | Opera на старых ядрах (порт hev) и рядом с модулями, которые гонят трафик через NFQUEUE; «Новый адрес» без раздачи |
 | 3.25.2 | Предупреждение о модулях, которые забирают весь трафик через NFQUEUE (nfqttl и подобные): с ними не работают обход, Opera и WARP |
+| 3.26.0 | YouTube: застрявшие видеосерверы отбиваются сразу, пороги от задержки сети, видео в WARP от 5 Мбит/с; WARP без «полки» 2,5 Мбит/с днём; запасной DoH — первый живой, MagicDNS, «DoH через обход»; Opera: запомненный сервер, выход, обрывы в метро; старые телефоны (Android 8/9, Magisk без `su -g`); тема WebUI; приложение «VPN Tether» |
 
 </details>
 
@@ -295,6 +297,7 @@ su -c 'iptables -m connbytes -h'   # должна быть справка, а н
 | Путь | Что там |
 |---|---|
 | [`module/`](module/) | Сам модуль — из этой папки собирается zip |
+| [`app/`](app/) | Приложение «VPN Tether»: WebUI модуля без менеджера KernelSU (Magisk, Android 8+) |
 | [`docs/settings.md`](docs/settings.md) | Справочник: все настройки, устройство обхода DPI и DNS, файлы и логи |
 | [`docs/screenshots/`](docs/screenshots/), [`docs/webui/`](docs/webui/) | Скриншоты WebUI |
 | [`third_party/conntrack/`](third_party/conntrack/), [`third_party/amneziawg/`](third_party/amneziawg/) | Исходники `conntrack` и AmneziaWG (GPL), в модуль не входят |
