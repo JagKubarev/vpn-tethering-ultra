@@ -389,9 +389,10 @@ st stage="узнаю адреса"
 SYSDNS=0
 [ "$MODE" = sites ] && grep -q '^phone_dns=1' "$MODDIR/status" 2>/dev/null && \
     grep -q '^dns_degraded=0' "$MODDIR/status" 2>/dev/null && SYSDNS=1
-# su -g не работает (DNSPROXY_SU_G=0): хук DNS телефона пропускает uid 0 мимо
-# dnsproxy — у ping (root) был бы DNS оператора, а не как у браузера
-[ "$SYSDNS" = 1 ] && $IPT -t nat -S VPN_PHONE_DNS 2>/dev/null | grep -q 'uid-owner 0 ' && SYSDNS=0
+# хук DNS телефона пропускает весь uid 0 мимо dnsproxy (DNSPROXY_SU_G=0 и обычный DNS по имени,
+# или так до 09.11) — у ping (root) был бы DNS оператора, а не как у браузера. Только правило
+# целиком: «-d адрес … --uid-owner 0 -j RETURN» (мимо — лишь серверы самого dnsproxy) не мешает
+[ "$SYSDNS" = 1 ] && $IPT -t nat -S VPN_PHONE_DNS 2>/dev/null | grep -qx -- '-A VPN_PHONE_DNS -m owner --uid-owner 0 -j RETURN' && SYSDNS=0
 resolve() { # resolve ПАРАЛЛЕЛЬНО ТАЙМАУТ
     local n=0 pids="" h
     for h in $SITES; do

@@ -811,10 +811,21 @@ case "$1" in
         # старый Magisk не знает -g (MT6580): тогда от root, ошибка не должна
         # выглядеть как блокировка
         asg() { su 0 -g $G -c "$1" 2>/dev/null; }
-        su 0 -g $G -c true 2>/dev/null || asg() { sh -c "$1" 2>/dev/null; }
+        NOG=0
+        su 0 -g $G -c true 2>/dev/null || { NOG=1; asg() { sh -c "$1" 2>/dev/null; }; }
         dcurl() { asg "$(command -v curl) -s --interface $wan --capath $CA $*"; }
         doh_a() { dcurl "-m 6 -H 'accept: application/dns-json' 'https://dns.google/resolve?name=$1&type=A'" | grep -oE '"data":"[0-9.]+"' | grep -oE '[0-9.]+' | head -1; }
-        plain_a() { asg "$BB nslookup $1 $2" | awk '/^Name:/ {n = 1} n && /^Address/ {print $NF; exit}' | grep -E '^[0-9.]+$'; }
+        # без -g root перехватывает DNS телефона (мимо — только серверы самого dnsproxy): на время
+        # запроса открываем путь к серверу, иначе ответил бы dnsproxy и подмена не была бы видна
+        plain_a() {
+            local ex="-d $2 -p udp --dport 53 -m owner --uid-owner 0 -j RETURN" ins=0
+            # shellcheck disable=SC2086
+            [ "$NOG" = 1 ] && iptables -w 2 -t nat -I VPN_PHONE_DNS 1 $ex 2>/dev/null && ins=1
+            asg "$BB nslookup $1 $2" | awk '/^Name:/ {n = 1} n && /^Address/ {print $NF; exit}' | grep -E '^[0-9.]+$'
+            # shellcheck disable=SC2086
+            [ "$ins" = 1 ] && iptables -w 2 -t nat -D VPN_PHONE_DNS $ex 2>/dev/null
+            return 0
+        }
 
         # 1. DNS: обычный DNS к 8.8.8.8 (оператор может перехватывать :53).
         # Разные адреса ещё не подмена: CDN (Cloudflare и т.п.) раздаёт разные
