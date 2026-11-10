@@ -307,7 +307,7 @@ udp_listening() {   # порт
 }
 
 dnsproxy_probe() {   # [адрес] — по умолчанию dnsproxy; с адресом — :53 от группы dnsproxy
-    local lbl f nc_pid t0 now out nc ex=""
+    local lbl f nc_pid t0 now out nc
     [ -n "$BUSYBOX" ] || return 0   # нечем проверить — не блокируем запуск
     lbl=$(printf 'p%09d' $(( ($(date +%s) % 100000) * 10000 + RANDOM % 10000 )))
     f="/data/local/tmp/vpn_tether_probe.$$"
@@ -316,15 +316,7 @@ dnsproxy_probe() {   # [адрес] — по умолчанию dnsproxy; с а�
     if [ -n "$1" ]; then
         # мимо перехвата DNS телефона: от root он ушёл бы в тот же dnsproxy
         nc="$BUSYBOX nc -u -w $DNS_PROBE_TIMEOUT $1 53"
-        if [ "$DNSPROXY_SU_G" = "1" ]; then
-            nc="su -g $DNSPROXY_GID -c '$nc'"
-        else
-            # без su -g root перехватывается (кроме серверов самого dnsproxy): адрес оператора
-            # открываем только на время проверки — насовсем нельзя, на него ходит резолвер (netd)
-            ex="-d $1 -p udp --dport 53 -m owner --uid-owner 0 -j RETURN"
-            # shellcheck disable=SC2086
-            $iptables -t nat -I "$CHAIN_PHONE_DNS" 1 $ex 2>/dev/null || ex=""
-        fi
+        [ "$DNSPROXY_SU_G" = "1" ] && nc="su -g $DNSPROXY_GID -c '$nc'"
     fi
     printf '\022\064\001\000\000\001\000\000\000\000\000\000\012%s\007example\003com\000\000\001\000\001' "$lbl" | \
         eval "$nc" > "$f" 2>/dev/null &
@@ -338,8 +330,6 @@ dnsproxy_probe() {   # [адрес] — по умолчанию dnsproxy; с а�
     done
     now=$(uptime_ms)
     kill "$nc_pid" 2>/dev/null
-    # shellcheck disable=SC2086
-    [ -n "$ex" ] && $iptables -t nat -D "$CHAIN_PHONE_DNS" $ex 2>/dev/null
     out=$($BUSYBOX od -An -tx1 -N4 "$f" 2>/dev/null)
     rm -f "$f"
     # " 12 34 81 83": id, флаги (rcode = младшие 4 бита 4-го байта)
@@ -1100,21 +1090,8 @@ dns_health() {
 # ============================================================================
 # DNS самого телефона (DNS_PHONE)
 # ============================================================================
-# Обычные (порт 53, без шифрования) DNS-серверы, к которым ходит сам dnsproxy: bootstrap и
-# апстримы вида 1.2.3.4, 1.2.3.4:53, udp://… tcp://… (DoH/DoT — мимо: не порт 53).
-# Без аргумента — их IPv4; «other» — код 0, если среди них есть имя или IPv6 (адрес не исключить)
-dnsproxy_plain_ips() {
-    local u
-    for u in $DNS_BOOTSTRAP $DNS_UPSTREAMS $DNS_FALLBACKS $DNS_META_UPSTREAMS $DNS_VPN_UPSTREAMS; do
-        case "$u" in udp://*|tcp://*) u=${u#*://} ;; *://*) continue ;; esac
-        u=${u%%/*}
-        case "$u" in *:*:*|\[*) echo "x $u"; continue ;; *:*) u=${u%:*} ;; esac
-        case "$u" in '') continue ;; *[!0-9.]*) echo "x $u" ;; *) echo "4 $u" ;; esac
-    done | sort -u | if [ "$1" = other ]; then grep -q '^x '; else sed -n 's/^4 //p'; fi
-}
-
 phone_dns_rules_on() {
-    local t _a
+    local t
     PHONE_DNS_V6=0
     for t in "$iptables" "$ip6tables"; do
         # ip6 nat есть не во всех ядрах (на OnePlus 13T, A15 — нет)
@@ -1125,21 +1102,8 @@ phone_dns_rules_on() {
         # сам dnsproxy (bootstrap :53) — мимо, иначе петля
         [ -n "$DNSPROXY_GID" ] && \
             $t -t nat -A "$CHAIN_PHONE_DNS" -m owner --gid-owner "$DNSPROXY_GID" -j RETURN 2>/dev/null
-        # su -g не работает (Magisk < 26): dnsproxy работает от root. Мимо — только root к его
-        # обычным DNS-серверам (bootstrap, апстримы без шифрования), а не весь root: на Android 8
-        # системный резолвер (netd) спрашивает от root за все приложения, и 09.11 на MT6580
-        # мимо DoH шёл DNS всех приложений, кроме Chrome со своим резолвером
-        # Обычный DNS по имени или по IPv6 адресом не исключить, и IPv6 — как раньше: весь root мимо
-        if [ "$DNSPROXY_SU_G" != "1" ]; then
-            if [ "$t" = "$ip6tables" ] || dnsproxy_plain_ips other; then
-                $t -t nat -A "$CHAIN_PHONE_DNS" -m owner --uid-owner 0 -j RETURN 2>/dev/null
-            else
-                for _a in $(dnsproxy_plain_ips); do
-                    $t -t nat -A "$CHAIN_PHONE_DNS" -d "$_a" -p udp --dport 53 -m owner --uid-owner 0 -j RETURN 2>/dev/null
-                    $t -t nat -A "$CHAIN_PHONE_DNS" -d "$_a" -p tcp --dport 53 -m owner --uid-owner 0 -j RETURN 2>/dev/null
-                done
-            fi
-        fi
+        [ "$DNSPROXY_SU_G" = "1" ] || \
+            $t -t nat -A "$CHAIN_PHONE_DNS" -m owner --uid-owner 0 -j RETURN 2>/dev/null
         $t -t nat -A "$CHAIN_PHONE_DNS" -o lo -j RETURN 2>/dev/null
         $t -t nat -A "$CHAIN_PHONE_DNS" -p udp --dport 53 -j REDIRECT --to-ports "$DNSPROXY_PORT" 2>/dev/null
         $t -t nat -A "$CHAIN_PHONE_DNS" -p tcp --dport 53 -j REDIRECT --to-ports "$DNSPROXY_PORT" 2>/dev/null
