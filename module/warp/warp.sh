@@ -195,6 +195,8 @@ gen() {
     pid=$(cat "$ZSCAN.pid" 2>/dev/null)
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
         case "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" in
+            # «идёт подбор» и «уже идёт» (ниже) разбирает демон (warp_ensure): занято — повтор
+            # через 30 с, а не пауза с удвоением. Меняя текст — поменять и там
             *zapret/scan.sh*) echo "ERR идёт подбор обхода — повторите позже"; return 1 ;;
         esac
     fi

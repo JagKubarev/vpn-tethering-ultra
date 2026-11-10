@@ -55,6 +55,7 @@ WARP_PUB=""              # «состояние|заметка», уже зап�
 WARP_ENSURE_PID=""
 WARP_ENSURE_DONE=0
 WARP_ENSURE_AT=0         # не вышло (нет сети при загрузке) — повтор после этого времени
+WARP_ENSURE_BUSY=0       # 1 = ждём конца подбора: повторы каждые 30 с в журнал не пишем
 WARP_TG_SECS=300         # Telegram DC2/DC4 через туннель — проверка раз в 5 мин (warp_tg_dead)
 WARP_TG_TS=0             # последняя такая проверка (0 — на первой проверке сессии)
 WARP_TG_TRIES=0          # переподключений подряд из-за DC2/DC4
@@ -357,9 +358,16 @@ warp_ensure() {
         WARP_ENSURE_PID=""
         r=$(head -1 "$WARP_RUN.ensure" 2>/dev/null); rm -f "$WARP_RUN.ensure"
         case "$r" in
-            OK*) log "WARP: созданы конфиги:${r#OK}"; WARP_RETRY_TS=0 ;;
+            OK*) log "WARP: созданы конфиги:${r#OK}"; WARP_RETRY_TS=0; WARP_ENSURE_BUSY=0 ;;
             '') ;;
-            *) log "WARP: не удалось создать конфиги — $r (повтор через $((WARP_ENSURE_WAIT / 60)) мин)"
+            # занято (сторож проверяет обход — после включения WARP почти всегда, 09.11 на MT6580 и
+            # NX1) — не сбой Cloudflare: через 30 с, без удвоения паузы
+            # (тексты — из warp/warp.sh gen)
+            *"идёт подбор"*|*"уже идёт"*)
+               [ "$WARP_ENSURE_BUSY" = 1 ] || log "WARP: конфиги создам позже — ${r#ERR } (повтор каждые 30 с)"
+               WARP_ENSURE_BUSY=1; WARP_ENSURE_DONE=0; WARP_ENSURE_AT=$(( $(date +%s) + 30 )) ;;
+            *) WARP_ENSURE_BUSY=0
+               log "WARP: не удалось создать конфиги — $r (повтор через $((WARP_ENSURE_WAIT / 60)) мин)"
                # Cloudflare стабильно не отвечает — не дёргать nfqws и правила
                # каждые 5 минут: пауза растёт вдвое, до часа
                WARP_ENSURE_DONE=0; WARP_ENSURE_AT=$(( $(date +%s) + WARP_ENSURE_WAIT ))
@@ -372,7 +380,7 @@ warp_ensure() {
     WARP_ENSURE_DONE=1
     [ -f "$WARP_DIR/.init" ] && return 0
     ls "$WARP_DIR"/*.conf >/dev/null 2>&1 && return 0
-    log "WARP: конфигов нет — создаю 3 (первый запуск)"
+    [ "$WARP_ENSURE_BUSY" = 1 ] || log "WARP: конфигов нет — создаю 3 (первый запуск)"
     sh "$MODULE_DIR/warp/warp.sh" ensure 3 > "$WARP_RUN.ensure" 2>/dev/null < /dev/null &
     WARP_ENSURE_PID=$!
 }
