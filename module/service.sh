@@ -1289,6 +1289,7 @@ CHAIN_GUARD_IN="VPN_TETHER_GUARD_IN"
 VPN_DOWN_COUNT=0
 WATCHDOG_TICK=0
 WAN_DOWN_LOGGED=0
+WAN_DOWN_TS=0           # когда пропал WAN (0 — с самого старта сети не было)
 GUARD_STATE="none"
 
 MODDIR="${0%/*}"

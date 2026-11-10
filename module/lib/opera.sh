@@ -60,7 +60,6 @@ OPERA_SU_G=""           # "" = не проверяли, 1 = su -g работае
 OPERA_NOSUPPORT=0       # 1 = ядро без TPROXY или нет бинарей: не пытаться до перечитывания
 OPERA_WAN=""
 OPERA_NONET=0           # 1 = сети не было на прошлом круге
-OPERA_NONET_TS=0        # когда для Opera началось «нет сети» (отсчёт 15 с)
 OPERA_DOM_TS=0
 OPERA_DOM_IPS=""
 OPERA_DOM_LAST=""
@@ -567,16 +566,11 @@ opera_reconcile() {
     # пустых старта, третий уже ушёл в запасной регион. Работающий прокси держим 15 с:
     # в метро сеть моргает на 1–3 с, а новый старт — 6–10 с без сайтов из списка. Дольше —
     # снимаем (неудачи без сети не в счёт), адреса сайтов оставляем: сеть вернётся та же
-    # Поднят VPN — не «нет сети»: get_wan_iface при VPN на Wi-Fi часто не находит аплинк (09.11
-    # MT6580: «WAN пропал», через 15 с Opera снята). Как до 024be44: процесс живёт всю сессию VPN
-    # (правила сняты ниже, want=0) и сразу готов после неё
-    if wan_gone && ! vpn_up_now; then
-        # отсчёт — свой, не от «WAN пропал»: при VPN WAN «пропадает» на всю сессию, и после
-        # выключения VPN Opera снималась сразу (09.11 MT6580, 22:23:15 — за 2 с до «WAN вернулся»)
-        [ "$OPERA_NONET" = "1" ] || { OPERA_NONET=1; OPERA_NONET_TS=$(date +%s); }
+    if wan_gone; then
+        OPERA_NONET=1
         case "$OPERA_STATE" in
             off) ;;
-            on) [ $(( $(date +%s) - OPERA_NONET_TS )) -ge 15 ] && { opera_down nonet; log "opera: остановлен (нет сети)"; } ;;
+            on) [ $(( $(date +%s) - WAN_DOWN_TS )) -ge 15 ] && { opera_down nonet; log "opera: остановлен (нет сети)"; } ;;
             *) opera_down nonet ;;
         esac
         return 0
