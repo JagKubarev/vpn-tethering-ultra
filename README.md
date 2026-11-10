@@ -107,6 +107,7 @@
 1. Скачайте `VPN_Tethering_Ultra_vX.Y.Z.zip` со страницы
    [последнего релиза](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest).
 2. Установите zip через менеджер KernelSU, Magisk или APatch и перезагрузите телефон.
+   В списке модулей он называется **VPN Tether** (с 3.26.0; id `vpn-to-hotspot-usb` прежний).
 3. Включите раздачу Wi-Fi или USB как обычно. Режим переключается кнопкой **Action** у модуля,
    настройки — в **WebUI**. В KernelSU и APatch WebUI открывается из менеджера, в Magisk —
    через приложение **VPN Tether** (`VPN_Tether_v*.apk` в том же релизе, Android 8.0+;

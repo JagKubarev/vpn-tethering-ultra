@@ -498,14 +498,21 @@ case "$1" in
             for i in $(sed -n 's/^ifaces=//p' "$STATUS_FILE" 2>/dev/null); do
                 ip -4 addr show "$i" 2>/dev/null | awk '/inet / { print "t " $2 }'
             done
-        } | awk 'NF == 2 && !s[$0]++' | tail -n 300 > "$ZAUTO_WHO.tmp" && mv -f "$ZAUTO_WHO.tmp" "$ZAUTO_WHO"
+        } | awk 'NF == 2 && !s[$0]++' | tail -n 300 > "$ZAUTO_WHO.tmp.$$"
+        # свой .tmp на вызов (раскрытие блока и возврат в WebUI бывают разом); без изменений —
+        # не переписываем: zauto-info зовут при каждом раскрытии блока
+        if cmp -s "$ZAUTO_WHO.tmp.$$" "$ZAUTO_WHO" 2>/dev/null; then rm -f "$ZAUTO_WHO.tmp.$$"
+        else mv -f "$ZAUTO_WHO.tmp.$$" "$ZAUTO_WHO"; fi
         lg="$ZAUTO_LOG"; [ -f "$lg" ] || lg=/dev/null
         awk -F' : ' '
             function n4(a,  o) { split(a, o, "."); return ((o[1] * 256 + o[2]) * 256 + o[3]) * 256 + o[4] }
             FILENAME == ARGV[1] {
                 split($0, w, " ")
                 if (w[1] == "p") ph[w[2]] = 1
-                else if (w[1] == "t") { split(w[2], c, "/"); m = 2 ^ (32 - c[2]); nt++; tn[nt] = int(n4(c[1]) / m); tm[nt] = m }
+                # только «адрес/маска 8–32»: строка без маски дала бы m = 2^32 — «раздача» любой адрес
+                else if (w[1] == "t" && split(w[2], c, "/") == 2 && c[2] ~ /^[0-9]+$/ && c[2] >= 8 && c[2] <= 32) {
+                    m = 2 ^ (32 - c[2]); nt++; tn[nt] = int(n4(c[1]) / m); tm[nt] = m
+                }
                 next
             }
             FILENAME == ARGV[2] {
