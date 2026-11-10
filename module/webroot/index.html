@@ -204,13 +204,6 @@ pre.log { margin: 0; padding: 12px 14px; background: var(--input); font: 12px/1.
 
 .applybar { touch-action: none; position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + var(--tabbar-pad) + var(--tabbar-h) + 10px); padding: 0 16px; display: none; z-index: 10; }
 .applybar.show { display: block; }
-/* ⟳ — данные открытой вкладки заново, без перезагрузки страницы (место прокрутки то же) */
-/* слева: справа в строках переключатели и ✕ автосписка — по ним промахивались бы */
-.refab { position: fixed; left: 16px; bottom: calc(env(safe-area-inset-bottom) + var(--tabbar-pad) + var(--tabbar-h) + 14px); width: 44px; height: 44px; border-radius: 22px; border: 1px solid var(--line); background: var(--card); color: var(--text); display: flex; align-items: center; justify-content: center; padding: 0; box-shadow: 0 4px 14px rgba(0,0,0,.25); opacity: .92; z-index: 9; cursor: pointer; }
-.refab svg { width: 22px; height: 22px; }
-.refab.spin svg { animation: refspin .8s linear infinite; }
-@keyframes refspin { to { transform: rotate(360deg); } }
-.applybar.show ~ .refab { display: none; }
 .applybar .in { max-width: 608px; margin: 0 auto; display: flex; gap: 10px; align-items: center; background: var(--text); color: var(--bg); border-radius: 16px; padding: 8px 8px 8px 16px; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
 .applybar #revertBtn { background: transparent; border-color: transparent; color: var(--bg); opacity: .8; }
 .applybar #applyBtn { background: var(--route); border-color: var(--route); color: var(--card); }
@@ -609,7 +602,7 @@ details > summary::after { border-color: currentColor; }
       </div>
     </div>
   </details>
-  <details data-dep="ZAPRET_ENABLE">
+  <details data-dep="ZAPRET_ENABLE" id="zautoBox">
     <summary>Встроенный список и автосписок</summary>
     <div class="row col">
       <div class="txt"><div class="t">Автосписок: <span id="zautoN">0</span></div>
@@ -1021,7 +1014,6 @@ details > summary::after { border-color: currentColor; }
   <button class="btn" id="revertBtn">Отмена</button>
   <button class="btn primary" id="applyBtn">Применить</button>
 </div></div>
-<button class="refab" id="refab" title="Обновить" aria-label="Обновить данные вкладки"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg></button>
 
 <div class="sheet-bg" id="sheetBg"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
@@ -1613,27 +1605,6 @@ function showTab(t) {
   try { localStorage.setItem('vtTab', t); } catch (e) { /* без хранилища — просто не запоминаем */ }
 }
 $$('#tabbar button').forEach((b) => b.addEventListener('click', () => { showTab(b.dataset.tab); document.body.scrollTo(0, 0); }));
-// ⟳: статус и данные открытой вкладки заново. Списки «Обхода» иначе грузятся только при открытии
-// WebUI (новые сайты автосписка не видно). Несохранённое не трогаем: настройки с изменениями
-// не перечитываем, поле «Дополнительные сайты» с правками остаётся как есть
-async function refreshTab() {
-  const b = $('#refab');
-  if (busy || b.classList.contains('spin')) return;
-  b.classList.add('spin');
-  const t = ($('.tab.on') || { dataset: {} }).dataset.tab || 'home';
-  const jobs = [loadStatus()];
-  if (!changedKeys().length) jobs.push(loadConf());
-  if (t === 'home') jobs.push(loadClients());
-  if (t === 'bypass') jobs.push(loadZ(zlistDirty()), loadZnet(), scRefresh());
-  if (t === 'warp') jobs.push(loadWarp(), loadWarpStats());
-  if ($('#logBox').open) jobs.push(loadLog());
-  if ($('#zevBox').open) jobs.push(loadZev());
-  try {
-    await Promise.all(jobs.map((p) => Promise.resolve(p).catch((e) => console.error(e))));
-    toast('Обновлено');
-  } finally { b.classList.remove('spin'); }
-}
-$('#refab').addEventListener('click', refreshTab);
 $$('[data-offnote]').forEach((n) => {
   n.tabIndex = 0;
   n.addEventListener('click', () => { showTab('home'); document.body.scrollTo(0, 0); });
@@ -2213,6 +2184,9 @@ async function loadZev() {
   $('#zev').textContent = lines.length ? lines.join('\n') : 'Пока пусто: здесь появятся результаты автопроверки и подбора.';
 }
 $('#zevBox').addEventListener('toggle', () => { if ($('#zevBox').open) loadZev(); });
+// списки «Обхода» грузились только при открытии WebUI — новые сайты автосписка не было видно.
+// Заново при раскрытии и сворачивании блока; правленое поле «Дополнительные сайты» не трогаем
+$('#zautoBox').addEventListener('toggle', () => { if (!busy) loadZ(zlistDirty()); });
 let renewTs = 0;   // когда нажата «Переподключить сеть»: ждём проверку выхода новее
 $('#netRenew').addEventListener('click', async () => {
   const b = $('#netRenew');
@@ -2763,7 +2737,13 @@ $('#metaBtn').addEventListener('click', async () => {
   // 3 с, а не 1 с, как в WG Tunnel: ksu.exec синхронный, каждый вызов (~80 мс) — пауза страницы
   setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="warp"]').classList.contains('on')) loadWarpStats(); }, 3000);
   // вернулись на страницу — сразу свежий статус, не ждать тика
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && !busy) { loadStatus(); scRefresh(); } });
+  // на «Обходе» — и списки (автосписок пополняется, пока WebUI свёрнут)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !busy) {
+      loadStatus(); scRefresh();
+      if ($('.tab[data-tab="bypass"]').classList.contains('on')) loadZ(zlistDirty());
+    }
+  });
 })();
 
 // ---------------------------------------------------------------- без KernelSU (предпросмотр в браузере)
