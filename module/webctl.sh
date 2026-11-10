@@ -63,6 +63,7 @@ DNSPROXY_PORT=5354
 ZLIST_USER=/data/adb/vpn_tether_zapret.txt
 ZLIST_AUTO=/data/adb/vpn_tether_zapret_auto.txt
 ZAUTO_LOG=/data/adb/vpn_tether_zapret_auto.log   # причины (nfqws --hostlist-auto-debug)
+ZAUTO_WHO=/data/adb/vpn_tether_zapret_auto.who   # «p адрес телефона» / «t сеть раздачи/маска» — чей клиент в журнале
 ZSCAN=/data/local/tmp/vpn_tether_zscan
 ZNETS=/data/adb/vpn_tether_zapret_nets
 ZHIST=/data/adb/vpn_tether_zapret_hist      # ключ|стратегия|аргументы|дата|заметка|аргументы_YouTube|аргументы_Discord — прежние стратегии сетей
@@ -207,7 +208,7 @@ case "$1" in
         # обхода. Импорт — в WebUI: файл -> форма -> «Применить»
         F=/storage/emulated/0/Download/vpn_tether_settings_$(date '+%Y%m%d_%H%M').conf
         {
-            echo "# VPN Tethering Ultra — настройки, $(date '+%d.%m.%Y %H:%M')"
+            echo "# VPN Tether — настройки, $(date '+%d.%m.%Y %H:%M')"
             sed -n 's/^version=/# модуль: /p' "$MODDIR/module.prop"
             echo "# Импорт: WebUI -> Сервис -> «Импорт». Чего нет в файле — вернётся к умолчанию."
             sh "$MODDIR/webctl.sh" conf | awk '
@@ -275,7 +276,7 @@ case "$1" in
         # в «Загрузках» (ответ «OK путь nosend»).
         F=/storage/emulated/0/Download/vpn_tether_logs_$(date '+%Y%m%d_%H%M').txt
         {
-            echo "=== VPN Tethering Ultra — логи для разбора, $(date '+%d.%m.%Y %H:%M:%S')"
+            echo "=== VPN Tether — логи для разбора, $(date '+%d.%m.%Y %H:%M:%S')"
             sed -n 's/^version=/модуль: /p' "$MODDIR/module.prop"
             echo "телефон: $(getprop ro.product.manufacturer) $(getprop ro.product.model), Android $(getprop ro.build.version.release), ядро $(uname -r)"
             echo; echo "=== состояние"; sed '1,2d' "$STATUS_FILE" 2>/dev/null
@@ -308,7 +309,7 @@ case "$1" in
         V=$(sed -n 's/^version=//p' "$MODDIR/module.prop"); T=$(date '+%d.%m.%Y %H:%M')
         if [ -n "$id" ] && su 2000 -c "am start -a android.intent.action.SEND -t text/plain -d '$U' \
                 --eu android.intent.extra.STREAM '$U' \
-                --es android.intent.extra.SUBJECT 'VPN Tethering Ultra $V: логи от $T' \
+                --es android.intent.extra.SUBJECT 'VPN Tether $V: логи от $T' \
                 -f 0x10000001" >/dev/null 2>&1; then
             echo "OK $F"
         else
@@ -481,12 +482,33 @@ case "$1" in
         # строки журнала: "ДД.ММ.ГГГГ ЧЧ:ММ:СС : домен : profile N : client IP:порт : proto P : событие".
         # Сбои считаем с последнего «website is working» до «adding to»; клиент —
         # адрес телефона в сети оператора (в т.ч. через AdGuard) или раздача.
+        # Адрес телефона меняется при каждом переподключении: раньше «телефон» был только
+        # нынешний адрес, и всё, что телефон добавил со старых, показывалось как раздача
+        # (10.11: 10.188.236.114, 10.180.49.90 при нынешнем 10.209.6.175). Теперь: прежние
+        # адреса из журнала демона («Network change … ip=A→B») и нынешний — телефон, сети
+        # интерфейсов раздачи — раздача; всё копится в ZAUTO_WHO (журнал — только 2 сессии).
+        # Ни то ни другое — без пометки, а не «раздача»
         [ -f "$ZLIST_AUTO" ] || exit 0
         wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
         wip=$(ip -4 addr show "$wan" 2>/dev/null | awk '/inet / {sub(/\/.*/, "", $2); print $2; exit}')
+        {
+            [ -f "$ZAUTO_WHO" ] && cat "$ZAUTO_WHO"
+            [ -n "$wip" ] && echo "p $wip"
+            cat "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null | grep 'Network change' | grep -oE 'ip=[0-9.]*→[0-9.]+' | sed 's/^ip=//; s/→/ /' | awk '{ for (i = 1; i <= NF; i++) print "p " $i }'
+            for i in $(sed -n 's/^ifaces=//p' "$STATUS_FILE" 2>/dev/null); do
+                ip -4 addr show "$i" 2>/dev/null | awk '/inet / { print "t " $2 }'
+            done
+        } | awk 'NF == 2 && !s[$0]++' | tail -n 300 > "$ZAUTO_WHO.tmp" && mv -f "$ZAUTO_WHO.tmp" "$ZAUTO_WHO"
         lg="$ZAUTO_LOG"; [ -f "$lg" ] || lg=/dev/null
-        W="$wip" awk -F' : ' '
+        awk -F' : ' '
+            function n4(a,  o) { split(a, o, "."); return ((o[1] * 256 + o[2]) * 256 + o[3]) * 256 + o[4] }
             FILENAME == ARGV[1] {
+                split($0, w, " ")
+                if (w[1] == "p") ph[w[2]] = 1
+                else if (w[1] == "t") { split(w[2], c, "/"); m = 2 ^ (32 - c[2]); nt++; tn[nt] = int(n4(c[1]) / m); tm[nt] = m }
+                next
+            }
+            FILENAME == ARGV[2] {
                 if (NF < 6) next
                 h = $2; ev = $6; split($4, c, " "); cl = c[2]; sub(/:[0-9]+$/, "", cl)
                 if (ev ~ /^incoming RST/) rst[h]++
@@ -494,14 +516,18 @@ case "$1" in
                 else if (ev ~ /^redirect/) rd[h]++
                 else if (ev ~ /website is working/) { rst[h] = 0; rt[h] = 0; rd[h] = 0 }
                 else if (ev ~ /^adding to/) {
-                    when[h] = $1; who[h] = (cl == ENVIRON["W"]) ? "phone" : "tether"
+                    when[h] = $1; who[h] = ""
+                    if (cl in ph) who[h] = "phone"
+                    else if (cl ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+                        x = n4(cl); for (i = 1; i <= nt; i++) if (int(x / tm[i]) == tn[i]) { who[h] = "tether"; break }
+                    }
                     n[h] = (rst[h] + 0) "/" (rt[h] + 0) "/" (rd[h] + 0); rst[h] = 0; rt[h] = 0; rd[h] = 0
                 }
                 next
             }
             { h = $1; sub(/\r$/, "", h); if (h == "" || (h in seen)) next; seen[h] = 1
               if (h in when) print h "|" when[h] "|" n[h] "|" who[h]; else print h "|||" }
-        ' "$lg" "$ZLIST_AUTO"
+        ' "$([ -f "$ZAUTO_WHO" ] && echo "$ZAUTO_WHO" || echo /dev/null)" "$lg" "$ZLIST_AUTO"
         ;;
     zauto-del)
         d=$(printf '%s' "$2" | tr 'A-Z' 'a-z')
