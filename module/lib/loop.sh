@@ -55,7 +55,7 @@ handle_change() {
         # Каждая такая пересборка = окно, в котором клиент шёл напрямую.
         if [ "$WAN_DOWN_LOGGED" -eq 0 ]; then
             log "WAN пропал (был $LAST_WAN_IFACE), держу текущее состояние"
-            WAN_DOWN_LOGGED=1; WAN_DOWN_TS=$(date +%s)
+            WAN_DOWN_LOGGED=1
         fi
     else
         if [ "$WAN_DOWN_LOGGED" -eq 1 ]; then
