@@ -475,6 +475,18 @@ st stage="проверяю, что заблокировано"
 # 06.11 на YOTA прямые запросы к закрытым именам запускали волну Google через минуту на
 # адресах 188.162.5 и .12 (3 из 3, держится до смены адреса), без них 0 из 3. Автопроверка
 # слала такие каждые 15 мин. Без прямого ответа сайт не сравнить: «ломает» видно только на контрольных
+# Белый список оператора: свои сайты открыты, всё зарубежное закрыто по адресу — стратегия
+# ни при чём. 11.11 (YOTA, с 18:43): ya.ru отвечал, поэтому «связь есть», и сторож трижды
+# перезапускал обход с новыми «своими стратегиями сайтов», а проверка сайтов раздала их 17.
+# Признак — порт 80 (его ТСПУ обычным сайтам не закрывает) у трёх чужих сетей молчит или
+# отбит, а ya.ru по нему отвечает. Отказ бывает мгновенный (RST) и молчанием — и то и то 000
+wl_closed() {
+    for _u in http://www.google.com/generate_204 http://www.cloudflare.com/ http://github.com/; do
+        [ "$(curl -s -o /dev/null -m 4 --interface "$WAN" -w '%{http_code}' "$_u" 2>/dev/null)" = 000 ] || return 1
+    done
+    _c=$(curl -s -o /dev/null -m 4 --interface "$WAN" -w '%{http_code}' http://ya.ru/ 2>/dev/null)
+    [ -n "$_c" ] && [ "$_c" != 000 ]
+}
 : > "$TMP/ips.rest"
 if [ -z "$SITES_ARG" ]; then
     L=" ya.ru www.google.com " awk -v rest="$TMP/ips.rest" \
@@ -506,6 +518,13 @@ if [ "$MODE" = sites ] && [ -z "$SITES_ARG" ]; then
         st state=error msg="сеть не готова (адресов $_got из $_req, открылись контрольные:$BASE_OK) — повторю позже"
         exit 1
     fi
+    # Google закрыт и по HTTP — это может быть белый список: сайты получили бы чужие стратегии
+    case " $BASE_OK " in *" www.google.com "*) ;; *)
+        if wl_closed; then
+            st state=error msg="оператор открывает только свои сайты (белый список) — проверку сайтов отложил"
+            exit 1
+        fi ;;
+    esac
 fi
 [ -n "$BASE_OK" ] || { st state=error msg="через $WAN не открылся ни один сайт, даже без блокировок — нет интернета или сеть сменилась"; exit 1; }
 if [ -z "$BLOCKED" ]; then
@@ -794,6 +813,14 @@ if [ "$MODE" = "check" ]; then
     wave_google() {
         _g443=$(curl -s -o /dev/null -m 5 --interface "$WAN" --capath "$CA" -w '%{http_code}' https://www.google.com/generate_204 2>/dev/null)
         _g80=$(curl -s -o /dev/null -m 5 --interface "$WAN" -w '%{http_code}' http://www.google.com/generate_204 2>/dev/null)
+        # Google закрыт и по HTTP, как и другие чужие сети, а ya.ru открыт — белый список.
+        # Метку волны не ставим: подсказка «смените адрес» тут не поможет (11.11: 0 из 37)
+        if [ "$_g443" = 000 ] && [ "$_g80" = 000 ] && wl_closed; then
+            event "автопроверка: оператор открывает только свои сайты (белый список) — стратегию не трогаю ($(last_fail))"
+            wd_last "белый список, отложил"
+            st state=done stage="готово" msg="белый список оператора — стратегию не трогаю"
+            exit 0
+        fi
         [ "$_g443" = 000 ] && [ "$_g80" = 204 ] || return 0
         touch "$OUTB.wave"
         event "автопроверка: Google по HTTPS молчит и без обхода, по HTTP отвечает — волна ТСПУ, стратегию не трогаю ($(last_fail))"
