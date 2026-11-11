@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VPN Tether</string>
+    <string name="wait_root">Запрашиваю root…</string>
+    <string name="retry">Повторить</string>
+    <string name="no_root">Нет root-доступа.\n\nРазрешите приложению «VPN Tether» root:\n• KernelSU / APatch — в списке «Суперпользователь» менеджера (сами они не спрашивают);\n• Magisk — нажмите «Разрешить» в окне запроса.\n\nЗатем нажмите «Повторить».</string>
+    <string name="no_module">Модуль VPN Tethering Ultra не найден:\nнет %1$s/webroot/index.html.\n\nУстановите модуль в KernelSU / Magisk / APatch и перезагрузите телефон.</string>
+</resources>

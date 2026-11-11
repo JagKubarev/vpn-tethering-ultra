@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Тот же знак, что в шапке WebUI (webroot/index.html, h1 .logo): дуги раздачи + стрелка вверх.
+     Точка без обводки и дуги вокруг неё (радиусы 5 и 10) — точка не слипается
+     с первой дугой. 24 → 43 dp по центру зоны 108 dp. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateX="32.4" android:translateY="32.4" android:scaleX="1.8" android:scaleY="1.8">
+        <path android:pathData="M4.93,13.33a10,10 0,0 1,14.14 0"
+            android:strokeColor="#FFFFFF" android:strokeWidth="2.4"
+            android:strokeLineCap="round" android:strokeLineJoin="round" />
+        <path android:pathData="M8.46,16.86a5,5 0,0 1,7.08 0"
+            android:strokeColor="#FFFFFF" android:strokeWidth="2.4"
+            android:strokeLineCap="round" android:strokeLineJoin="round" />
+        <path android:pathData="M12,2.5v4M9.6,4.9L12,2.5l2.4,2.4"
+            android:strokeColor="#FFFFFF" android:strokeWidth="2.4"
+            android:strokeLineCap="round" android:strokeLineJoin="round" />
+        <path android:pathData="M12,20.4m-1.7,0a1.7,1.7 0,1 0,3.4 0a1.7,1.7 0,1 0,-3.4 0"
+            android:fillColor="#FFFFFF" />
+    </group>
+</vector>
