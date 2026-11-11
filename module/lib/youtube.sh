@@ -183,6 +183,7 @@ yt_dead_off() {
     yt_bg_alive "$YT_RECHECK_PID" && kill -9 "$YT_RECHECK_PID" 2>/dev/null; YT_RECHECK_PID=""
     yt_bg_alive "$YT_SPROBE_PID" && kill -9 "$YT_SPROBE_PID" 2>/dev/null; YT_SPROBE_PID=""
     yt_bg_alive "$YT_WPROBE_PID" && kill -9 "$YT_WPROBE_PID" 2>/dev/null; YT_WPROBE_PID=""
+    yt_bg_alive "$YT_WARP_SPD_PID" && kill -9 "$YT_WARP_SPD_PID" 2>/dev/null; YT_WARP_SPD_PID=""; YT_WARP_SLOW=""
     yt_slow_stop
     rm -f "$YT_DEAD_FILE" "$YT_SEEN_FILE" "$YT_SEEN_FILE.new" "$YT_SEEN_FILE.udp" "$YT_SEEN_FILE.udp.new" "$YT_WARP_FILE" "$YT_WARP_FILE".* "$YT_GRANGES" "$YT_RECHECK_FILE".* "$YT_SPROBE_FILE".*
     YT_DEAD_STATE=""; YT_DEAD_SIG=""; YT_STUCK=""; YT_WARP_SIG=""; YT_WARP_PEND=""; YT_WARP_NEW=""
@@ -259,13 +260,62 @@ yt_probe_ip() {   # адрес [интерфейс]
 # молчали напрямую: это блок на пути, и отказ только отправляет плеер искать запасной
 # сервер, а это его собственные секунды. С WARP он остаётся на своём сервере. Только сети
 # Google: кэш оператора снаружи не виден.
-# Порядок: сперва фоновая проба через warp0 (в основном цикле ждать нельзя), потом отбой,
-# потом маршрут и закрытие соединений. Отказ раньше маршрута отправил бы плеер искать
-# запасной сервер, и всё зря. Итог живёт как запись отбоя (YT_DEAD_TTL). Без su -g проба
-# ушла бы в AdGuard, и её итогу верить нельзя — тогда обычный отказ
+# Порядок: отбой сразу, проба через warp0 в фоне (в основном цикле ждать нельзя), ответил —
+# маршрут, и следующие соединения к адресу идут через WARP. Раньше отбой ждал пробу, чтобы
+# плеер не ушёл на запасной сервер «зря», — это ~9 с до сброса (две очереди круга + проба
+# до 3 с), а на шортсах плеер сам уходит с молчащего сервера за ~6 с (08.11). Итог живёт
+# как запись отбоя (YT_DEAD_TTL). Без su -g проба ушла бы в AdGuard, и её итогу верить
+# нельзя — тогда обычный отказ
 yt_warp_on() {
     [ "$YT_DEAD_WARP" = "1" ] && [ "$WARP_RT_ON" = "1" ] && [ "$DNSPROXY_SU_G" = "1" ] && \
-        { [ "$WARP_PHONE" = "1" ] || [ "$WARP_TETHER" = "1" ]; }
+        { [ "$WARP_PHONE" = "1" ] || [ "$WARP_TETHER" = "1" ]; } && yt_warp_fast
+}
+# Скорость WARP: видео в медленный туннель хуже отказа — с отказом плеер уходит на другой
+# сервер напрямую. 08.11 утром YOTA резала туннель до 2,4–2,5 Мбит/с (I1 с SNI Apple),
+# напрямую было 27–31, и видео, уведённое в WARP, тупило; ночью тот же туннель — 24–28.
+# Замер — 3 с загрузки через туннель, не чаще раза в YT_WARP_SPD_EVERY и только когда есть
+# кандидат в WARP (yt_warp_on из отбоя мёртвых) или видеосерверы уже ведутся туда
+# (yt_warp_sync), а не каждый круг.
+# Цикл не ждёт: пока замер идёт, решает прежний итог (первый раз — «быстрый»)
+# 10.11 днём YOTA: стойки 74.125.104.192/28 и .224/28 закрыты по адресу, через WARP отвечают,
+# а замер 3 с давал 2–3 Мбит/с (8 с — 5–18): при пороге 8 видео туда не шло, шортсы тупили.
+# Шортсам хватает 3–5 Мбит/с; от 2,5 Мбит/с туннеля (08.11 утро) порог 5 по-прежнему отсекает
+YT_WARP_SPD_MIN=5          # Мбит/с: меньше — видеосерверы в WARP не ведём, отбиваем
+YT_WARP_SPD_EVERY=600      # сек между замерами
+YT_WARP_SPD="$YT_WARP_FILE.spd"   # "время Мбит/с конфиг"
+YT_WARP_SPD_PID=""; YT_WARP_SLOW=""
+yt_warp_fast() {
+    local t=0 m="" c="" s="" e="$YT_WARP_SPD_EVERY"
+    [ -f "$YT_WARP_SPD" ] && read -r t m c < "$YT_WARP_SPD"
+    case "$t$m" in *[!0-9]*|'') t=0; m="" ;; esac
+    # другой конфиг WARP — прежний замер не о нём
+    [ "$c" = "$WARP_CUR" ] || { t=0; m=""; }
+    # 0 — замер не удался, а не «медленный» (08.11 08:59: сразу после загрузки 0, а та же
+    # команда через минуту — 24–32): вердикт прежний, повтор через минуту. Если туннель
+    # и правда мёртв, адрес отсеет проба через WARP
+    [ "$m" = 0 ] && e=60
+    if [ $(( $(date +%s) - t )) -ge "$e" ]; then
+        yt_bg_alive "$YT_WARP_SPD_PID" || {
+            (
+                v=$(su -g "$DNSPROXY_GID" -c "$CURL_BIN -s -o /dev/null -m 3 --interface $WARP_IF -w '%{speed_download}' https://dl.google.com/android/repository/platform-tools-latest-windows.zip" 2>/dev/null)
+                echo "$(date +%s) $(echo "$v" | awk '{ x = $1 * 8 / 1e6; if ($1 > 0 && x < 1) x = 1; printf "%d", x }') $WARP_CUR" > "$YT_WARP_SPD.tmp"
+                mv -f "$YT_WARP_SPD.tmp" "$YT_WARP_SPD"
+            ) </dev/null >/dev/null 2>&1 &
+            YT_WARP_SPD_PID=$!
+        }
+    fi
+    [ -n "$m" ] && [ "$m" -lt "$YT_WARP_SPD_MIN" ] && s=1
+    [ "$m" = 0 ] && s="$YT_WARP_SLOW"
+    if [ "$s" != "$YT_WARP_SLOW" ]; then
+        # без замера (другой конфиг, ещё меряем) — молча: «снова ?» вводило в заблуждение
+        if [ -n "$s" ]; then
+            log "YouTube: WARP сейчас $m Мбит/с (меньше $YT_WARP_SPD_MIN) — видеосерверы туда не веду, отбиваю"
+        elif [ -n "$m" ]; then
+            log "YouTube: WARP снова $m Мбит/с — веду видеосерверы туда"
+        fi
+        YT_WARP_SLOW="$s"
+    fi
+    [ -z "$s" ]
 }
 yt_in_google() {
     awk -v ip="$1" 'BEGIN { split(ip, o, "."); n = ((o[1] * 256 + o[2]) * 256 + o[3]) * 256 + o[4] } $1 <= n && n <= $2 { f = 1; exit } END { exit !f }' "$YT_GRANGES" 2>/dev/null
@@ -321,10 +371,18 @@ yt_warp_poll() {   # now
 yt_warp_sync() {
     local n new=" "
     [ "$WARP_RT_ON" = "1" ] || { YT_WARP_SIG=""; return 0; }
-    [ "$YT_DEAD_WARP" = "1" ] && new=" $(awk -v wf="$YT_WARP_FILE" -v now="$(date +%s)" 'FILENAME == wf { if ($2 == "ok" && $3 > now) ok[$1] = 1; next } { c = split($3, a, ","); for (i = 1; i <= c; i++) if (a[i] in ok) { print $1; break } }' "$YT_WARP_FILE" "$YT_DEAD_FILE" 2>/dev/null | tr '\n' ' ')"
+    # видео уже ведётся в WARP — скорость туннеля держим свежей и без новых кандидатов:
+    # замедлился, а новых мёртвых нет — иначе адреса сидели бы в нём до конца записи (30 мин).
+    # Сам замер — не чаще раза в YT_WARP_SPD_EVERY (yt_warp_fast)
+    case "$YT_WARP_SIG" in *[0-9]*) [ "$YT_DEAD_WARP" = "1" ] && [ "$DNSPROXY_SU_G" = "1" ] && yt_warp_fast ;; esac
+    # WARP медленный (yt_warp_fast) — маршруты снимаем: новые соединения к этим адресам
+    # получат отказ и плеер уйдёт на другой сервер
+    [ "$YT_DEAD_WARP" = "1" ] && [ "$YT_WARP_SLOW" != 1 ] && new=" $(awk -v wf="$YT_WARP_FILE" -v now="$(date +%s)" 'FILENAME == wf { if ($2 == "ok" && $3 > now) ok[$1] = 1; next } { c = split($3, a, ","); for (i = 1; i <= c; i++) if (a[i] in ok) { print $1; break } }' "$YT_WARP_FILE" "$YT_DEAD_FILE" 2>/dev/null | tr '\n' ' ')"
     [ "$new" = "$YT_WARP_SIG" ] && return 0
     for n in $YT_WARP_SIG; do
-        case "$new" in *" $n "*) ;; *) $iptables -t mangle -D "$CHAIN_WARP_YT" -d "$n" -j "$CHAIN_WARP_SET" 2>/dev/null ;; esac
+        case "$new" in *" $n "*) ;; *) $iptables -t mangle -D "$CHAIN_WARP_YT" -d "$n" -j "$CHAIN_WARP_SET" 2>/dev/null
+            # из-за медленного WARP — и его соединения: по connmark они так и остались бы в нём
+            [ "$YT_WARP_SLOW" = 1 ] && ss -K -tn dst "$n" dport = :443 >/dev/null 2>&1 ;; esac
     done
     for n in $new; do
         case "$n" in *[!0-9./]*) continue ;; esac
@@ -342,9 +400,12 @@ yt_warp_sync() {
 yt_dead_add() {
     local dip="$1" who="$2" why="$3" now="$4" kill="${5:-1}" net n28 b sib keep t nlist ws=""
     case "$dip" in *[!0-9.]*|'') return 1 ;; esac
-    if yt_warp_on && yt_in_google "$dip"; then
+    # $6=nowarp — без пробы через WARP: отбой сразу (застрявшие, yt_dead_scan)
+    if [ "$6" != nowarp ] && yt_warp_on && yt_in_google "$dip"; then
         ws=$(yt_warp_state "$dip")
-        [ -n "$ws" ] || { yt_warp_ask "$dip" "$who" "$why" "$kill"; return 1; }
+        # итога WARP ещё нет — проба в фоне, а отбой не ждёт её (см. «Порядок» у yt_warp_on):
+        # ответит через WARP — yt_warp_poll запишет итог, маршрут поставит yt_warp_sync
+        [ -n "$ws" ] || yt_warp_ask "$dip" "$who" "$why" "$kill"
     fi
     b=${dip##*.}; b=$((b - b % 16))
     net="$dip/32"; n28="${dip%.*}.$b/28"
@@ -402,7 +463,8 @@ yt_dead_who() {
 # conntrack. ClientHello ушёл (>=600 байт), а от сервера дольше
 # YT_DEAD_AFTER — ни байта данных:
 #   пакетов от сервера >=2 — ClientHello он подтвердил, но молчит -> мёртв;
-#   1 (только SYN-ACK) — ClientHello не дошёл: это DPI, а не сервер -> сторожу.
+#   1 (только SYN-ACK) — ClientHello не подтверждён YT_STUCK_AFTER -> отбой сразу
+#   (без проверки) и сигнал сторожу.
 # QUIC с подделкой: ни одного ответа дольше YT_QUIC_AFTER -> проверка адреса, а если
 # и TCP с ним застрял — отбой сразу.
 # Молчит после запроса (только помеченные): от сервера было рукопожатие,
@@ -412,9 +474,37 @@ yt_dead_who() {
 # проверка не прошла; прошедшие 5 мин не проверяем снова.
 yt_dead_scan() {
     [ "$YT_DEAD_STATE" = "on" ] || return 0
-    local now out dip hit n t keep="" changed=0 sil res tag cnt b qo qh="" qsil="" qst
+    local now out dip hit n t keep="" changed=0 sil res tag cnt b qo qh="" qsil="" qst k sa da ds
     # не ip: локальная ip затирала бы $ip (/system/bin/ip) — адрес WAN ниже не узнавался
     now=$(date +%s)
+    # Пороги от RTT канала. 08.11, «медленный Wi-Fi» (netem: RTT ~380 мс, потери 4%): за 8 мин
+    # шортсов 42–44 отбоя, около половины — живые серверы (ответ на ClientHello или первый ответ
+    # не успевал за 2–3 с после одной потери). RTT — медиана активных HTTPS-сокетов телефона
+    # (ss, раз в 30 с; данные за последние 30 с; меньше 5 мс — локальные сокеты AdGuard).
+    # Порог — 12×RTT, но не меньше прежнего: на YOTA (~70–150 мс) как было, при 380 мс — 5 с.
+    # 8×RTT (4 с) убрал ложные «не подтвердил», но 9 из 21 «принял и молчит» были живыми:
+    # ClientHello разрезан, потеря части — сервер ждёт её повтора (RTO ~1,2 с, ещё раз — 2,4)
+    if [ $((now - YT_RTT_TS)) -ge 30 ]; then
+        YT_RTT_TS=$now
+        YT_RTT_MS=$(ss -tin state established '( dport = :443 )' 2>/dev/null | awk '
+            { r = ""; l = 999999
+              for (i = 1; i <= NF; i++) { if ($i ~ /^rtt:/) { split(substr($i, 5), a, "/"); r = a[1] } else if ($i ~ /^lastrcv:/) l = substr($i, 9) + 0 }
+              if (r != "" && r + 0 >= 5 && l <= 30000) print int(r) }' | sort -n | awk '{ v[NR] = $1 } END { if (NR >= 3) print v[int((NR + 1) / 2)] }')
+    fi
+    k=0; [ -n "$YT_RTT_MS" ] && k=$(( (12 * YT_RTT_MS + 999) / 1000 ))
+    sa=$YT_STUCK_AFTER; [ "$k" -gt "$sa" ] && sa=$k
+    da=$YT_DEAD_AFTER; [ "$k" -gt "$da" ] && da=$k
+    # в журнал — только смена «обычные / поднятые», и не чаще раза в 10 мин: RTT около
+    # границы (~170 мс) двигал порог каждые 30 с (под netem — 7 строк за 8 мин)
+    if [ "$sa" -gt "$YT_STUCK_AFTER" ]; then k=up; else k=base; fi
+    if [ "$k" != "${YT_SA_LAST:-base}" ] && [ $((now - YT_RTT_LOG_TS)) -ge 600 ]; then
+        if [ "$k" = up ]; then
+            log "YouTube: RTT соединений ${YT_RTT_MS} мс — отбой ждёт ответа сервера ${sa} с (ClientHello) и ${da} с (данные), обычно ${YT_STUCK_AFTER} и ${YT_DEAD_AFTER}"
+        else
+            log "YouTube: RTT соединений ${YT_RTT_MS:-?} мс — пороги отбоя обычные (${YT_STUCK_AFTER} и ${YT_DEAD_AFTER} с)"
+        fi
+        YT_SA_LAST=$k; YT_RTT_LOG_TS=$now
+    fi
     if [ -s "$YT_DEAD_FILE" ]; then
         n=$(awk 'END {print NR}' "$YT_DEAD_FILE")
         awk -v now="$now" '$2 > now' "$YT_DEAD_FILE" > "$YT_DEAD_FILE.tmp" 2>/dev/null && mv -f "$YT_DEAD_FILE.tmp" "$YT_DEAD_FILE"
@@ -430,7 +520,7 @@ yt_dead_scan() {
     [ -n "$wip" ] || wip=$($ip -4 addr show "$LAST_WAN_IFACE" 2>/dev/null | awk '/inet / {sub(/\/.*/, "", $2); print $2; exit}')
     # IPv6-only сеть с CLAT: IPv4 у v4-<WAN>, иначе запасной поиск выключен
     [ -n "$wip" ] || wip=$($ip -4 addr show "v4-$LAST_WAN_IFACE" 2>/dev/null | awk '/inet / {sub(/\/.*/, "", $2); print $2; exit}')
-    out=$($CONNTRACK_BIN -L -p tcp --dport 443 2>/dev/null | awk -v now="$now" -v after="$YT_DEAD_AFTER" -v safter="$YT_SILENT_AFTER" -v smax="$YT_SILENT_MAX" -v sf="$YT_SEEN_FILE" -v gr="$YT_GRANGES" -v wip="$wip" '
+    out=$($CONNTRACK_BIN -L -p tcp --dport 443 2>/dev/null | awk -v now="$now" -v after="$da" -v sa="$sa" -v safter="$YT_SILENT_AFTER" -v smax="$YT_SILENT_MAX" -v sf="$YT_SEEN_FILE" -v gr="$YT_GRANGES" -v wip="$wip" '
         FILENAME == gr { gs[++ng] = $1; ge[ng] = $2; next }
         FILENAME == sf { seen[$1] = $2; rep[$1] = $4; sbr[$1] = $5; stb[$1] = $6; next }
         / ESTABLISHED / {
@@ -467,6 +557,10 @@ yt_dead_scan() {
             k = src ":" sp ">" dst
             t0 = (k in seen) ? seen[k] : now
             d = (k in rep) ? rep[k] : 0
+            # видео идёт: сумма байт от видеосерверов (больше рукопожатия) — для отбоя
+            # застрявших; шелл сравнит с прошлым кругом: важен прирост, а не накопленное
+            # за жизнь соединения (старое простаивающее держало бы «видео идёт» вечно)
+            if (yt && br > smax && br > 80 * pr) dsum += br
             # молчит после запроса: данные от сервера были (рукопожатие), но
             # мало, и safter ни байта нового -> кандидат на проверку (каждый
             # раз: повторы отсекают отбой и «живой» на 5 мин у демона)
@@ -495,12 +589,20 @@ yt_dead_scan() {
             # на 172.217.133.234 / 173.194.188.42 (TLS нет и с www.google.com):
             # от сервера 1 пакет, ClientHello переотправлен 14 раз
             if (kind == "stuck" && gv && !yt) kind = "dead"
-            # застрявшие (сигнал сторожу) — только точно googlevideo.com
+            # застрявшие (отбой и сигнал сторожу) — только точно googlevideo.com
             if (kind == "stuck" && !yt) next
-            if (now - t0 >= after && d == 0) { print "HIT", kind, dst, tag; d = 1 }
+            # и не в WARP (connmark WARP_MARK 0x20000000): там застревает туннель, а не
+            # стойка — отбой с ss -K порвал бы живое видео через WARP к тому же серверу
+            if (kind == "stuck" && int(mk / 536870912) % 2 == 1) next
+            # застрявшему свой срок, короче: ответ на ClientHello — 0,1–0,5 с.
+            # Раздача (src не телефон) — +2 с: Wi-Fi до клиента в RTT телефона (ss) не виден,
+            # а отсчёт идёт от появления соединения, ClientHello клиента сам может опоздать
+            lim = (kind == "stuck") ? sa : after
+            if (src != wip) lim += 2
+            if (now - t0 >= lim && d == 0) { print "HIT", kind, dst, tag; d = 1 }
             ns[k] = t0 " " kind " " d " " br " " now
         }
-        END { for (k in ns) print k, ns[k] > (sf ".new") }
+        END { for (k in ns) print k, ns[k] > (sf ".new"); printf "DATA %.0f\n", dsum }
     ' "$YT_GRANGES" "$YT_SEEN_FILE" - 2>/dev/null)
     if [ -f "$YT_SEEN_FILE.new" ]; then mv -f "$YT_SEEN_FILE.new" "$YT_SEEN_FILE"; else : > "$YT_SEEN_FILE"; fi
 
@@ -517,8 +619,27 @@ $dip playch"*) ;; *) YT_PLAY_PEND="$YT_PLAY_PEND$dip playch
 " ;; esac
             continue
         fi
-        yt_dead_add "$dip" "$(yt_dead_who "$tag")" "принял ClientHello и молчит ${YT_DEAD_AFTER}с" "$now" && changed=1
+        yt_dead_add "$dip" "$(yt_dead_who "$tag")" "принял ClientHello и молчит ${da}с" "$now" && changed=1
     done
+    # Застрял (от сервера только SYN-ACK, ClientHello не подтверждён) — отбой сразу, без
+    # проверки адреса и без WARP. Раньше — только сигнал сторожу: плеер ждал свой тайм-аут
+    # (~30 с у обычных роликов, 08.11 ночью старт 34,5–35,6 с у 10 из 23). Проверка с
+    # WARP (yt-stalls, 08.11) отбивала за 6–10 с, а на шортсах плеер сам уходит с такого
+    # сервера за ~6 с: днём 13 из 18 медленных стартов — это ожидание отбоя. Такие стойки
+    # молчат и с www.google.com, и под обходом zapret2 (08.11: 41–44 из 44 на свежих
+    # адресах) — проверка ничего не добавляет, а прямой TLS в закрытый узел виден ТСПУ.
+    # Если режут имя на живом адресе — отбой снимет перепроверка, лавину — YT_DEAD_ADDS.
+    # Только пока видео где-то идёт (данные от видеосервера за последнюю минуту): застряло
+    # всё подряд — это сломанная стратегия (новая сеть, ТСПУ сменил правила), а не стойки;
+    # тогда только сторож, иначе до 11 живых адресов в минуту ушли бы в отбой (ревью 08.11)
+    ds=$(printf '%s\n' "$out" | sed -n 's/^DATA //p')
+    [ "${ds:-0}" -gt "$YT_DATA_SUM" ] && YT_DATA_TS=$now
+    YT_DATA_SUM=${ds:-0}
+    if [ $((now - YT_DATA_TS)) -le 60 ]; then
+        for dip in $(printf '%s\n' "$out" | awk '$1 == "HIT" && $2 == "stuck" && !s[$3]++ {print $3}'); do
+            yt_dead_add "$dip" "$(yt_dead_who yt)" "не подтвердил ClientHello ${sa}с" "$now" 1 nowarp && changed=1
+        done
+    fi
 
     # QUIC с подделкой (помечен в quic_block_apply): Initial ушёл, а за YT_QUIC_AFTER ни
     # одного ответа. 06.11, шортсы на YOTA: 74.125.104.166 и .168 — по QUIC 13 пакетов без
@@ -670,7 +791,7 @@ $dip playch"*) ;; *) YT_PLAY_PEND="$YT_PLAY_PEND$dip playch
     done
 }
 
-# Раз в ~минуту: отбитые (старше минуты) перепроверяются в фоне — TLS-рукопожатие
+# Раз в YT_RECHECK_EVERY: отбитые (старше минуты) перепроверяются в фоне — TLS-рукопожатие
 # с нейтральным именем (www.google.com) мимо обхода и AdGuard (группа dnsproxy):
 # жив ли сам адрес. Ожил (у подсети — хоть один из её адресов) — отбой снимаем,
 # не дожидаясь срока. Результат забираем на следующем вызове: цикл не ждёт curl.
@@ -692,9 +813,15 @@ yt_dead_recheck() {
     [ -s "$YT_DEAD_FILE" ] && [ -n "$LAST_WAN_IFACE" ] || return 0
     yt_bg_alive "$YT_RECHECK_PID" && return 0
     now=$(date +%s)
+    # новый круг — раз в YT_RECHECK_EVERY, а не каждую минуту: каждый отбитый адрес —
+    # прямой TLS в закрытый узел мимо обхода, 08.11 днём 10–15 таких в минуту; итоги
+    # прошлого круга выше забираются как раньше, на каждом вызове
+    [ $((now - YT_RECHECK_TS)) -ge "$YT_RECHECK_EVERY" ] || return 0
     # только добавленные больше минуты назад (свежие проверять рано)
     awk -v now="$now" -v ttl="$YT_DEAD_TTL" '$2 - ttl + 60 <= now' "$YT_DEAD_FILE" > "$YT_RECHECK_FILE.in" 2>/dev/null
     [ -s "$YT_RECHECK_FILE.in" ] || return 0
+    # метка — только когда круг правда начат: иначе свежий отбой ждал первой проверки до ~6 мин
+    YT_RECHECK_TS=$now
     # записи — по 4 одновременно: мёртвый адрес занимает весь тайм-аут (3 с),
     # и с YT_DEAD_MAX=64 круг по одной тянулся до ~3 мин, ожившие ждали
     # снятия отбоя столько же; адреса внутри записи — по очереди, как раньше

@@ -66,7 +66,7 @@ CONF=/data/adb/vpn_tether.conf
 if [ ! -f "$CONF" ]; then
     cat > "$CONF" <<'EOF'
 # ============================================================
-#  Настройки VPN Tethering Ultra
+#  Настройки VPN Tether
 #  Применяются после перезагрузки телефона.
 #  Файл переживает обновления модуля.
 #  Строка с # в начале — выключена (действует значение
@@ -130,8 +130,8 @@ else
     rm -f "$CONF.tmp"
 fi
 ui_print " "
-ui_print "VPN Tethering Ultra — что дальше:"
-ui_print "- Настройки: значок модуля в KernelSU/APatch, в Magisk — приложение WebUI X"
+ui_print "VPN Tether — что дальше:"
+ui_print "- Настройки: значок модуля в KernelSU/APatch, в Magisk — приложение VPN Tether (APK в релизе на GitHub)"
 ui_print "- Кнопка Action: переключить раздачу VPN / напрямую"
 ui_print "- Сайты не открываются: вкладка Обход, подбор стратегии"
 ui_print "- Telegram и то, что обход не берёт: вкладка «Выходы», WARP"

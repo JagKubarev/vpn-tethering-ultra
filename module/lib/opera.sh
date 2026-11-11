@@ -32,6 +32,7 @@ OPERA_CA="/data/local/tmp/vpn_tether_op_ca.pem"
 OPERA_API_FILE="/data/adb/vpn_tether_op_api.txt"   # удачные прокси API: запасной список, если ссылка не скачалась
 OPERA_API_URL="https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt"
 OPERA_DQ_DIR="/data/adb/vpn_tether_op_dq"
+OPERA_EP_FILE="/data/adb/vpn_tether_op_ep"        # «регион адрес:порт» — на чём Opera последний раз работала
 CHAIN_OPERA_IN="VPN_OPERA_IN"     # mangle PREROUTING
 CHAIN_OPERA_OUT="VPN_OPERA_OUT"   # mangle OUTPUT
 CHAIN_OPERA_TP="VPN_OPERA_TP"     # адреса сайтов -> TPROXY
@@ -42,6 +43,10 @@ CHAIN_OPERA_V6F="VPN_OPERA_V6F"   # ip6 FORWARD: то же для раздачи
 OPERA_DOM_SECS=600
 OPERA_STATE="off"       # off | starting | on | fail
 OPERA_ENDPOINT=""       # сервер Opera, выбранный opera-proxy
+OPERA_CUR_COUNTRY=""    # регион этого запуска: OPERA_COUNTRY или запасной
+OPERA_COLO=""           # где выход: площадка Cloudflare (colo=) и страна (loc=) из trace через прокси
+OPERA_LOC=""
+OPERA_WHERE_N=0         # попыток узнать выход за этот запуск (не больше 3: trace может не отвечать)
 OPERA_ERR=""            # почему fail
 OPERA_OWN=0             # этот запуск идёт через свой прокси (OPERA_API_PROXY)
 OPERA_OWN_BAD=0         # свой прокси не ответил: до смены сети или выключения — бесплатный список
@@ -54,6 +59,8 @@ OPERA_TICK=0
 OPERA_SU_G=""           # "" = не проверяли, 1 = su -g работает, 0 = нет
 OPERA_NOSUPPORT=0       # 1 = ядро без TPROXY или нет бинарей: не пытаться до перечитывания
 OPERA_WAN=""
+OPERA_NONET=0           # 1 = сети не было на прошлом круге
+OPERA_NONET_TS=0        # когда для Opera началось «нет сети» (отсчёт 15 с)
 OPERA_DOM_TS=0
 OPERA_DOM_IPS=""
 OPERA_DOM_LAST=""
@@ -126,8 +133,24 @@ opera_exempt_down() {
     while [ $_n -lt 8 ] && $iptables -t nat -D OUTPUT -m owner --gid-owner "$OPERA_GID" -j RETURN 2>/dev/null; do _n=$((_n + 1)); done
 }
 
+# Последний рабочий сервер региона, если он сейчас отвечает по TLS (407 — прокси без
+# пароля, то есть адрес открыт). Закрытый ТСПУ не соединяется вовсе — тогда пусто
+opera_saved_ep() {   # регион
+    local ep code
+    ep=$(sed -n "s/^$1 //p" "$OPERA_EP_FILE" 2>/dev/null | head -n 1)
+    case "$ep" in *[0-9].[0-9]*:[0-9]*) ;; *) return 1 ;; esac
+    [ -n "$CURL_BIN" ] || return 1
+    if [ "$OPERA_SU_G" = "1" ]; then
+        code=$(su -g "$OPERA_GID" -c "$CURL_BIN -sk -o /dev/null -m 4 -w %{http_code} https://$ep/" 2>/dev/null)
+    else
+        code=$($CURL_BIN -sk -o /dev/null -m 4 -w %{http_code} "https://$ep/" 2>/dev/null)
+    fi
+    [ -n "$code" ] && [ "$code" != "000" ] || return 1
+    echo "$ep"
+}
+
 opera_start() {
-    local args
+    local args cc="$OPERA_COUNTRY" ovr="" how=""
     _opera_kill $(opera_proxy_pids)
     if [ -z "$OPERA_SU_G" ]; then
         OPERA_SU_G=0
@@ -136,11 +159,28 @@ opera_start() {
     fi
     opera_exempt
     opera_ca_build || log "WARNING: opera: системные сертификаты не найдены"
-    args="-bind-address 127.0.0.1:$OPERA_PORT -socks-mode -country $OPERA_COUNTRY -verbosity 20 -cafile $OPERA_CA"
+    # Неудачи подряд: API отдаёт случайный набор серверов, и бывает, что все они закрыты
+    # (08.11 вечером с YOTA и с домашнего Wi-Fi закрыты 77.111.244.209/.210/.37, 247.25/.79/.80,
+    # открыт 247.34; при смене сети API выдал 247.34 — и Opera заработала и на YOTA).
+    # 1-я и 2-я попытки — как обычно, 3-я — последний рабочий сервер региона (если отвечает),
+    # 4-я и 5-я — запасные регионы (Азия и Америка 08.11 были открыты), дальше по кругу
+    case $((OPERA_FAILS % 5)) in
+        2) ovr=$(opera_saved_ep "$OPERA_COUNTRY") && how=" (последний рабочий сервер ${ovr%:*})" ;;
+        3|4)
+            case "$OPERA_COUNTRY" in AS) set -- EU AM ;; AM) set -- EU AS ;; *) set -- AS AM ;; esac
+            [ $((OPERA_FAILS % 5)) = 3 ] && cc="$1" || cc="$2"
+            # без case внутри $(…): «)» шаблона в подстановке старые шеллы путают
+            case "$cc" in EU) how="Европа" ;; AS) how="Азия" ;; *) how="Америка" ;; esac
+            how=" (запасной регион $how)" ;;
+    esac
+    OPERA_CUR_COUNTRY="$cc"
+    args="-bind-address 127.0.0.1:$OPERA_PORT -socks-mode -country $cc -verbosity 20 -cafile $OPERA_CA"
     args="$args -server-selection fastest -server-selection-timeout 3s -server-selection-test-url http://www.example.com/"
     # discover за раз часто отдаёт 2–4 сервера, иногда только мёртвые 77.111.247.79/.80
     # (07.11: 1 запуск из 3); три запроса вместе — 5–6 серверов, +1 с к старту
     args="$args -api-address api2.sec-tunnel.com -discover-repeat 3"
+    # API нужен и тут (логин), но сервер — наш, без выбора среди выданных
+    [ -n "$ovr" ] && args="$args -override-proxy-address $ovr"
     OPERA_OWN=0
     if [ -n "$OPERA_API_PROXY" ] && [ "$OPERA_OWN_BAD" != "1" ]; then
         # свой прокси вместо списка; в журнал адрес не пишем: в нём может быть пароль
@@ -160,8 +200,9 @@ opera_start() {
     OPERA_START_TS=$(date +%s)
     OPERA_STATE="starting"
     OPERA_ENDPOINT=""
+    OPERA_COLO=""; OPERA_LOC=""; OPERA_WHERE_N=0
     OPERA_ERR=""
-    log "opera: запускаю opera-proxy"
+    log "opera: запускаю opera-proxy$how"
     phone_status_refresh
 }
 
@@ -174,7 +215,13 @@ opera_started() {
             mv -f "$OPERA_API_FILE.tmp" "$OPERA_API_FILE"
         chmod 600 "$OPERA_API_FILE" 2>/dev/null
     fi
-    OPERA_ENDPOINT=$(sed -n 's/.*Selected endpoint address: \([^ ]*\).*/\1/p' "$OPERA_LOG" 2>/dev/null | tail -n 1)
+    OPERA_ENDPOINT=$(sed -n 's/.*Selected endpoint address: \([^ ]*\).*/\1/p; s/.*Endpoint override: \([^ ]*\).*/\1/p' "$OPERA_LOG" 2>/dev/null | tail -n 1)
+    # запомнить рабочий сервер региона — для подстановки, когда API выдаст одни закрытые
+    if [ -n "$OPERA_ENDPOINT" ]; then
+        # «|| :» — grep без строк (или без файла) не должен отменять mv
+        { echo "$OPERA_CUR_COUNTRY $OPERA_ENDPOINT"; grep -v "^$OPERA_CUR_COUNTRY " "$OPERA_EP_FILE" 2>/dev/null || :; } > "$OPERA_EP_FILE.tmp" && \
+            mv -f "$OPERA_EP_FILE.tmp" "$OPERA_EP_FILE"
+    fi
     OPERA_WAN="$LAST_WAN_IFACE"
     OPERA_FAILS=0; OPERA_BAD=0
     log "opera: готов за $(( $(date +%s) - OPERA_START_TS )) с (сервер ${OPERA_ENDPOINT:-?}${c:+, API через $c}$([ "$OPERA_OWN" = "1" ] && echo ', API через свой прокси'))"
@@ -436,6 +483,24 @@ opera_probe() {
     [ -n "$code" ] && [ "$code" != "000" ]
 }
 
+# Где выход Opera: trace Cloudflare через её прокси (как площадка у WARP). Один раз после
+# запуска и при проверках, пока не узнали, но не больше 3 раз: каждая попытка держит цикл
+# демона до 6 с, а trace через Opera может и не отвечать. Не узнали — просто без подписи
+opera_where() {
+    local g="sh -c" out
+    [ -n "$CURL_BIN" ] && [ "$OPERA_WHERE_N" -lt 3 ] || return 0
+    OPERA_WHERE_N=$((OPERA_WHERE_N + 1))
+    [ "$OPERA_SU_G" = "1" ] && g="su -g $OPERA_GID -c"
+    # -k, как у WARP (warp_probe): нужна только площадка, а корня сертификата 1.1.1.1 нет в
+    # хранилище Android 8 (09.11 MT6580: «unable to get local issuer certificate», выход пустой)
+    out=$($g "$CURL_BIN -s -k -m 6 --socks5-hostname 127.0.0.1:$OPERA_PORT https://1.1.1.1/cdn-cgi/trace" 2>/dev/null)
+    OPERA_COLO=$(echo "$out" | sed -n 's/^colo=\([A-Z]*\).*/\1/p' | head -n 1)
+    OPERA_LOC=$(echo "$out" | sed -n 's/^loc=\([A-Z]*\).*/\1/p' | head -n 1)
+    [ -n "$OPERA_COLO$OPERA_LOC" ] || return 0
+    log "opera: выход ${OPERA_LOC:-?} (площадка Cloudflare ${OPERA_COLO:-?})"
+    phone_status_refresh
+}
+
 opera_fail() {   # причина
     local p
     opera_rules_off
@@ -449,27 +514,29 @@ opera_fail() {   # причина
     OPERA_STATE="fail"
     OPERA_ERR="$1"
     OPERA_ENDPOINT=""
+    OPERA_COLO=""; OPERA_LOC=""
     log "WARNING: opera: $1 — сайты напрямую, повтор через ~$((p * 2)) с"
     phone_status_refresh
 }
 
-opera_down() {   # [quiet]
+opera_down() {   # [quiet | nonet — тихо и с адресами сайтов: после обрыва сеть та же]
     opera_rules_off
     _opera_kill $(opera_hev_pids)
     _opera_kill $(opera_proxy_pids)
     opera_exempt_down
-    [ "$OPERA_STATE" != "off" ] && [ "$1" != "quiet" ] && log "opera: выключен"
+    [ "$OPERA_STATE" != "off" ] && [ -z "$1" ] && log "opera: выключен"
     OPERA_STATE="off"
     OPERA_ENDPOINT=""
+    OPERA_CUR_COUNTRY=""
+    OPERA_COLO=""; OPERA_LOC=""
     OPERA_ERR=""
     OPERA_RETRY=0
     OPERA_FAILS=0
     OPERA_BAD=0
     OPERA_OWN_BAD=0
-    OPERA_DOM_TS=0
-    OPERA_DOM_IPS=""
-    OPERA_DOM_LAST=""
-    OPERA_DOM_FLAST=""
+    if [ "$1" != "nonet" ]; then
+        OPERA_DOM_TS=0; OPERA_DOM_IPS=""; OPERA_DOM_LAST=""; OPERA_DOM_FLAST=""
+    fi
     phone_status_refresh
 }
 
@@ -496,6 +563,26 @@ opera_reconcile() {
         log "WARNING: opera: $OPERA_ERR"; phone_status_refresh
         return 0
     fi
+    # Нет сети — не запускаем и не проверяем. 09.11 на машине за минуту без сети было три
+    # пустых старта, третий уже ушёл в запасной регион. Работающий прокси держим 15 с:
+    # в метро сеть моргает на 1–3 с, а новый старт — 6–10 с без сайтов из списка. Дольше —
+    # снимаем (неудачи без сети не в счёт), адреса сайтов оставляем: сеть вернётся та же
+    # Поднят VPN — не «нет сети»: get_wan_iface при VPN на Wi-Fi часто не находит аплинк (09.11
+    # MT6580: «WAN пропал», через 15 с Opera снята). Как до 024be44: процесс живёт всю сессию VPN
+    # (правила сняты ниже, want=0) и сразу готов после неё
+    if wan_gone && ! vpn_up_now; then
+        # отсчёт — свой, не от «WAN пропал»: при VPN WAN «пропадает» на всю сессию, и после
+        # выключения VPN Opera снималась сразу (09.11 MT6580, 22:23:15 — за 2 с до «WAN вернулся»)
+        [ "$OPERA_NONET" = "1" ] || { OPERA_NONET=1; OPERA_NONET_TS=$(date +%s); }
+        case "$OPERA_STATE" in
+            off) ;;
+            on) [ $(( $(date +%s) - OPERA_NONET_TS )) -ge 15 ] && { opera_down nonet; log "opera: остановлен (нет сети)"; } ;;
+            *) opera_down nonet ;;
+        esac
+        return 0
+    fi
+    # сеть вернулась, прокси жив — проверить сразу
+    [ "$OPERA_NONET" = "1" ] && { OPERA_NONET=0; OPERA_TICK=15; }
     # появление VPN снимает перенаправление сразу, без второго замера
     [ "$PHONE_VPN_STABLE" = "0" ] && [ "$PHONE_VPN_SEEN" = "0" ] && want=1
     # первые 3 минуты после старта — каждый круг: AdGuard встаёт позже и ставит свой
@@ -532,7 +619,8 @@ opera_reconcile() {
             opera_hev_start || { opera_fail "hev-socks5-tproxy не запустился: $OPERA_HEV_WHY"; return 0; }
             OPERA_STATE="on"
             OPERA_TICK=0
-            phone_status_refresh ;;
+            phone_status_refresh
+            opera_where ;;
         on)
             [ -n "$(opera_proxy_pids)" ] || { opera_fail "opera-proxy завершился"; return 0; }
             if [ -z "$(opera_hev_pids)" ]; then
@@ -552,6 +640,7 @@ opera_reconcile() {
         if [ "$want" = "1" ]; then
             if opera_probe; then
                 OPERA_BAD=0
+                [ -n "$OPERA_COLO$OPERA_LOC" ] || opera_where
             else
                 OPERA_BAD=$((OPERA_BAD + 1))
                 [ "$OPERA_BAD" -ge 3 ] && { opera_fail "прокси не отвечает"; return 0; }

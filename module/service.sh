@@ -636,6 +636,14 @@
 #   WebUI: «Новый адрес» и волна и без раздачи.
 # v3.25.2 — детект чужой NFQUEUE в mangle (nfqttl и подобные забирают весь трафик): журнал,
 #   nfq_rivals в статусе, «Мешает модуль» на Главной.
+# v3.26.0 — YouTube: застрявшие видеосерверы отбиваются сразу, пороги от RTT, окно nfqws 1:20,
+#   видео в WARP от 5 Мбит/с; WARP: I1 с apteka.ru, первые конфиги — повтор через 30 с;
+#   DNS: запасной DoH — первый живой, MagicDNS, WhatsApp через Meta, DoH через обход
+#   (DNS_VIA_ZAPRET), DNS телефона без su -g — мимо dnsproxy только его серверы;
+#   Opera: последний рабочий сервер, площадка выхода, без сети не стартует; при VPN держится;
+#   обход: пресеты badseq/seqovl — сдвиг только ack; сторож не меняет стратегию при
+#   нестабильной сети; Android 8/9: адреса через dnsproxy, busybox awk; WebUI: тема, списки
+#   «Обхода» заново при раскрытии блока, автосписок «телефон/раздача» по прежним адресам; имя модуля — «VPN Tether».
 # ============================================================================
 # ============================================================================
 
@@ -703,15 +711,25 @@ DNS_UPSTREAMS="https://not-a-dns.quic.best/dns-query"
 # Был dagami (23.10 первым — not-a-dns тогда отвечал 1-2.6с),
 # 30.10 мёртв: «Couldn't connect» напрямую, тишина через WARP, у dnsproxy
 # SERVFAIL — после него DNS уходил к оператору. comss — последним: Gemini через
-# него уже нет; commonnet — самым последним (30.10: прокси ChatGPT/Claude,
-# Gemini — Google /sorry, другой владелец). Google/Cloudflare убраны (3.17):
+# него уже нет; commonnet был самым последним (30.10: прокси ChatGPT/Claude,
+# Gemini — Google /sorry, другой владелец; 08.11 убран — сервер лежит). Google/Cloudflare убраны (3.17):
 # гео-блок не обходят, а dnsproxy при задержке основного (> --timeout)
 # опрашивает запасные разом и берёт самый быстрый ответ — им мог оказаться
 # Google с настоящими адресами ChatGPT/Claude/Gemini, и тот сидел в кэше
 # (25.10: «регион недоступен» на ноуте, переподключение Wi-Fi не помогало;
 # причина вероятная, в логе не поймана). Молчат
 # все — модуль и так уводит DNS к оператору (проверка dns_health).
-DNS_FALLBACKS="https://dns.wlrus.cfd/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.commonnet.work/dns-query"
+# dns.zapret.moe — в конец (08.11: напрямую с YOTA снова отвечает, 03.11 был закрыт по
+# адресу; прокси 5.129.221.64 для всех трёх ИИ, Gemini и ChatGPT через него — 200 за ~2 с).
+# us.geohide.ru и dns.malw.link не добавлены: сами отвечают, но их прокси с YOTA молчат —
+# хуже мёртвого. commonnet убран (08.11: 94.181.44.39 не принимает TCP ни напрямую, ни через WARP)
+# MagicDNS — вторым (08.11 вечер, YOTA: DoH 0,35–0,75 с напрямую; прокси 45.88.163.92 для
+# всех трёх ИИ напрямую с YOTA — Gemini 200 за 4,2 с, ChatGPT за 2,1 с, как not-a-dns; YouTube,
+# google.com, GitHub — настоящие адреса). Выше обоих GeoHide: те 08.11 не принимали TCP.
+# keyoneday не взят: через прокси и www.google.com, а прокси не докачивает страницу за 8 с
+# zapret.moe — третьим, сразу после MagicDNS (08.11 вечер: geohide и comss не отвечали
+# даже через WARP, zapret.moe — ~270 мс в соединении, прокси для всех трёх ИИ)
+DNS_FALLBACKS="https://dns.wlrus.cfd/dns-query https://api.magicdns.ru/dns-query https://dns.zapret.moe/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query"
 # Апстримы для DNS_VPN=doh (идут через туннель)
 DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Чем резолвить имена самих апстримов (dns.wlrus.cfd и т.д.). Подмена тут не
@@ -829,6 +847,12 @@ YT_DEAD_FAILFAST=1
 # на своём сервере и не ищет запасной. Нет WARP или адрес молчит и там — обычный отказ
 YT_DEAD_WARP=1
 YT_DEAD_AFTER=3         # сек без ответа сервера после ClientHello = мёртв (было 6; ответ на CH — 0,3–0,5 с)
+YT_STUCK_AFTER=2        # сек без подтверждения ClientHello (от сервера только SYN-ACK) = отбой сразу
+YT_RECHECK_EVERY=300    # сек между кругами перепроверки отбитых (было ~60: прямой TLS в закрытые узлы)
+YT_RECHECK_TS=0
+YT_RTT_TS=0; YT_RTT_MS=""; YT_SA_LAST=""; YT_RTT_LOG_TS=0   # RTT канала для порогов отбоя (yt_dead_scan)
+YT_DATA_TS=0            # когда в последний раз видеосервер слал данные (отбой застрявших — только при живом видео)
+YT_DATA_SUM=0           # байт от видеосерверов на прошлом круге (данные = прирост)
 YT_QUIC_AFTER=2         # сек без единого ответа на QUIC Initial (обычно 0.1–0.5 с, 06.11)
 YT_SILENT_AFTER=10      # сек без новых байт после рукопожатия = молчит (-> проверка)
 YT_DEAD_TTL=1800        # сек держать сервер/подсеть в отбое (ожил раньше — снимаем перепроверкой)
@@ -902,6 +926,16 @@ ZAPRET_PER_NET=1
 # VPN (замер: ECS Амстердама -> 57.144.x). Только там, где DNS и так идёт
 # через DoH без VPN: раздача напрямую (DNS_DIRECT=doh) и DNS телефона.
 DNS_META_EU=1           # по умолчанию с 3.3
+# DoH-серверы — через обход (zapret). Раньше dnsproxy всегда шёл мимо nfqws. 09.11 на YOTA
+# dns.zapret.moe резали по имени: напрямую 0/4, через обход — 6/6 за 0,22 с. При 1 nfqws
+# получает и соединения dnsproxy, а имена DoH из DNS_UPSTREAMS, DNS_FALLBACKS и
+# DNS_META_UPSTREAMS (и .ru: MagicDNS, GeoHide тоже могут резать) — своим профилем первым,
+# с постоянной стратегией md5sig (стратегия сети может DoH сломать: 09.11 — одна из 31).
+# DoH (https://, порт из URL, иначе 443) и DoT (tls://, 853); серверы по адресу и bootstrap DoH —
+# профилем по адресу. DoQ (quic://, UDP) — нет.
+# Запасные — тоже через обход: сломает стратегия DoH — DNS уйдёт к оператору (откат, раз в 30 с
+# проверка DoH), как при любом сбое DoH.
+DNS_VIA_ZAPRET=0
 DNS_META_ECS="185.15.56.0"                       # "откуда" спрашиваем (Амстердам, /24)
 DNS_META_UPSTREAMS="https://dns.google/dns-query" # должен учитывать ECS (Cloudflare — нет)
 # =====================================================================
@@ -948,7 +982,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     local key="$1" val="$2" ok=1
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
-        ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_QUIC_FAKE|QUIC_BLOCK_YT|QUIC_YT_FAKE|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
+        DNS_VIA_ZAPRET|ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_QUIC_FAKE|QUIC_BLOCK_YT|QUIC_YT_FAKE|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
         OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|YT_DEAD_WARP|ZAPRET_WATCHDOG|ZAPRET_AUTOPICK|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
@@ -1022,7 +1056,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS YT_GGC_BLOCK YT_DEAD_FAILFAST YT_DEAD_WARP ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS DNS_VIA_ZAPRET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_DEAD_WARP ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -1085,9 +1119,11 @@ zapret_strategy_args() {
     case "$st" in
         md5sig)   echo "--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@$g" ;;
         md5sig2)  echo "--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@$g" ;;
-        badseq)   echo "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=badseq --dpi-desync-fake-tls=@$g" ;;
+        # badseq и seqovl — только ack (seq не трогаем): 09.11 на YOTA со сдвигом seq (любым, и в паре
+        # с md5sig) facebook, rutracker, linkedin, medium, patreon не открывались 3 круга из 3, только ack — 10 из 10
+        badseq)   echo "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=0 --dpi-desync-fake-tls=@$g" ;;
         disorder) echo "--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld" ;;
-        seqovl)   echo "--dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=@$g --dpi-desync-fake-tls=@$g" ;;
+        seqovl)   echo "--dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=0 --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=@$g --dpi-desync-fake-tls=@$g" ;;
         custom)
             if [ -n "$za" ]; then
                 echo "$za" | sed "s#=@G#=@$g#g; s#=@Q#=@$1/quic_initial_www_google_com.bin#g"
@@ -1464,6 +1500,7 @@ DNS_ALT_LAST=0         # когда последний раз проверяли
 DNS_ALT_SINCE=0        # когда ушли на запасные
 DNS_ALT_OKS=0          # удачных проверок основного подряд
 DNS_ALT_TRIPS=""       # время уходов на запасные (за 30 мин) — признак "дёргается"
+DNS_ALT_SCAN_DEAD=0    # когда curl-проверка запасных не нашла живых (5 мин не повторяем)
 DNS_EXEMPT_TICK=0      # исключение AdGuard проверяем раз в ~10с
 DHCP_IFACES_CACHE=""   # ss -lun раз в ~6с (раздача и так видна по ip rule netd)
 DHCP_IFACES_TICK=0
@@ -1554,7 +1591,7 @@ trap 'cleanup_on_exit' TERM INT
 # Прошлый лог не затираем: после ребута он — единственный след того, что
 # случилось (20.10 так потеряли "iif netd|wlan2")
 [ -s "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null
-echo "=== VPN Tether v3.25.2 Started $(date) ===" > "$LOG_FILE"
+echo "=== VPN Tether v3.26.0 Started $(date) ===" > "$LOG_FILE"
 
 log "Daemon started with PID $$"
 # curl: системный, если есть, иначе свой из модуля (PATH — в конце, системный
@@ -1610,7 +1647,7 @@ dnsproxy_kill_strays
 warp_routes_off force      # туннель и его маршруты от убитого демона
 warp_down
 phone_dns_rules_off
-rm -f "$DNSPROXY_PID_FILE" /data/local/tmp/vpn_tether_probe.*
+rm -f "$DNSPROXY_PID_FILE" /data/local/tmp/vpn_tether_probe.* /data/local/tmp/vpn_tether_alt.*
 # /data/local/tmp переживает перезагрузку, а tun после неё часто с тем же
 # ifindex — старая метка срезала бы ретраи первого поиска таблицы (ревью PR #21)
 rm -f "$RT_MISS_FILE"

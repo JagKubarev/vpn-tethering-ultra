@@ -30,8 +30,9 @@ PATH="$PATH:$MODDIR/bin"; export PATH   # curl: нет системного — 
 BB=/data/adb/ksu/bin/busybox
 [ -x "$BB" ] || BB=/data/adb/magisk/busybox
 [ -x "$BB" ] || BB=/data/adb/ap/bin/busybox
-# в Android 8 нет awk (MT6580, 04.11): этот скрипт идёт под mksh, не под busybox
-command -v awk >/dev/null 2>&1 || awk() { "$BB" awk "$@"; }
+# в Android 8 нет awk (MT6580, 04.11): этот скрипт идёт под mksh, не под busybox. А awk 20121220
+# (Android 9, Redmi 4X, 09.11) падает (SIGSEGV) на любом унарном «!»: !s[$1]++, !/…/, exit !(…)
+( echo x | awk '!/y/' ) >/dev/null 2>&1 || awk() { "$BB" awk "$@"; }
 ZDIR="$MODDIR/zapret"
 OUT=/data/local/tmp/vpn_tether_zscan
 Q=203
@@ -215,7 +216,7 @@ event() {
 # трогают — иначе его новые соединения во время подбора резались/ломались
 # ядро без connbytes (zapret_caps демона): в очередь — все пакеты сканера,
 # ответы — тоже все, но только его соединений (connmark), трафика мало
-CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9"
+CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:20"   # как у демона (ZAPRET_CB_OUT)
 CB_IN="-m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3"
 grep -q '^cb=0' /data/local/tmp/vpn_tether_zcaps 2>/dev/null && { CB_OUT=""; CB_IN=""; }
 RULE="-o $WAN -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
@@ -388,9 +389,10 @@ st stage="узнаю адреса"
 SYSDNS=0
 [ "$MODE" = sites ] && grep -q '^phone_dns=1' "$MODDIR/status" 2>/dev/null && \
     grep -q '^dns_degraded=0' "$MODDIR/status" 2>/dev/null && SYSDNS=1
-# su -g не работает (DNSPROXY_SU_G=0): хук DNS телефона пропускает uid 0 мимо
-# dnsproxy — у ping (root) был бы DNS оператора, а не как у браузера
-[ "$SYSDNS" = 1 ] && $IPT -t nat -S VPN_PHONE_DNS 2>/dev/null | grep -q 'uid-owner 0 ' && SYSDNS=0
+# хук DNS телефона пропускает весь uid 0 мимо dnsproxy (DNSPROXY_SU_G=0 и обычный DNS по имени,
+# или так до 09.11) — у ping (root) был бы DNS оператора, а не как у браузера. Только правило
+# целиком: «-d адрес … --uid-owner 0 -j RETURN» (мимо — лишь серверы самого dnsproxy) не мешает
+[ "$SYSDNS" = 1 ] && $IPT -t nat -S VPN_PHONE_DNS 2>/dev/null | grep -qx -- '-A VPN_PHONE_DNS -m owner --uid-owner 0 -j RETURN' && SYSDNS=0
 resolve() { # resolve ПАРАЛЛЕЛЬНО ТАЙМАУТ
     local n=0 pids="" h
     for h in $SITES; do
@@ -839,6 +841,36 @@ if [ "$MODE" = "check" ]; then
     fi
     # волна могла начаться за эту минуту
     wave_google
+    # 10.11 06:10: сеть мигала (у демона «напрямую сети нет» 06:07–06:12), а сторож сменил
+    # рабочую стратегию YOTA. Вывод, не замер (результаты прогона перезаписаны): контрольные
+    # открывались через раз, поэтому не сработало «ничего не открылось». Перед заменой —
+    # 3 проверки через 5 с, первая неудачная — сеть нестабильна, через 15 мин заново.
+    # Проверка — хоть один контрольный по HTTP (порт 80 не закрывают): ya.ru любым ответом
+    # (Google бывает закрыт целиком — белые списки), Google — 204 (в волну по HTTP отвечает).
+    # Адреса — уже найденные ($TMP/ips): DoH мог упасть вместе со связью
+    net_alive() {
+        for _h in ya.ru www.google.com; do
+            _ip=$(awk -v h="$_h" '$1 == h { print $2; exit }' "$TMP/ips")
+            _u="http://$_h/"; [ "$_h" = www.google.com ] && _u="http://$_h/generate_204"
+            _c=$(curl -s -o /dev/null -m 5 --interface "$WAN" ${_ip:+--resolve $_h:80:$_ip} -w '%{http_code}' "$_u" 2>/dev/null)
+            case "$_h:$_c" in
+                ya.ru:|ya.ru:000) ;;
+                ya.ru:*|*:204) return 0 ;;
+            esac
+        done
+        return 1
+    }
+    _nf=0
+    for _i in 1 2 3; do
+        net_alive || { _nf=$_i; break; }
+        [ "$_i" = 3 ] || sleep 5
+    done
+    if [ "$_nf" -gt 0 ]; then
+        event "автопроверка: стратегия не открывает ($(last_fail)), но сеть нестабильна (контрольные по HTTP молчат, проверка $_nf из 3) — стратегию не трогаю"
+        wd_last "сеть нестабильна, отложил"
+        st state=done stage="готово" msg="сеть нестабильна — проверка отложена"
+        exit 0
+    fi
     # Без прямых запросов не видно, закрыт ли сайт вообще: в сети без блокировок сторож менял
     # бы стратегию зря. Спрашиваем напрямую только то, что не открылось, и не больше трёх имён
     _df=0; _do=0
@@ -988,9 +1020,10 @@ else
     run_strat "--dpi-desync=fake,hostfakesplit --dpi-desync-split-pos=host+1 --dpi-desync-hostfakesplit-midhost=midsld --dpi-desync-hostfakesplit-mod=host=www.google.com --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=sberbank.ru --dpi-desync-fooling=datanoack --dpi-desync-repeats=6 --dpi-desync-cutoff=n6" "3"
     run_strat "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=3,sld+1 --dpi-desync-split-seqovl=2 --dpi-desync-split-seqovl-pattern=@G --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=max.ru --dpi-desync-fooling=datanoack --dpi-desync-repeats=6 --dpi-desync-cutoff=n5" "3"
     run_strat "--dpi-desync=fake,multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1 --dpi-desync-fake-tls=@G --dpi-desync-fake-tls-mod=rnd,dupsid,sni=gosuslugi.ru --dpi-desync-fooling=datanoack --dpi-desync-cutoff=n5" "3"
-    # подставное имя в hostfakesplit — VK (есть во всех белых списках; фейки
-    # с ним — у magisk-zapret2)
-    run_strat "--dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=vk.com --dpi-desync-fooling=md5sig" "3"
+    # подставное имя в hostfakesplit — Max (есть в белых списках). Было vk.com (как у
+    # magisk-zapret2), но 10.11 на YOTA подделка с vk.com и rutube.ru держала видео на
+    # 2,5 Мбит/с во всех кругах (остальные имена 25–47): сайты открываются, видео ползёт
+    run_strat "--dpi-desync=hostfakesplit --dpi-desync-hostfakesplit-mod=host=max.ru --dpi-desync-fooling=md5sig" "3"
     # C2: разрез с наложением 1 байта (seqovl) — 21.10 YOTA: только он и
     # multidisorder с позиции 1 проходили с ClientHello Chrome/AdGuard
     st stage="3/4 разрез с наложением"

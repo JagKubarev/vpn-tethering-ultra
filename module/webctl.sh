@@ -63,6 +63,7 @@ DNSPROXY_PORT=5354
 ZLIST_USER=/data/adb/vpn_tether_zapret.txt
 ZLIST_AUTO=/data/adb/vpn_tether_zapret_auto.txt
 ZAUTO_LOG=/data/adb/vpn_tether_zapret_auto.log   # причины (nfqws --hostlist-auto-debug)
+ZAUTO_WHO=/data/adb/vpn_tether_zapret_auto.who   # «p адрес телефона» / «t сеть раздачи/маска» — чей клиент в журнале
 ZSCAN=/data/local/tmp/vpn_tether_zscan
 ZNETS=/data/adb/vpn_tether_zapret_nets
 ZHIST=/data/adb/vpn_tether_zapret_hist      # ключ|стратегия|аргументы|дата|заметка|аргументы_YouTube|аргументы_Discord — прежние стратегии сетей
@@ -72,8 +73,9 @@ ZSKIP=/data/adb/vpn_tether_zapret_altskip   # ключ|сайт|epoch — не �
 BB=/data/adb/ksu/bin/busybox
 [ -x "$BB" ] || BB=/data/adb/magisk/busybox
 [ -x "$BB" ] || BB=/data/adb/ap/bin/busybox
-# в Android 8 нет awk (MT6580, 04.11): этот скрипт идёт под mksh, не под busybox
-command -v awk >/dev/null 2>&1 || awk() { "$BB" awk "$@"; }
+# в Android 8 нет awk (MT6580, 04.11): этот скрипт идёт под mksh, не под busybox. А awk 20121220
+# (Android 9, Redmi 4X, 09.11) падает (SIGSEGV) на любом унарном «!»: !s[$1]++, !/…/, exit !(…)
+( echo x | awk '!/y/' ) >/dev/null 2>&1 || awk() { "$BB" awk "$@"; }
 
 # адрес через DoH. 1.1.1.1 в Android 8 не проходит проверку: корня SSL.com нет в
 # cacerts (MT6580, rc=60), тогда 8.8.8.8
@@ -114,7 +116,7 @@ zscan_busy() {
 warpgen_busy() { [ -n "$(find /data/local/tmp/vpn_tether_warpgen.lock -maxdepth 0 -mmin -3 2>/dev/null)" ]; }
 
 # ядро без connbytes (демон проверил, zapret_caps) — правило проверки без него
-CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9"
+CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:20"   # как у демона (ZAPRET_CB_OUT)
 grep -q '^cb=0' /data/local/tmp/vpn_tether_zcaps 2>/dev/null && CB_OUT=""
 
 # Текущая сеть: "<ключ>|<название>" (zapret/netid.sh по WAN из status)
@@ -206,7 +208,7 @@ case "$1" in
         # обхода. Импорт — в WebUI: файл -> форма -> «Применить»
         F=/storage/emulated/0/Download/vpn_tether_settings_$(date '+%Y%m%d_%H%M').conf
         {
-            echo "# VPN Tethering Ultra — настройки, $(date '+%d.%m.%Y %H:%M')"
+            echo "# VPN Tether — настройки, $(date '+%d.%m.%Y %H:%M')"
             sed -n 's/^version=/# модуль: /p' "$MODDIR/module.prop"
             echo "# Импорт: WebUI -> Сервис -> «Импорт». Чего нет в файле — вернётся к умолчанию."
             sh "$MODDIR/webctl.sh" conf | awk '
@@ -274,7 +276,7 @@ case "$1" in
         # в «Загрузках» (ответ «OK путь nosend»).
         F=/storage/emulated/0/Download/vpn_tether_logs_$(date '+%Y%m%d_%H%M').txt
         {
-            echo "=== VPN Tethering Ultra — логи для разбора, $(date '+%d.%m.%Y %H:%M:%S')"
+            echo "=== VPN Tether — логи для разбора, $(date '+%d.%m.%Y %H:%M:%S')"
             sed -n 's/^version=/модуль: /p' "$MODDIR/module.prop"
             echo "телефон: $(getprop ro.product.manufacturer) $(getprop ro.product.model), Android $(getprop ro.build.version.release), ядро $(uname -r)"
             echo; echo "=== состояние"; sed '1,2d' "$STATUS_FILE" 2>/dev/null
@@ -307,7 +309,7 @@ case "$1" in
         V=$(sed -n 's/^version=//p' "$MODDIR/module.prop"); T=$(date '+%d.%m.%Y %H:%M')
         if [ -n "$id" ] && su 2000 -c "am start -a android.intent.action.SEND -t text/plain -d '$U' \
                 --eu android.intent.extra.STREAM '$U' \
-                --es android.intent.extra.SUBJECT 'VPN Tethering Ultra $V: логи от $T' \
+                --es android.intent.extra.SUBJECT 'VPN Tether $V: логи от $T' \
                 -f 0x10000001" >/dev/null 2>&1; then
             echo "OK $F"
         else
@@ -411,6 +413,8 @@ case "$1" in
 
     clients)
         # Устройства в раздаче: "ip|mac|состояние|имя|соединений|байт|1=заблокировано|↓|↑".
+        # Последней строкой "T|мс от загрузки" — когда сняты счётчики: по нему WebUI считает
+        # скорость (время ответа ksu.exec плавает на 100–300 мс).
         # IP и MAC — ip neigh по интерфейсам раздачи; имя — из журнала DHCP
         # раздачи (dumpsys network_stack); соединения и байты — открытые
         # записи conntrack от этого IP. ↓/↑ — накопленные: Wi-Fi — iw station dump
@@ -451,6 +455,7 @@ case "$1" in
                     else if (!(ifc[m] in wif) && nif[ifc[m]] == 1 && (ifc[m] in idn)) { d = idn[ifc[m]]; u = iup[ifc[m]] }
                     print ip[m] "|" m "|" st[m] "|" nm[m] "|" (c[ip[m]] + 0) "|" (by[ip[m]] + 0) "|" (bl[m] ? 1 : 0) "|" d "|" u }
                 for (m in bl) if (!seen[m]) print "|" m "|-|" nm[m] "|0|0|1||"
+                if (now > 0) print "T|" now
             }'
         ;;
     client-block|client-unblock)
@@ -477,12 +482,40 @@ case "$1" in
         # строки журнала: "ДД.ММ.ГГГГ ЧЧ:ММ:СС : домен : profile N : client IP:порт : proto P : событие".
         # Сбои считаем с последнего «website is working» до «adding to»; клиент —
         # адрес телефона в сети оператора (в т.ч. через AdGuard) или раздача.
+        # Адрес телефона меняется при каждом переподключении: раньше «телефон» был только
+        # нынешний адрес, и всё, что телефон добавил со старых, показывалось как раздача
+        # (10.11: 10.188.236.114, 10.180.49.90 при нынешнем 10.209.6.175). Теперь: прежние
+        # адреса из журнала демона («Network change … ip=A→B») и нынешний — телефон, сети
+        # интерфейсов раздачи — раздача; всё копится в ZAUTO_WHO (журнал — только 2 сессии).
+        # Ни то ни другое — без пометки, а не «раздача»
         [ -f "$ZLIST_AUTO" ] || exit 0
         wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
         wip=$(ip -4 addr show "$wan" 2>/dev/null | awk '/inet / {sub(/\/.*/, "", $2); print $2; exit}')
+        {
+            [ -f "$ZAUTO_WHO" ] && cat "$ZAUTO_WHO"
+            [ -n "$wip" ] && echo "p $wip"
+            cat "$LOG_FILE" "$LOG_FILE.prev" 2>/dev/null | grep 'Network change' | grep -oE 'ip=[0-9.]*→[0-9.]+' | sed 's/^ip=//; s/→/ /' | awk '{ for (i = 1; i <= NF; i++) print "p " $i }'
+            for i in $(sed -n 's/^ifaces=//p' "$STATUS_FILE" 2>/dev/null); do
+                ip -4 addr show "$i" 2>/dev/null | awk '/inet / { print "t " $2 }'
+            done
+        } | awk 'NF == 2 && !s[$0]++' | tail -n 300 > "$ZAUTO_WHO.tmp.$$"
+        # свой .tmp на вызов (раскрытие блока и возврат в WebUI бывают разом); без изменений —
+        # не переписываем: zauto-info зовут при каждом раскрытии блока
+        if cmp -s "$ZAUTO_WHO.tmp.$$" "$ZAUTO_WHO" 2>/dev/null; then rm -f "$ZAUTO_WHO.tmp.$$"
+        else mv -f "$ZAUTO_WHO.tmp.$$" "$ZAUTO_WHO"; fi
         lg="$ZAUTO_LOG"; [ -f "$lg" ] || lg=/dev/null
-        W="$wip" awk -F' : ' '
+        awk -F' : ' '
+            function n4(a,  o) { split(a, o, "."); return ((o[1] * 256 + o[2]) * 256 + o[3]) * 256 + o[4] }
             FILENAME == ARGV[1] {
+                split($0, w, " ")
+                if (w[1] == "p") ph[w[2]] = 1
+                # только «адрес/маска 8–32»: строка без маски дала бы m = 2^32 — «раздача» любой адрес
+                else if (w[1] == "t" && split(w[2], c, "/") == 2 && c[2] ~ /^[0-9]+$/ && c[2] >= 8 && c[2] <= 32) {
+                    m = 2 ^ (32 - c[2]); nt++; tn[nt] = int(n4(c[1]) / m); tm[nt] = m
+                }
+                next
+            }
+            FILENAME == ARGV[2] {
                 if (NF < 6) next
                 h = $2; ev = $6; split($4, c, " "); cl = c[2]; sub(/:[0-9]+$/, "", cl)
                 if (ev ~ /^incoming RST/) rst[h]++
@@ -490,14 +523,18 @@ case "$1" in
                 else if (ev ~ /^redirect/) rd[h]++
                 else if (ev ~ /website is working/) { rst[h] = 0; rt[h] = 0; rd[h] = 0 }
                 else if (ev ~ /^adding to/) {
-                    when[h] = $1; who[h] = (cl == ENVIRON["W"]) ? "phone" : "tether"
+                    when[h] = $1; who[h] = ""
+                    if (cl in ph) who[h] = "phone"
+                    else if (cl ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+                        x = n4(cl); for (i = 1; i <= nt; i++) if (int(x / tm[i]) == tn[i]) { who[h] = "tether"; break }
+                    }
                     n[h] = (rst[h] + 0) "/" (rt[h] + 0) "/" (rd[h] + 0); rst[h] = 0; rt[h] = 0; rd[h] = 0
                 }
                 next
             }
             { h = $1; sub(/\r$/, "", h); if (h == "" || (h in seen)) next; seen[h] = 1
               if (h in when) print h "|" when[h] "|" n[h] "|" who[h]; else print h "|||" }
-        ' "$lg" "$ZLIST_AUTO"
+        ' "$([ -f "$ZAUTO_WHO" ] && echo "$ZAUTO_WHO" || echo /dev/null)" "$lg" "$ZLIST_AUTO"
         ;;
     zauto-del)
         d=$(printf '%s' "$2" | tr 'A-Z' 'a-z')
@@ -613,7 +650,8 @@ case "$1" in
         # видно по байтам в direct. "probe <tcp 0|1> <tls_нейтральное 0|1>"
         case "$d" in
             "000 "*|*" 28 "*|*" 35 "*|*" 56 "*)
-                tcp=0; curl -v -s -o /dev/null -m 4 --interface "$wan" "http://$ip:443/" 2>&1 | grep -q "Connected to" && tcp=1
+                # curl 8.23 (свой в модуле) пишет «Established connection to», системный — «Connected to»
+                tcp=0; curl -v -s -o /dev/null -m 4 --interface "$wan" "http://$ip:443/" 2>&1 | grep -qE "Connected to|Established connection to" && tcp=1
                 neu=0; [ "$tcp" = 1 ] && curl -v -sk -o /dev/null -m 5 --interface "$wan" --resolve "example.com:443:$ip" \
                     https://example.com/ 2>&1 | grep -qiE "Server hello|SSL connection using|TLS handshake, Finished|alert" && neu=1
                 # «ответил сервер» — и ServerHello, и alert (Cloudflare на чужое имя): блок по
@@ -806,10 +844,21 @@ case "$1" in
         # старый Magisk не знает -g (MT6580): тогда от root, ошибка не должна
         # выглядеть как блокировка
         asg() { su 0 -g $G -c "$1" 2>/dev/null; }
-        su 0 -g $G -c true 2>/dev/null || asg() { sh -c "$1" 2>/dev/null; }
+        NOG=0
+        su 0 -g $G -c true 2>/dev/null || { NOG=1; asg() { sh -c "$1" 2>/dev/null; }; }
         dcurl() { asg "$(command -v curl) -s --interface $wan --capath $CA $*"; }
         doh_a() { dcurl "-m 6 -H 'accept: application/dns-json' 'https://dns.google/resolve?name=$1&type=A'" | grep -oE '"data":"[0-9.]+"' | grep -oE '[0-9.]+' | head -1; }
-        plain_a() { asg "$BB nslookup $1 $2" | awk '/^Name:/ {n = 1} n && /^Address/ {print $NF; exit}' | grep -E '^[0-9.]+$'; }
+        # без -g root перехватывает DNS телефона (мимо — только серверы самого dnsproxy): на время
+        # запроса открываем путь к серверу, иначе ответил бы dnsproxy и подмена не была бы видна
+        plain_a() {
+            local ex="-d $2 -p udp --dport 53 -m owner --uid-owner 0 -j RETURN" ins=0
+            # shellcheck disable=SC2086
+            [ "$NOG" = 1 ] && iptables -w 2 -t nat -I VPN_PHONE_DNS 1 $ex 2>/dev/null && ins=1
+            asg "$BB nslookup $1 $2" | awk '/^Name:/ {n = 1} n && /^Address/ {print $NF; exit}' | grep -E '^[0-9.]+$'
+            # shellcheck disable=SC2086
+            [ "$ins" = 1 ] && iptables -w 2 -t nat -D VPN_PHONE_DNS $ex 2>/dev/null
+            return 0
+        }
 
         # 1. DNS: обычный DNS к 8.8.8.8 (оператор может перехватывать :53).
         # Разные адреса ещё не подмена: CDN (Cloudflare и т.п.) раздаёт разные

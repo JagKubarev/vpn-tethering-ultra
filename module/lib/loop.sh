@@ -86,7 +86,7 @@ handle_change() {
         # WARP: проверить туннель на новой сети сразу, молчит — перезапуск без
         # «трёх промахов» (warp_reconcile). «Плохие» конфиги, пул и пауза
         # прошлой сети к этой не относятся
-        WARP_CHECK_TS=0; WARP_NETCHG=1; WARP_BAD=""; WARP_EP_FULL=0; WARP_RETRY_TS=0; WARP_TG_TRIES=0; WARP_TG_HOLD=0
+        WARP_CHECK_TS=0; WARP_NETCHG=1; WARP_BAD=""; WARP_EP_FULL=0; WARP_RETRY_TS=0; WARP_TG_TRIES=0; WARP_TG_YTW=0; WARP_TG_HOLD=0
         flush_conntrack
         $ip route flush cache 2>/dev/null || true
         ndc resolver flushdefaultif 2>/dev/null || true
@@ -208,7 +208,7 @@ CONF_GRP_STEALTH="TETHER_STEALTH TETHER_TTL_STRICT"
 CONF_GRP_WARP="WARP_ENABLE WARP_CONF"
 CONF_GRP_OPERA="OPERA_ENABLE OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 CONF_GRP_WARPR="WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER"
-CONF_GRP_ZAPRET="ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_EXCL_APPS ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_PER_NET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_DEAD_WARP"
+CONF_GRP_ZAPRET="DNS_VIA_ZAPRET ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_EXCL_APPS ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_PER_NET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_DEAD_WARP"
 _conf_grp_sig() {   # $1 = имя переменной-результата, дальше ключи
     local _v="$1" _k _o=""; shift
     for _k in "$@"; do eval "_o=\"\$_o|\$$_k\""; done

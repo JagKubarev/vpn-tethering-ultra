@@ -18,6 +18,9 @@
 # ключом, PATCH warp_enabled, адреса и ключ пира — из ответа. Параметры
 # AmneziaWG (Jc/Jmin/Jmax, H1–H4, I1 из i1.txt) — как в конфигах, которые
 # годами работают на YOTA.
+# I1 — поддельный QUIC Initial, по его SNI оператор опознаёт весь UDP-поток туннеля.
+# 08.11: с bag.itunes.apple.com YOTA днём резала туннель до 2,4–2,5 Мбит/с (ночью 25);
+# с apteka.ru (как в WARPv1_50/76) — 20–30 Мбит/с на тех же аккаунте и эндпоинте.
 # ============================================================================
 
 MODDIR="${0%/*}"; MODDIR="${MODDIR%/warp}"
@@ -26,8 +29,9 @@ PATH="$PATH:$MODDIR/bin"; export PATH   # curl: нет системного — 
 BB=/data/adb/ksu/bin/busybox
 [ -x "$BB" ] || BB=/data/adb/magisk/busybox
 [ -x "$BB" ] || BB=/data/adb/ap/bin/busybox
-# в Android 8 нет awk (MT6580, 04.11): этот скрипт идёт под mksh, не под busybox
-command -v awk >/dev/null 2>&1 || awk() { "$BB" awk "$@"; }
+# в Android 8 нет awk (MT6580, 04.11): этот скрипт идёт под mksh, не под busybox. А awk 20121220
+# (Android 9, Redmi 4X, 09.11) падает (SIGSEGV) на любом унарном «!»: !s[$1]++, !/…/, exit !(…)
+( echo x | awk '!/y/' ) >/dev/null 2>&1 || awk() { "$BB" awk "$@"; }
 WARP_DIR=/data/adb/vpn_tether_warp
 STATUS_FILE="$MODDIR/status"
 ZSCAN=/data/local/tmp/vpn_tether_zscan
@@ -117,7 +121,7 @@ bypass_on() {
     wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
     [ -n "$wan" ] && [ -x "$NQ" ] || return 0
     # ядро без connbytes (zapret_caps демона) — без него
-    CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:9"
+    CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:20"   # как у демона (ZAPRET_CB_OUT)
     grep -q '^cb=0' /data/local/tmp/vpn_tether_zcaps 2>/dev/null && CB_OUT=""
     RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
     iptables -w 2 -t mangle -I POSTROUTING 1 $RULE_NFQ
@@ -191,6 +195,8 @@ gen() {
     pid=$(cat "$ZSCAN.pid" 2>/dev/null)
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
         case "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" in
+            # «идёт подбор» и «уже идёт» (ниже) разбирает демон (warp_ensure): занято — повтор
+            # через 30 с, а не пауза с удвоением. Меняя текст — поменять и там
             *zapret/scan.sh*) echo "ERR идёт подбор обхода — повторите позже"; return 1 ;;
         esac
     fi

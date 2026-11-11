@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
-<title>VPN Tethering</title>
+<meta name="color-scheme" id="metaScheme" content="light dark">
+<title>VPN Tether</title>
 <style>
 :root {
   color-scheme: light dark;   /* select, чекбоксы, полосы прокрутки — в тон теме */
@@ -33,8 +33,11 @@
   --tabbar-h: 60px;   /* от неё отсчитываются плашка «Применить» и тост */
   --tabbar-pad: 8px;  /* поля панели снизу и по бокам (.in) — подальше от скруглённых углов экрана */
 }
-@media (prefers-color-scheme: dark) {
-  :root {
+/* Тема: data-theme на <html> ставит скрипт в <head> до отрисовки — «как в системе»
+   (по умолчанию), светлая или тёмная; выбор в «Сервис → Модуль» (localStorage vtTheme) */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] {
+    color-scheme: dark;
     --bg: #0d1311;
     --card: #151d1a;
     --text: #e2e9e6;
@@ -54,7 +57,6 @@
     --vpn: #8aa3ff;    --vpn-soft: #1a2448;
     --direct: #bfcc6e; --direct-soft: #262c12;
     --wave: #f2a640;   --wave-soft: #33260f;
-  }
 }
 body[data-route="direct"] { --route: var(--direct); --route-soft: var(--direct-soft); }
 body[data-route="wave"], body[data-route="blocked"] { --route: var(--wave); --route-soft: var(--wave-soft); }
@@ -72,9 +74,10 @@ body {
      WebView снова тянет всю страницу при прокрутке до края */
   height: calc(100% - 1px); overflow-y: auto; overscroll-behavior: none;
 }
-h1 { font-size: 20px; font-weight: 600; margin: 4px 2px 14px; display: flex; align-items: center; gap: 10px; }
-h1 .logo { width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; flex: none; }
-h1 .logo svg { width: 18px; height: 18px; }
+h1 { font-size: 20px; font-weight: 600; margin: 4px 2px 14px; display: flex; align-items: center; }
+h1 .logo { margin-right: 10px; width: 36px; height: 36px; border-radius: 10px; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; flex: none; }
+h1 .logo svg { width: 26px; height: 26px; }
+h1 .ttl { margin-right: 10px; }   /* до плашки версии: margin-left: auto у неё на узком экране сжимается до 0 */
 h1 small { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--muted); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }   /* длинная версия (тестовые сборки) — с многоточием, а не за край экрана */
 h1 small:empty { display: none; }
 h2 small { font-size: 13px; font-weight: 400; color: var(--muted); margin-left: 6px; }
@@ -87,7 +90,7 @@ h2 { font-size: 17px; font-weight: 650; letter-spacing: -.005em; color: var(--te
 .dot.green { background: var(--green); } .dot.amber { background: var(--amber); }
 .dot.red { background: var(--red); } .dot.blue { background: var(--blue); }
 .dot.big { width: 14px; height: 14px; position: relative; }
-.dot.big::before { content: ""; position: absolute; inset: -5px; border-radius: 50%; background: inherit; opacity: .22; }
+.dot.big::before { content: ""; position: absolute; top: -5px; right: -5px; bottom: -5px; left: -5px; inset: -5px; border-radius: 50%; background: inherit; opacity: .22; }
 
 .hero { display: flex; gap: 12px; align-items: flex-start; }
 .hero .dot { margin: 6px 4px 0; }
@@ -96,7 +99,8 @@ h2 { font-size: 17px; font-weight: 650; letter-spacing: -.005em; color: var(--te
 .hero-sub { color: var(--muted); font-size: 14px; margin-top: 2px; }
 .health { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; font-size: 13.5px; color: var(--muted); }
 .health:empty { display: none; }
-.health .hi { display: inline-flex; align-items: center; gap: 6px; }
+.health .hi { display: inline-flex; align-items: center; }
+.health .hi .dot { margin-right: 6px; }   /* не gap: рядом текст, старый WebView (без gap у flex) слеплял точку с подписью */
 .health .hint { flex-basis: 100%; color: var(--amber-text); overflow-wrap: anywhere; }
 .health .hint.red { color: var(--red); }
 
@@ -117,7 +121,7 @@ h2 { font-size: 17px; font-weight: 650; letter-spacing: -.005em; color: var(--te
 .btn.wide { width: 100%; margin-top: 16px; min-height: 48px; }
 /* компактная — 38 px на вид, но зона нажатия всё равно 44 */
 .btn.small { position: relative; padding: 0 12px; min-height: 38px; font-size: 13.5px; flex: none; }
-.btn.small::after { content: ""; position: absolute; inset: -3px 0; }
+.btn.small::after { content: ""; position: absolute; top: -3px; right: 0; bottom: -3px; left: 0; inset: -3px 0; }
 .btn:active:not(:disabled) { background: var(--line); transform: scale(.98); }
 .btn.bad { color: var(--red); }
 .btn.primary:active:not(:disabled) { background: var(--accent); filter: brightness(.92); }
@@ -125,7 +129,8 @@ h2 { font-size: 17px; font-weight: 650; letter-spacing: -.005em; color: var(--te
 .btn:focus-visible, summary:focus-visible, .chip button:focus-visible, .offnote:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* у вкладок рамки фокуса нет: WebView KernelSU рисовал её и после нажатия пальцем,
    а активная вкладка и так видна по цвету */
-#tabbar button:focus, #tabbar button:focus-visible { outline: none; }
+#tabbar button:focus { outline: none; }
+#tabbar button:focus-visible { outline: none; }
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .btn-row.eq > .btn { flex: 1 1 120px; padding: 0 8px; white-space: nowrap; }   /* две равные в ряд, третья — ниже на всю ширину (120 — две и на 320 px) */
 /* равные кнопки в ряд; не влезают — переносятся и растягиваются на свободное место */
@@ -150,8 +155,8 @@ h2 { font-size: 17px; font-weight: 650; letter-spacing: -.005em; color: var(--te
 .badge { font-size: 11px; color: var(--accent); border: 1px solid currentColor; border-radius: 6px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
 
 .sw { position: relative; width: 46px; height: 28px; flex: none; }
-.sw input { opacity: 0; position: absolute; inset: -8px -6px; width: calc(100% + 12px); height: calc(100% + 16px); margin: 0; z-index: 1; cursor: pointer; }
-.sw span { position: absolute; inset: 0; background: var(--field); border-radius: 14px; transition: background .15s; }
+.sw input { opacity: 0; position: absolute; top: -8px; right: -6px; bottom: -8px; left: -6px; inset: -8px -6px; width: calc(100% + 12px); height: calc(100% + 16px); margin: 0; z-index: 1; cursor: pointer; }
+.sw span { position: absolute; top: 0; right: 0; bottom: 0; left: 0; inset: 0; background: var(--field); border-radius: 14px; transition: background .15s; }
 .sw input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sw span::after { content: ""; position: absolute; width: 22px; height: 22px; left: 3px; top: 3px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
 .sw input:checked + span { background: var(--accent); }
@@ -168,7 +173,7 @@ textarea { resize: vertical; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo
 .st-line > .dot { margin-right: 8px; vertical-align: -1px; }
 details.off { opacity: .45; pointer-events: none; }
 /* в тёмной теме серый текст на .45 почти сливался с карточкой */
-@media (prefers-color-scheme: dark) { .row.off, details.off { opacity: .55; } }
+:root[data-theme="dark"] .row.off, :root[data-theme="dark"] details.off { opacity: .55; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 select:disabled { opacity: .6; }
 .inline { display: flex; flex-wrap: wrap; gap: 0 8px; align-items: flex-start; }
@@ -180,7 +185,7 @@ select:disabled { opacity: .6; }
 .chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; background: var(--input); border: 1px solid var(--field); border-radius: 999px; padding: 3px 3px 3px 12px; font-size: 13.5px; }
 .chip > span { min-width: 0; overflow-wrap: anywhere; }
 .chip button { position: relative; width: 26px; height: 26px; flex: none; border: 0; border-radius: 50%; background: transparent; color: var(--muted); font-size: 17px; line-height: 1; padding: 0; cursor: pointer; }
-.chip button::after { content: ""; position: absolute; inset: -9px; }
+.chip button::after { content: ""; position: absolute; top: -9px; right: -9px; bottom: -9px; left: -9px; inset: -9px; }
 .chip button:active { background: var(--line); }
 /* ✕ в строках автосписка */
 .icon-btn { min-width: 44px; padding: 0 !important; font-size: 14px; color: var(--muted); }
@@ -208,7 +213,7 @@ pre.log { margin: 0; padding: 12px 14px; background: var(--input); font: 12px/1.
 .applybar .msg { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .applybar .msg::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); margin-right: 8px; vertical-align: 1px; }
 
-.sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; z-index: 20; }
+.sheet-bg { position: fixed; top: 0; right: 0; bottom: 0; left: 0; inset: 0; background: rgba(0,0,0,.45); display: none; z-index: 20; }
 .sheet-bg.show { display: block; }
 .sheet { position: fixed; left: 0; right: 0; bottom: 0; max-height: 85vh; background: var(--card); border-radius: 16px 16px 0 0; display: none; flex-direction: column; z-index: 21; padding-bottom: env(safe-area-inset-bottom); }
 .sheet.show { display: flex; }
@@ -261,7 +266,7 @@ details > summary::after { border-color: currentColor; }
 
 /* ---- Главная: верх в цвет маршрута, путь трафика ---- */
 #statusCard { background: var(--route-soft); border-radius: 22px; transition: background-color .4s; }
-#statusCard .kv { border-top-color: color-mix(in srgb, var(--route) 25%, transparent); }
+#statusCard .kv { border-top-color: var(--line); border-top-color: color-mix(in srgb, var(--route) 25%, transparent); }
 .hero-title { font-size: 22px; font-weight: 650; letter-spacing: -.01em; line-height: 1.2; }
 .path { display: grid; grid-template-columns: auto 1fr auto 1fr auto 1fr auto; align-items: start; margin: 18px 0 4px; }
 .path:empty { display: none; }
@@ -292,10 +297,10 @@ details > summary::after { border-color: currentColor; }
 .wavebox { margin-top: 10px; background: var(--amber-soft); border-radius: 16px; padding: 14px 16px; }
 .wavebox .t { font-weight: 650; color: var(--amber-text); }
 .wavebox p { margin: 4px 0 12px; font-size: 13.5px; }
-.wavebox p.wl { margin: 12px 0 0; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--amber) 30%, transparent); color: var(--muted); }
+.wavebox p.wl { margin: 12px 0 0; padding-top: 12px; border-top: 1px solid var(--line); border-top: 1px solid color-mix(in srgb, var(--amber) 30%, transparent); color: var(--muted); }
 
 /* ---- подсказка наверху карточки ---- */
-.tip { margin: 14px 16px 0; font-size: 13px; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); border-radius: 10px; padding: 8px 10px; }
+.tip { margin: 14px 16px 0; font-size: 13px; color: var(--accent); background: var(--line); background: color-mix(in srgb, var(--accent) 10%, transparent); border-radius: 10px; padding: 8px 10px; }
 .tip[hidden] { display: none; }
 
 /* ---- Выходы: плитки и списки ---- */
@@ -325,11 +330,101 @@ details > summary::after { border-color: currentColor; }
 }
 @media (prefers-reduced-motion: reduce) { #statusCard { transition: none; } }
 .mt8 { margin-top: 8px; }
+/* устройства в раздаче: «всего» и «скорость» колонками — числа меняются раз в 3 с, текст не прыгает */
+#clients .cn { display: inline-block; min-width: 4.9em; font-variant-numeric: tabular-nums; }
+#clients .cu { min-width: 0; }   /* ↑ — последняя колонка: правее ничего не сдвинется */
 </style>
+<script>
+// тема до первой отрисовки, иначе тёмная мигала бы светлой. Пусто — как в системе
+(function () {
+  var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null, pref = '';
+  try { pref = localStorage.getItem('vtTheme') || ''; } catch (e) { /* без хранилища — как в системе */ }
+  window.vtTheme = function (p) {
+    if (p !== undefined) pref = p;
+    var t = pref || (mq && mq.matches ? 'dark' : 'light'), m = document.getElementById('metaScheme');
+    document.documentElement.setAttribute('data-theme', t);
+    // и meta: иначе при «Светлой» в тёмной системе WebView красит фон тёмным до стилей
+    if (m) m.setAttribute('content', pref ? t : 'light dark');
+    return pref;
+  };
+  window.vtTheme();
+  // «как в системе» — следить и за сменой темы телефона, пока WebUI открыт
+  var f = function () { if (!pref) window.vtTheme(); };
+  if (mq && mq.addEventListener) mq.addEventListener('change', f); else if (mq && mq.addListener) mq.addListener(f);
+})();
+</script>
+<script>
+// gap у flex — с WebView 84. В старом (Android 9 AOSiP на Redmi 4X: 75, системный, не обновляется)
+// отступов нет: точки и подписи слипаются. Там — отступы детям вместо gap: правила с gap берём из
+// стилей (и style="…gap…"), после каждой перерисовки — заново. В новых WebView не делает ничего
+(function () {
+  var t, ok;
+  try {
+    t = document.createElement('div');
+    t.style.cssText = 'display:flex;flex-direction:column;row-gap:1px;position:absolute;visibility:hidden';
+    t.appendChild(document.createElement('div')); t.appendChild(document.createElement('div'));
+    document.documentElement.appendChild(t);
+    ok = t.scrollHeight === 1;
+    document.documentElement.removeChild(t);
+  } catch (e) { return; }
+  if (ok) return;
+  var sel = null, busy = false;
+  function collect(rules, out) {
+    for (var i = 0; i < rules.length; i++) {
+      var r = rules[i];
+      if (r.cssRules && !r.selectorText) { collect(r.cssRules, out); continue; }   // @media
+      if (r.style && r.selectorText && (r.style.gap || r.style.rowGap || r.style.columnGap)) out.push(r.selectorText);
+    }
+  }
+  function px(v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; }
+  // свой отступ ставим, только если у ребёнка его не было (margin-left: auto и т.п. не трогаем)
+  function set(c, k, v) {
+    if (!c.hasAttribute('data-fg-' + k)) {
+      if (px(getComputedStyle(c)[k]) !== 0) return;
+      c.setAttribute('data-fg-' + k, '');
+    }
+    c.style[k] = v + 'px';
+  }
+  function fix() {
+    busy = false;
+    if (!sel) {
+      var out = ['[style*="gap"]'];
+      for (var i = 0; i < document.styleSheets.length; i++) {
+        try { collect(document.styleSheets[i].cssRules, out); } catch (e) { /* чужой лист */ }
+      }
+      sel = out;
+    }
+    // по одному: селектор, который querySelectorAll не примет (::after и т.п.), не ломает остальные
+    var els = [];
+    for (var q = 0; q < sel.length; q++) {
+      try { els.push.apply(els, document.querySelectorAll(sel[q])); } catch (e) { /* пропустить */ }
+    }
+    for (var j = 0; j < els.length; j++) {
+      var el = els[j], cs = getComputedStyle(el);
+      if (cs.display.indexOf('flex') < 0) continue;
+      var col = cs.flexDirection.indexOf('column') === 0, wrap = cs.flexWrap !== 'nowrap';
+      var cg = px(cs.columnGap), rg = px(cs.rowGap), first = true;
+      if (!cg && !rg) continue;
+      for (var c = el.firstElementChild; c; c = c.nextElementSibling) {
+        var ccs = getComputedStyle(c);
+        if (ccs.display === 'none' || ccs.position === 'absolute' || ccs.position === 'fixed') continue;
+        if (col) { if (!first && rg) set(c, 'marginTop', rg); }
+        else { if (!first && cg) set(c, 'marginLeft', cg); if (wrap && rg) set(c, 'marginBottom', rg); }
+        first = false;
+      }
+    }
+  }
+  function later() { if (!busy) { busy = true; requestAnimationFrame(fix); } }
+  document.addEventListener('DOMContentLoaded', function () {
+    fix();
+    new MutationObserver(later).observe(document.body, { childList: true, subtree: true });
+  });
+})();
+</script>
 </head>
 <body>
 
-<h1><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1" fill="currentColor"/><path d="M12 3v4M9.5 5.5 12 3l2.5 2.5"/></svg></span>VPN Tethering <small id="ver"></small></h1>
+<h1><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.93 13.33a10 10 0 0 1 14.14 0"/><path d="M8.46 16.86a5 5 0 0 1 7.08 0"/><circle cx="12" cy="20.4" r="1.7" fill="currentColor" stroke="none"/><path d="M12 2.5v4M9.6 4.9 12 2.5l2.4 2.4"/></svg></span><span class="ttl">VPN Tether</span><small id="ver"></small></h1>
 
 <section class="tab" data-tab="home">
 <div class="card pad" id="statusCard">
@@ -392,16 +487,40 @@ details > summary::after { border-color: currentColor; }
 <div class="card">
   <div id="clients"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
 </div>
-<div class="hint">Заблокированное устройство остаётся в точке доступа, но без интернета; новый «случайный» MAC блокировку обходит. ↓ ↑ — трафик с подключения, а если телефон его не даёт — в открытых сейчас соединениях.</div>
+<div class="hint">Заблокированное устройство остаётся в точке доступа, но без интернета; новый «случайный» MAC блокировку обходит. «Всего» — трафик с подключения, а если телефон его не даёт — в открытых сейчас соединениях; «скорость» — между двумя последними обновлениями (раз в 3 секунды).</div>
 <div class="hint">Остальные настройки — во вкладках «Обход», «Выходы» и «DNS», проверки и журналы — в «Сервисе».</div>
 
 </section>
 
 <section class="tab" data-tab="bypass">
+<h2>Подбор стратегии</h2>
+<div class="card">
+  <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
+  <div class="pad">
+  <div class="s muted" style="font-size:13px;margin-top:2px">Ищет рабочую стратегию для этой сети по сайтам ниже, в фоне. При сбое автопроверка запускает его сама.</div>
+  <textarea id="scSites" rows="3" aria-label="Сайты для подбора" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+  <div class="btn-row eq mt8">
+    <button class="btn" id="scQuick">Быстрый · ~2 мин</button>
+    <button class="btn" id="scFull">Полный · ~7 мин</button>
+    <button class="btn" id="scStop" style="display:none">Остановить</button>
+  </div>
+  <div class="s muted" style="font-size:13px;margin-top:10px">YouTube и Discord часто работают лучше со своей стратегией: запустите подбор, дождитесь конца и примените лучшую в таблице. Общая не меняется, замер скачивает до 110 МБ.</div>
+  <div class="btn-row eq mt8">
+    <button class="btn" id="scYt">YouTube · ~4 мин</button>
+    <button class="btn" id="scDc">Discord · ~4 мин</button>
+  </div>
+  <div class="btn-row eq mt8">
+    <button class="btn" id="scQ">Проверить QUIC · ~30 с</button>
+  </div>
+  <div id="scProg" class="mt8" style="font-size:14px"></div>
+  <div id="scRes" class="mt8"></div>
+  </div>
+</div>
+
 <h2>Стратегия</h2>
 <div class="card">
   <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
-  <div class="tip" id="pickTip">Для лучшей работы подберите стратегию под свою сеть, отдельно для YouTube и Discord: кнопки в «Подборе стратегии» ниже.</div>
+  <div class="tip" id="pickTip">Для лучшей работы подберите стратегию под свою сеть, отдельно для YouTube и Discord: кнопки в «Подборе стратегии» выше.</div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Стратегия для каждой сети</div>
       <div class="s">Своя для каждой сети Wi-Fi и оператора, переключается сама.</div></div>
@@ -452,27 +571,6 @@ details > summary::after { border-color: currentColor; }
   </div>
 </div>
 
-<h2>Подбор стратегии</h2>
-<div class="card pad">
-  <div class="s muted" style="font-size:13px;margin-top:2px">Ищет рабочую стратегию для этой сети по сайтам ниже, в фоне. При сбое автопроверка запускает его сама.</div>
-  <textarea id="scSites" rows="3" aria-label="Сайты для подбора" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
-  <div class="btn-row eq mt8">
-    <button class="btn" id="scQuick">Быстрый · ~2 мин</button>
-    <button class="btn" id="scFull">Полный · ~7 мин</button>
-    <button class="btn" id="scStop" style="display:none">Остановить</button>
-  </div>
-  <div class="s muted" style="font-size:13px;margin-top:10px">YouTube и Discord часто работают лучше со своей стратегией: запустите подбор, дождитесь конца и примените лучшую в таблице. Общая не меняется, замер скачивает до 110 МБ.</div>
-  <div class="btn-row eq mt8">
-    <button class="btn" id="scYt">YouTube · ~4 мин</button>
-    <button class="btn" id="scDc">Discord · ~4 мин</button>
-  </div>
-  <div class="btn-row eq mt8">
-    <button class="btn" id="scQ">Проверить QUIC · ~30 с</button>
-  </div>
-  <div id="scProg" class="mt8" style="font-size:14px"></div>
-  <div id="scRes" class="mt8"></div>
-</div>
-
 <h2>Сайты</h2>
 <div class="card">
   <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
@@ -504,7 +602,7 @@ details > summary::after { border-color: currentColor; }
       </div>
     </div>
   </details>
-  <details data-dep="ZAPRET_ENABLE">
+  <details data-dep="ZAPRET_ENABLE" id="zautoBox">
     <summary>Встроенный список и автосписок</summary>
     <div class="row col">
       <div class="txt"><div class="t">Автосписок: <span id="zautoN">0</span></div>
@@ -608,10 +706,11 @@ details > summary::after { border-color: currentColor; }
       <optgroup label="Открывают ChatGPT, Gemini и Claude">
       <option value="https://not-a-dns.quic.best/dns-query">not-a-dns.quic.best</option>
       <option value="https://dns.wlrus.cfd/dns-query">wlrus.cfd</option>
+      <option value="https://api.magicdns.ru/dns-query">magicdns.ru</option>
+      <option value="https://dns.zapret.moe/dns-query">zapret.moe</option>
       <option value="https://dns.geohide.ru:444/dns-query">dns.geohide.ru:444</option>
       <option value="https://geohide.ru/dns-query">geohide.ru</option>
       <option value="https://dns.comss.one/dns-query">comss.one</option>
-      <option value="https://dns.commonnet.work/dns-query">commonnet.work</option>
       </optgroup>
       <optgroup label="Обычные, для приватности">
       <option value="https://dns.google/dns-query">Google</option>
@@ -648,9 +747,14 @@ details > summary::after { border-color: currentColor; }
     </select>
   </div>
   <div class="row" data-dep="DNSPROXY_ENABLE">
-    <div class="txt"><div class="t">Instagram и Facebook без VPN</div>
-      <div class="s">Instagram, Facebook и Threads получают европейские адреса и открываются через обход, без VPN.</div></div>
+    <div class="txt"><div class="t">Instagram, Facebook и WhatsApp без VPN</div>
+      <div class="s">Instagram, Facebook, Threads и WhatsApp получают европейские адреса и открываются через обход, без VPN.</div></div>
     <label class="sw"><input type="checkbox" data-key="DNS_META_EU"><span></span></label>
+  </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">DoH через обход</div>
+      <div class="s">Если оператор режет DoH-серверы по имени — соединения с ними идут через обход блокировок, своей постоянной стратегией (не той, что у сети). Запасные — тоже через обход, поэтому если обход сломает DoH, DNS временно уйдёт к оператору: интернет будет, но без обхода гео-блоков.</div></div>
+    <label class="sw"><input type="checkbox" data-key="DNS_VIA_ZAPRET"><span></span></label>
   </div>
 </div>
 
@@ -744,7 +848,7 @@ details > summary::after { border-color: currentColor; }
 <div class="card">
   <div class="row col" data-dep="OPERA_ENABLE">
     <div class="txt"><div class="t">Регион</div>
-      <div class="s">Амстердам, Сингапур или Вашингтон. Азия и Америка дальше и обычно медленнее.</div></div>
+      <div class="s">Амстердам, Сингапур или Вашингтон. Азия и Америка дальше и обычно медленнее. Если серверы региона закрыты, модуль сам попробует последний рабочий сервер, потом другие регионы.</div></div>
     <div class="seg" data-key="OPERA_COUNTRY" role="radiogroup" aria-label="Регион Opera" style="margin-top:10px"><button data-v="EU" role="radio">Европа</button><button data-v="AS" role="radio">Азия</button><button data-v="AM" role="radio">Америка</button></div>
   </div>
   <div class="row" data-dep="OPERA_ENABLE">
@@ -820,7 +924,7 @@ details > summary::after { border-color: currentColor; }
   </div>
   <div class="row col">
     <div class="head">
-      <div class="txt"><div class="t">Проверка адресов Meta</div><div class="s">Адреса Instagram и Facebook с европейским ECS. Рабочие обычно на 57.144.</div></div>
+      <div class="txt"><div class="t">Проверка адресов Meta</div><div class="s">Адреса Instagram, Facebook и WhatsApp с европейским ECS. Рабочие обычно на 57.144.</div></div>
       <button class="btn small" id="metaBtn">Проверить</button>
     </div>
     <div id="metaRes" style="font-size:14px"></div>
@@ -838,6 +942,11 @@ details > summary::after { border-color: currentColor; }
     <div class="txt"><div class="t">Состояние в описании модуля</div>
       <div class="s">Режим виден в списке модулей KernelSU и Magisk.</div></div>
     <label class="sw"><input type="checkbox" data-key="STATUS_IN_DESCRIPTION"><span></span></label>
+  </div>
+  <div class="row col">
+    <div class="txt"><div class="t">Оформление</div>
+      <div class="s">Сразу, без «Применить». Запоминается отдельно в этом окне: у WebUI в KernelSU и у приложения VPN Tether выбор свой.</div></div>
+    <div class="seg" id="themeSeg" role="radiogroup" aria-label="Оформление" style="margin-top:10px"><button data-t="" role="radio">Системная</button><button data-t="light" role="radio">Светлая</button><button data-t="dark" role="radio">Тёмная</button></div>
   </div>
 </div>
 
@@ -889,7 +998,7 @@ details > summary::after { border-color: currentColor; }
 
 <h2>Автор и помощь</h2>
 <div class="card links" id="links"></div>
-<p class="foot" id="foot">VPN Tethering Ultra, Kubarev</p>
+<p class="foot" id="foot">VPN Tether, Kubarev</p>
 </section>
 
 <nav class="tabbar" id="tabbar"><div class="in">
@@ -1049,7 +1158,7 @@ function renderTop(s, names, exTxt, exOld) {
 function renderStatus(s) {
   ST = s;
   $('#ver').textContent = s.module_version || '';
-  $('#foot').textContent = 'VPN Tethering Ultra ' + (s.module_version || '') + ', Kubarev';
+  $('#foot').textContent = 'VPN Tether ' + (s.module_version || '') + ', Kubarev';
   const dot = $('#heroDot'), title = $('#heroTitle'), sub = $('#heroSub'), btn = $('#toggleBtn');
   const names = friendly(s.ifaces);
   const up = esc(s.dns_upstream || 'DoH');
@@ -1152,9 +1261,9 @@ function renderStatus(s) {
   else if (s.zapret === 'nokernel') h += kvRow('Обход блокировок', 'ядро телефона не поддерживает NFQUEUE — обход невозможен, нужен VPN', 'red');
   else if (s.zapret === 'wl') h += kvRow('Обход блокировок', 'пауза: похоже, белые списки оператора — обход не поможет, нужен VPN', 'amber');
   if (s.dnsproxy_enable === '1' && s.meta_eu === '1') {
-    if (s.meta_eu_on === '1') h += kvRow('Instagram и Facebook', 'как из Европы (ECS ' + esc(s.meta_ecs) + ')', 'green');
-    else if (s.vpn_up === '1') h += kvRow('Instagram и Facebook', 'через VPN, Европа не нужна', '');
-    else h += kvRow('Instagram и Facebook', 'обычный: DoH без VPN сейчас не используется', '');
+    if (s.meta_eu_on === '1') h += kvRow('Instagram, Facebook, WhatsApp', 'как из Европы (ECS ' + esc(s.meta_ecs) + ')', 'green');
+    else if (s.vpn_up === '1') h += kvRow('Instagram, Facebook, WhatsApp', 'через VPN, Европа не нужна', '');
+    else h += kvRow('Instagram, Facebook, WhatsApp', 'обычный: DoH без VPN сейчас не используется', '');
   }
   if (s.zapret_per_net === '1' && s.net_key && s.net_key !== ZN.cur && !znetLoading) loadZnet();
   const w = warpState(s);
@@ -1169,13 +1278,13 @@ function renderStatus(s) {
   if (s.warp && s.warp !== 'disabled') h += kvRow('WARP', esc(w.t + (w.s ? ' · ' + w.s : '')), w.d);
   // выход и Google после последней смены сети: «время|интерфейс|адрес|страна|https|http»
   const ex = (s.exit || '').split('|');
-  let exTxt = '';
+  let exTxt = '', exCls = '';
   if (ex[2] || ex[4]) {
     const g = ex[4] === 'warp' || ex[4] === 'opera' ? 'идёт через ' + (ex[4] === 'warp' ? 'WARP' : 'Opera') + ', не проверяю'
       : ex[4] && ex[4] !== '000' ? 'работает' : ex[5] && ex[5] !== '000' ? 'HTTPS молчит, HTTP отвечает' : 'не отвечает';
     const age = Math.round((Date.now() / 1000 - +ex[0]) / 60);
     exTxt = (ex[2] || 'адрес не узнан') + (ex[3] ? ' (' + ex[3] + ')' : '') + ' · Google: ' + g + (age > 1 ? ' · ' + age + ' мин назад' : '');
-    h += kvRow('Выход', esc(exTxt), g === 'работает' ? 'green' : /^идёт/.test(g) ? '' : 'amber');
+    exCls = g === 'работает' ? 'green' : /^идёт/.test(g) ? '' : 'amber';
   }
   // после нажатия «Переподключить сеть» — пока не пришла свежая проверка, старое не показываем
   const exOld = renewTs && s.vpn_up !== '1' && !(+ex[0] > renewTs);
@@ -1183,6 +1292,8 @@ function renderStatus(s) {
   if ($('#netExit')) $('#netExit').textContent = exOld ? 'Проверяю новый выход и Google…' : exTxt ? 'Сейчас: ' + exTxt : '';
   renderTop(s, names, exTxt, exOld);
   if (s.opera && s.opera !== 'disabled') { const o = operaState(s); h += kvRow('Opera', esc(o[1] + (o[2] ? ' · ' + o[2] : '')), o[0]); }
+  // выход — после WARP и Opera, не между ними
+  if (exTxt) h += kvRow('Выход', esc(exTxt), exCls);
   if (s.quic_uids) h += kvRow('Без QUIC', esc(String(s.quic_uids.split(' ').length)) + ' прил.');
   const bad = (s.conf_note || '').split(' ').filter((x) => x[0] === '!' || x[0] === '?');
   if (bad.length) h += kvRow('Конфиг', 'пропущено: ' + esc(bad.join(', ')), 'amber');
@@ -1239,7 +1350,7 @@ let DEF = {}, USR = {}, CUR = {};   // умолчания, из файла, те
 const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAMS','DNS_FALLBACKS','DNS_VPN_UPSTREAMS',
   'DNS_BOOTSTRAP','DNS_HEALTH_INTERVAL','DNS_HEALTH_RECOVER','KILL_SWITCH','KILL_SWITCH_STRICT','NET_PROFILE_ADAPTIVE',
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE','ZAPRET_EXCL_APPS',
-  'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','YT_GGC_BLOCK','YT_DEAD_FAILFAST','YT_DEAD_WARP','ZAPRET_WATCHDOG','ZAPRET_AUTOPICK','ZAPRET_WATCHDOG_MIN',
+  'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','DNS_VIA_ZAPRET','YT_GGC_BLOCK','YT_DEAD_FAILFAST','YT_DEAD_WARP','ZAPRET_WATCHDOG','ZAPRET_AUTOPICK','ZAPRET_WATCHDOG_MIN',
   'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','YT_SLOW_RETRY','ZAPRET_AUTO_FAIL',
   'WARP_ENABLE','WARP_CONF','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_COUNTRY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
 // интервал в минутах человеческим языком: 15 -> «15 минут», 180 -> «3 часа»
@@ -1354,7 +1465,7 @@ $('#routeSites').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e
 // DNS: открывает ли выбранный сервер ИИ-сервисы; что значит выбор «DNS раздачи при VPN»
 function renderUpAi() {
   const v = upValue(), grp = Array.from($('#upSelect').querySelectorAll('optgroup')[0].children).map((o) => o.value);
-  const ai = grp.includes(v), noGem = /comss|commonnet/.test(v);
+  const ai = grp.includes(v), noGem = /comss/.test(v);
   $('#upAi').innerHTML = !v || $('#upSelect').value === 'custom' ? '' : '<span class="dot ' + (ai ? noGem ? 'amber' : 'green' : '') + '"></span>' +
     'ИИ-сервисы без VPN: ' + (ai ? noGem ? 'ChatGPT и Claude, Gemini — нет' : 'открываются' : 'нет');
 }
@@ -1427,27 +1538,51 @@ $$('.row input, .row select, .row textarea').forEach((el) => {
 // ↓/↑ — накопленные с подключения (Wi-Fi) или с подъёма USB, пусто — не знаем
 // неразрывный пробел: «64.6 МБ» на узком экране не рвётся
 const fmtBytes = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' ГБ' : b >= 1048576 ? (b / 1048576).toFixed(1) + ' МБ' : b >= 1024 ? Math.round(b / 1024) + ' КБ' : b + ' Б';
+// Скорость устройства — разница накопленных ↓/↑ между двумя опросами (раз в 3 с)
+const CL_PREV = {};
+let clBusy = false;
 function clientRow(f) {
   const [ip, mac, st, name, c, by, bl, dn, up] = f, blocked = bl === '1';
   const nm = name && name !== 'null' ? name : 'Без имени';
   const on = st === 'REACHABLE' || st === 'DELAY' || st === 'PROBE';
   // строки: адрес · состояние · трафик (одной строкой переносилось посреди чисел)
   const ln = [(ip ? ip + ' · ' : '') + mac];
+  let tr = '';   // «всего» и «скорость» — HTML: числа в колонках постоянной ширины, строка не прыгает
   if (blocked) ln.push('заблокировано');
   else if (st === '-') ln.push('не подключено');
   else {
     ln.push((on ? 'в сети' : 'был недавно') + (+c ? ' · соединений: ' + c : ''));
-    if (dn) ln.push('↓ ' + fmtBytes(+dn) + ' · ↑ ' + fmtBytes(+up || 0));
+    if (dn) {
+      // скорость всегда, 0 — простой или первый опрос: строка не появляется и не пропадает
+      const r = (CL_PREV[mac] && CL_PREV[mac].r) || [0, 0];
+      const cell = (t, u) => '<span class="cn' + (u ? ' cu' : '') + '">' + esc(t) + '</span>';
+      tr = '<br>всего<br>↓ ' + cell(fmtBytes(+dn)) + ' ↑ ' + cell(fmtBytes(+up || 0), 1) +
+        '<br>скорость<br>↓ ' + cell(fmtBytes(Math.round(r[0])) + '/с') + ' ↑ ' + cell(fmtBytes(Math.round(r[1])) + '/с', 1);
+    }
     else if (+c && +by) ln.push(fmtBytes(+by) + ' в открытых соединениях');
   }
   return '<div class="row wrap" style="gap:8px"><span class="dot ' + (blocked ? 'red' : on ? 'green' : '') + '"></span>' +
-    '<div class="txt"><div class="t">' + esc(nm) + '</div><div class="s">' + ln.map(esc).join('<br>') + '</div></div>' +
+    '<div class="txt"><div class="t">' + esc(nm) + '</div><div class="s">' + ln.map(esc).join('<br>') + tr + '</div></div>' +
     '<button class="btn small" data-cmac="' + esc(mac) + '" data-cname="' + esc(nm) + '" data-cbl="' + (blocked ? '1' : '0') + '">' +
     (blocked ? 'Разблокировать' : 'Блок') + '</button></div>';
 }
 async function loadClients() {
-  const r = await ctl('clients');
+  if (clBusy) return;
+  clBusy = true;
+  let r;
+  try { r = await ctl('clients'); } catch (e) { return; } finally { clBusy = false; }
   const rows = (r.out || '').split('\n').filter((l) => l.split('|').length >= 7).map((l) => l.split('|'));
+  // время замера из webctl (мс от загрузки телефона); старый webctl без него — время ответа
+  const tm = /(?:^|\n)T\|(\d+)/.exec(r.out || ''), now = tm ? +tm[1] : Date.now();
+  rows.forEach((f) => {
+    const mac = f[1], d = +f[7], u = +f[8] || 0, p = CL_PREV[mac];
+    if (!f[7]) { delete CL_PREV[mac]; return; }
+    const dt = p ? (now - p.t) / 1000 : 0;
+    // счётчик сбросился (переподключение) — скорость не считаем, только запоминаем
+    const r2 = p && dt >= 1 && dt <= 30 && d >= p.d && u >= p.u ? [(d - p.d) / dt, (u - p.u) / dt] : null;
+    // другие часы (сменился источник времени) — dt вне 1..30 с, скорость просто не считается
+    CL_PREV[mac] = { t: now, d, u, r: r2 };
+  });
   CLIENTS_N = rows.filter((f) => f[6] !== '1' && f[2] !== '-').length;
   $('#clients').innerHTML = rows.length ? rows.map(clientRow).join('')
     : '<div class="row"><div class="txt"><div class="s">Сейчас никто не подключён к раздаче.</div></div></div>';
@@ -1478,6 +1613,18 @@ $$('[data-offnote]').forEach((n) => {
 let _tab0 = 'home';
 try { _tab0 = localStorage.getItem('vtTab') || 'home'; } catch (e) { /* по умолчанию — Главная */ }
 showTab(_tab0);
+
+// оформление: не настройка модуля (без «Применить»), а этого WebUI — в localStorage
+function themeSegSync(p) {
+  $$('#themeSeg button').forEach((b) => { b.classList.toggle('on', b.dataset.t === p); b.setAttribute('aria-checked', b.dataset.t === p ? 'true' : 'false'); });
+}
+themeSegSync(window.vtTheme());
+$('#themeSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  const p = b.dataset.t;
+  try { localStorage.setItem('vtTheme', p); } catch (err) { /* не запомнится — только до закрытия */ }
+  themeSegSync(window.vtTheme(p));
+});
 
 $('#directDoh').addEventListener('change', (e) => setCur('DNS_DIRECT', e.target.checked ? 'doh' : 'plain'));
 
@@ -1796,6 +1943,16 @@ function warpState(s) {
     default: return { d: '', t: 'Выключен', s: '' };
   }
 }
+// где выход Opera: площадка Cloudflare (как у WARP) или страна; не узнали — регион из настроек
+function operaWhere(s) {
+  if (s.opera_colo && COLO[s.opera_colo]) return 'Выход: ' + coloName(s.opera_colo);
+  if (s.opera_loc) {
+    let cn = s.opera_loc;
+    try { if (REGION_RU) cn = REGION_RU.of(s.opera_loc) || cn; } catch (e) { /* кодом */ }
+    return 'Выход: ' + cn;
+  }
+  return { EU: 'Европа', AS: 'Азия', AM: 'Америка' }[s.opera_country] || '';
+}
 // [цвет, заголовок, подпись]: плитка на вкладке «Выходы» и строка на Главной
 function operaState(s) {
   const a = (s.opera_endpoint || '').replace(/:\d+$/, '');
@@ -1803,7 +1960,7 @@ function operaState(s) {
   return {
     on: pause ? ['', 'Пауза: включён VPN', 'Без VPN включится сам']
       : none ? ['amber', 'Сайты не направлены', s.opera_skip !== '0' ? 'Они на общих CDN: поставьте «!» перед именем' : 'Проверьте список и выключатели «телефон» и «раздача»']
-      : ['green', 'Работает', [{ EU: 'Европа', AS: 'Азия', AM: 'Америка' }[s.opera_country], a && 'сервер ' + a].filter(Boolean).join(', ')],
+      : ['green', 'Работает', [operaWhere(s), a && 'сервер ' + a].filter(Boolean).join(', ')],
     starting: ['amber', 'Подключается', 'Обычно несколько секунд'],
     fail: ['red', 'Не запустился', s.opera_err || 'Повтор идёт сам'],
     off: s.vpn_up === '1' ? ['', 'Пауза: включён VPN', 'Без VPN включится сам'] : ['', 'Ждёт список сайтов или сеть', ''],
@@ -2027,6 +2184,9 @@ async function loadZev() {
   $('#zev').textContent = lines.length ? lines.join('\n') : 'Пока пусто: здесь появятся результаты автопроверки и подбора.';
 }
 $('#zevBox').addEventListener('toggle', () => { if ($('#zevBox').open) loadZev(); });
+// списки «Обхода» грузились только при открытии WebUI — новые сайты автосписка не было видно.
+// Заново при раскрытии и сворачивании блока; правленое поле «Дополнительные сайты» не трогаем
+$('#zautoBox').addEventListener('toggle', () => { if (!busy) loadZ(zlistDirty()); });
 let renewTs = 0;   // когда нажата «Переподключить сеть»: ждём проверку выхода новее
 $('#netRenew').addEventListener('click', async () => {
   const b = $('#netRenew');
@@ -2104,7 +2264,9 @@ function zautoRow(f) {
     if (r) why.push('сбросов ' + r);
     if (t) why.push('зависаний ' + t);
     if (d) why.push('редирект на заглушку');
-    info = (m ? m[1] + ' ' + m[2] : when) + ' · ' + (why.join(', ') || 'сбои') + ' · ' + (who === 'phone' ? 'телефон' : 'раздача');
+    // источник неизвестен (адрес не телефона и не раздачи, или из давней сессии) — без пометки
+    const src = who === 'phone' ? 'телефон' : who === 'tether' ? 'раздача' : '';
+    info = (m ? m[1] + ' ' + m[2] : when) + ' · ' + (why.join(', ') || 'сбои') + (src ? ' · ' + src : '');
   } else info = 'добавлен до 3.9 — причина не записана';
   return '<div class="row" style="padding:6px 0;gap:8px"><div class="txt"><div class="t" style="font-size:14px;font-weight:400">' + esc(h) + '</div>' +
     '<div class="s" style="font-size:12px">' + esc(info) + '</div></div>' +
@@ -2568,13 +2730,20 @@ $('#metaBtn').addEventListener('click', async () => {
   loadLinks();
   setInterval(() => { if (!document.hidden && !busy && !stBusy) loadStatus(); }, 3000);
   loadClients();
-  setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="home"]').classList.contains('on')) loadClients(); }, 15000);
+  // со сдвигом 1,5 с от статуса: ksu.exec синхронный, два вызова подряд — заметная пауза страницы
+  setTimeout(() => setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="home"]').classList.contains('on')) loadClients(); }, 3000), 1500);
   loadWarp();
   setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="warp"]').classList.contains('on')) loadWarp(); }, 10000);
   // 3 с, а не 1 с, как в WG Tunnel: ksu.exec синхронный, каждый вызов (~80 мс) — пауза страницы
   setInterval(() => { if (!document.hidden && !busy && $('.tab[data-tab="warp"]').classList.contains('on')) loadWarpStats(); }, 3000);
   // вернулись на страницу — сразу свежий статус, не ждать тика
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && !busy) { loadStatus(); scRefresh(); } });
+  // на «Обходе» — и списки (автосписок пополняется, пока WebUI свёрнут)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !busy) {
+      loadStatus(); scRefresh();
+      if ($('.tab[data-tab="bypass"]').classList.contains('on')) loadZ(zlistDirty());
+    }
+  });
 })();
 
 // ---------------------------------------------------------------- без KernelSU (предпросмотр в браузере)
@@ -2594,7 +2763,7 @@ function mockExec(cmd) {
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=предпросмотр\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
     '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=' + (M.target === 'vpn' ? 'wifi:Дом_5G' : 'mobile:25011') + '\nnet_label=' + (M.target === 'vpn' ? 'Дом_5G' : 'YOTA') + '\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nwan=rmnet_data1\nexit=' + (Math.floor(Date.now() / 1000) - 120) + '|rmnet_data1|188.162.73.24|RU|' + (M.wave ? '000|204' : '204|204') + '\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nwarp=up\nwarp_conf=warp-2\nwarp_note=\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://not-a-dns.quic.best/dns-query\nD DNS_FALLBACKS=https://dns.wlrus.cfd/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query https://dns.commonnet.work/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=1\nD OPERA_API_PROXY=\nD OPERA_COUNTRY=EU\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://not-a-dns.quic.best/dns-query\nD DNS_FALLBACKS=https://dns.wlrus.cfd/dns-query https://api.magicdns.ru/dns-query https://dns.zapret.moe/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD DNS_VIA_ZAPRET=0\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=1\nD OPERA_API_PROXY=\nD OPERA_COUNTRY=EU\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
     Object.keys(M.usr).map((k) => 'U ' + k + '=' + M.usr[k] + '\n').join('') };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +
@@ -2621,7 +2790,7 @@ function mockExec(cmd) {
     return { errno: 0, out: t.split('\n').filter(Boolean).map((l) => { const k = l.split('=')[0]; return (KEYS.includes(k) ? (k === 'ZAPRET_ALT_MIN' && !/^\d+$/.test(l.split('=')[1]) ? 'BAD ' : 'OK ') : 'UNK ') + k; }).join('\n') };
   }
   if (a === 'warp-saveall') return { errno: 0, out: 'OK /storage/emulated/0/Download/warp-configs_20261027_1040.zip 3' };
-  if (a === 'clients') return { errno: 0, out: '192.168.43.77|e0:2b:e9:75:60:84|REACHABLE|DESKTOP-LAPTOP|31|21545980|0|1243512870|67710170\n192.168.43.67|42:96:f4:ac:3a:91|STALE|realme-9-Pro-5G|2|7553|0||\n|00:27:15:ec:84:bd|-|android-tv|0|0|1||\n' };
+  if (a === 'clients') return { errno: 0, out: '192.168.43.77|e0:2b:e9:75:60:84|REACHABLE|DESKTOP-LAPTOP|31|21545980|0|' + (1243512870 + Math.floor(Date.now() / 1000 % 86400) * 2400000) + '|' + (67710170 + Math.floor(Date.now() / 1000 % 86400) * 90000) + '\n192.168.43.67|42:96:f4:ac:3a:91|STALE|realme-9-Pro-5G|2|7553|0||\n|00:27:15:ec:84:bd|-|android-tv|0|0|1||\nT|' + Date.now() + '\n' };
   if (/^client-(un)?block /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'dnsflush') return { errno: 0, out: 'OK кэш сброшен (dnsproxy перезапущен). На ноутбуке — ещё ipconfig /flushdns' };
   if (a === 'warp-stats') { M.wrx = (M.wrx || 5e6) + 2e5; M.wup = M.wup || Date.now(); return { errno: 0, out: 'hs_age=' + (Math.floor(Date.now() / 1000) % 130) + '\nrx=' + M.wrx + '\ntx=' + Math.round(M.wrx / 9) + '\nendpoint=188.114.96.1:2408\npeer=bmXOC+hWy3/DnZ3VUUTE7y0yOZfVvcRK0Xf4cPfgyo=\nup=' + Math.round((Date.now() - M.wup) / 1000 + 2534) + '\n' }; }

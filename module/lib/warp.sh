@@ -55,9 +55,11 @@ WARP_PUB=""              # «состояние|заметка», уже зап�
 WARP_ENSURE_PID=""
 WARP_ENSURE_DONE=0
 WARP_ENSURE_AT=0         # не вышло (нет сети при загрузке) — повтор после этого времени
+WARP_ENSURE_BUSY=0       # 1 = ждём конца подбора: повторы каждые 30 с в журнал не пишем
 WARP_TG_SECS=300         # Telegram DC2/DC4 через туннель — проверка раз в 5 мин (warp_tg_dead)
 WARP_TG_TS=0             # последняя такая проверка (0 — на первой проверке сессии)
 WARP_TG_TRIES=0          # переподключений подряд из-за DC2/DC4
+WARP_TG_YTW=0            # откладываний подряд из-за видео YouTube в туннеле (не больше 2 = 10 мин)
 WARP_TG_MAX=5
 WARP_TG_PAUSE=1800       # не помогли WARP_TG_MAX подряд — 30 мин не переподключать
 WARP_TG_HOLD=0           # до этого времени (epoch) не переподключать
@@ -356,9 +358,16 @@ warp_ensure() {
         WARP_ENSURE_PID=""
         r=$(head -1 "$WARP_RUN.ensure" 2>/dev/null); rm -f "$WARP_RUN.ensure"
         case "$r" in
-            OK*) log "WARP: созданы конфиги:${r#OK}"; WARP_RETRY_TS=0 ;;
+            OK*) log "WARP: созданы конфиги:${r#OK}"; WARP_RETRY_TS=0; WARP_ENSURE_BUSY=0 ;;
             '') ;;
-            *) log "WARP: не удалось создать конфиги — $r (повтор через $((WARP_ENSURE_WAIT / 60)) мин)"
+            # занято (сторож проверяет обход — после включения WARP почти всегда, 09.11 на MT6580 и
+            # NX1) — не сбой Cloudflare: через 30 с, без удвоения паузы
+            # (тексты — из warp/warp.sh gen)
+            *"идёт подбор"*|*"уже идёт"*)
+               [ "$WARP_ENSURE_BUSY" = 1 ] || log "WARP: конфиги создам позже — ${r#ERR } (повтор каждые 30 с)"
+               WARP_ENSURE_BUSY=1; WARP_ENSURE_DONE=0; WARP_ENSURE_AT=$(( $(date +%s) + 30 )) ;;
+            *) WARP_ENSURE_BUSY=0
+               log "WARP: не удалось создать конфиги — $r (повтор через $((WARP_ENSURE_WAIT / 60)) мин)"
                # Cloudflare стабильно не отвечает — не дёргать nfqws и правила
                # каждые 5 минут: пауза растёт вдвое, до часа
                WARP_ENSURE_DONE=0; WARP_ENSURE_AT=$(( $(date +%s) + WARP_ENSURE_WAIT ))
@@ -371,7 +380,7 @@ warp_ensure() {
     WARP_ENSURE_DONE=1
     [ -f "$WARP_DIR/.init" ] && return 0
     ls "$WARP_DIR"/*.conf >/dev/null 2>&1 && return 0
-    log "WARP: конфигов нет — создаю 3 (первый запуск)"
+    [ "$WARP_ENSURE_BUSY" = 1 ] || log "WARP: конфигов нет — создаю 3 (первый запуск)"
     sh "$MODULE_DIR/warp/warp.sh" ensure 3 > "$WARP_RUN.ensure" 2>/dev/null < /dev/null &
     WARP_ENSURE_PID=$!
 }
@@ -409,7 +418,7 @@ warp_reconcile() {
     # WARP впереди guard открыл бы клиентам Telegram/Google — «VPN или ничего»
     elif [ "$VPN_TETHER_MODE" = "blocked" ]; then why="пауза kill-switch"
     elif [ "$VPN_TETHER_MODE" != "off" ]; then why="поднят VPN"
-    elif [ "$WAN_DOWN_LOGGED" = "1" ] || [ -z "$LAST_WAN_IFACE" ]; then why="нет сети"
+    elif wan_gone; then why="нет сети"
     fi
     # первые конфиги — только при сети (иначе регистрация падает до перезагрузки)
     [ -z "$why" ] && warp_ensure
@@ -552,6 +561,18 @@ warp_reconcile() {
                     WARP_TG_TS=$now
                     if warp_tg_dead; then
                         WARP_TG_TRIES=$((WARP_TG_TRIES + 1))
+                        # через туннель сейчас идёт видео (отбой YouTube вёл туда адреса) —
+                        # снос оборвал бы его: 08.11 ролик висел 11 с. Попытка не в счёт.
+                        # Не больше 2 раз подряд: warp_yt_busy видит и простаивающие
+                        # соединения (conntrack держит ESTABLISHED до 2 ч) — без предела
+                        # Telegram через WARP мог не ожить вовсе (облачное ревью 08.11)
+                        if [ "$WARP_TG_YTW" -lt 2 ] && warp_yt_busy; then
+                            WARP_TG_YTW=$((WARP_TG_YTW + 1))
+                            WARP_TG_TRIES=$((WARP_TG_TRIES - 1))
+                            log "WARP: Telegram DC2/DC4 через туннель молчат, но через него идёт видео YouTube — переподключу на следующей проверке"
+                            return 0
+                        fi
+                        WARP_TG_YTW=0
                         if [ $WARP_TG_TRIES -gt $WARP_TG_MAX ]; then
                             log "WARP: Telegram DC2/DC4 через туннель молчат — $WARP_TG_MAX переподключений подряд не помогли, жду $((WARP_TG_PAUSE / 60)) мин"
                             WARP_TG_TRIES=0; WARP_TG_HOLD=$((now + WARP_TG_PAUSE))
@@ -562,7 +583,7 @@ warp_reconcile() {
                         fi
                     else
                         [ $WARP_TG_TRIES -gt 0 ] && log "WARP: Telegram DC2/DC4 через туннель отвечают (переподключений: $WARP_TG_TRIES)"
-                        WARP_TG_TRIES=0
+                        WARP_TG_TRIES=0; WARP_TG_YTW=0
                     fi
                 fi
             elif [ "$WARP_NETCHG" = 1 ]; then
@@ -657,8 +678,12 @@ warp_dq() {
     # Android 8 (нет /apex): toybox nc не принимает эти ключи, у busybox nc нет UDP.
     # На новых пустой ответ — сбой DNS: обычный DNS мимо dnsproxy дал бы чужие адреса
     [ -d /apex ] && return 0
-    [ -n "$BUSYBOX" ] && "$BUSYBOX" nslookup "$d" 8.8.8.8 2>/dev/null | \
-        sed -n 's/^Address[ 0-9]*: *\([0-9.]*\).*/\1/p' | grep -v '^8\.8\.8\.8$'
+    # busybox nslookup умеет «сервер:порт» — тот же dnsproxy, что у приложений. 09.11 на MT6580
+    # через 8.8.8.8 провайдер отдал 4pda.to 8.6.112.0/8.47.69.0, Chrome по DoH — 104.20.39.144:
+    # правила Opera стояли не на тех адресах, 4pda шёл напрямую (451). Адреса — после «Name:»,
+    # строки выше — сам сервер
+    [ -n "$BUSYBOX" ] && timeout 4 "$BUSYBOX" nslookup "$d" "$srv:$port" 2>/dev/null | \
+        sed -n '/^Name/,$ s/^Address[ 0-9]*: *\([0-9.]*\).*/\1/p' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
 }
 
 # Адреса WARP_DOMAINS без общих CDN -> WARP_DOM_IPS (вместе с прошлым набором:
@@ -751,6 +776,16 @@ warp_kill_sockets() {   # причина [сети — по умолчанию �
     return 0
 }
 
+# Через туннель идёт видео YouTube: в conntrack есть установленные соединения с обеими
+# метками — видео (YT_CTMARK, googlevideo в ClientHello) и WARP. И адреса из отбоя
+# (YT_WARP_SIG), и группа Google (WARP_GOOGLE), и телефон, и раздача
+warp_yt_busy() {
+    local m
+    [ -n "$CONNTRACK_BIN" ] || return 1
+    m=$(printf '0x%x' $((YT_CTMARK | WARP_MARK)))
+    $CONNTRACK_BIN -L -p tcp --mark "$m/$m" 2>/dev/null | grep -q ' ESTABLISHED '
+}
+
 warp_routes_off() {   # [force] — снять, даже если по флагу не стоят
     local t c _n
     [ "$WARP_RT_ON" = "1" ] || [ "$1" = "force" ] || return 0
@@ -774,7 +809,10 @@ warp_routes_off() {   # [force] — снять, даже если по флаг�
     $ip6tables -F "$CHAIN_WARP_V6F" 2>/dev/null; $ip6tables -X "$CHAIN_WARP_V6F" 2>/dev/null
     if [ "$WARP_RT_ON" = "1" ]; then
         log "WARP: маршруты в туннель сняты"
-        warp_kill_sockets "туннель снят"
+        # и видеосерверы, которые отбой YouTube сам вёл в WARP (YT_WARP_SIG): их
+        # соединения после сноса туннеля идут мимо со старым NAT и молча висят до
+        # тайм-аута плеера. 08.11: переподключения из-за Telegram DC2/DC4 — 5 раз за 2 мин
+        warp_kill_sockets "туннель снят" "$(warp_dst4) $YT_WARP_SIG"
     fi
     WARP_RT_ON=0; WARP_RT_SIG=""
 }

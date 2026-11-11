@@ -200,7 +200,10 @@ dnsproxy_spawn() {
 META_EU_PORT=5355
 META_EU_LOG="/data/local/tmp/vpn_tether_dnsproxy_meta.log"
 META_EU_UPS_FILE="/data/local/tmp/vpn_tether_meta_upstreams"
-META_DOMAINS="instagram.com cdninstagram.com instagr.am ig.me facebook.com fbcdn.net fbsbx.com facebook.net fb.com fb.me messenger.com threads.net threads.com meta.com"
+# whatsapp — 08.11, YOTA: web/www.whatsapp.com на адресах обычного DoH (31.13.72.52 от wlrus,
+# 157.240.205.60 от Google) — тайм-аут, с ECS — 57.144.75.32: 302/200 за 0,5–2,8 с (тот же
+# приём, что адреса 57.144.x в hosts.ini magisk-zapret2)
+META_DOMAINS="instagram.com cdninstagram.com instagr.am ig.me facebook.com fbcdn.net fbsbx.com facebook.net fb.com fb.me messenger.com threads.net threads.com meta.com whatsapp.com whatsapp.net wa.me"
 DNSPROXY_META_ON=0
 
 meta_eu_stop() {
@@ -304,7 +307,7 @@ udp_listening() {   # порт
 }
 
 dnsproxy_probe() {   # [адрес] — по умолчанию dnsproxy; с адресом — :53 от группы dnsproxy
-    local lbl f nc_pid t0 now out nc
+    local lbl f nc_pid t0 now out nc ex=""
     [ -n "$BUSYBOX" ] || return 0   # нечем проверить — не блокируем запуск
     lbl=$(printf 'p%09d' $(( ($(date +%s) % 100000) * 10000 + RANDOM % 10000 )))
     f="/data/local/tmp/vpn_tether_probe.$$"
@@ -313,7 +316,15 @@ dnsproxy_probe() {   # [адрес] — по умолчанию dnsproxy; с а�
     if [ -n "$1" ]; then
         # мимо перехвата DNS телефона: от root он ушёл бы в тот же dnsproxy
         nc="$BUSYBOX nc -u -w $DNS_PROBE_TIMEOUT $1 53"
-        [ "$DNSPROXY_SU_G" = "1" ] && nc="su -g $DNSPROXY_GID -c '$nc'"
+        if [ "$DNSPROXY_SU_G" = "1" ]; then
+            nc="su -g $DNSPROXY_GID -c '$nc'"
+        else
+            # без su -g root перехватывается (кроме серверов самого dnsproxy): адрес оператора
+            # открываем только на время проверки — насовсем нельзя, на него ходит резолвер (netd)
+            ex="-d $1 -p udp --dport 53 -m owner --uid-owner 0 -j RETURN"
+            # shellcheck disable=SC2086
+            $iptables -t nat -I "$CHAIN_PHONE_DNS" 1 $ex 2>/dev/null || ex=""
+        fi
     fi
     printf '\022\064\001\000\000\001\000\000\000\000\000\000\012%s\007example\003com\000\000\001\000\001' "$lbl" | \
         eval "$nc" > "$f" 2>/dev/null &
@@ -327,6 +338,8 @@ dnsproxy_probe() {   # [адрес] — по умолчанию dnsproxy; с а�
     done
     now=$(uptime_ms)
     kill "$nc_pid" 2>/dev/null
+    # shellcheck disable=SC2086
+    [ -n "$ex" ] && $iptables -t nat -D "$CHAIN_PHONE_DNS" $ex 2>/dev/null
     out=$($BUSYBOX od -An -tx1 -N4 "$f" 2>/dev/null)
     rm -f "$f"
     # " 12 34 81 83": id, флаги (rcode = младшие 4 бита 4-го байта)
@@ -804,41 +817,109 @@ dns_operator_dead() {
 
 dns_hosts_of() { echo $* | sed -E 's#[a-z0-9]+://([^/: ]+)[^ ]*#\1#g'; }
 
-dns_try_alt() {     # 0 = перешли на запасные DoH и они отвечают
-    [ -z "$DNS_ALT_UPS" ] || return 1
+dns_try_alt() {     # 0 = перешли на запасной DoH и он отвечает
+    local why="$1" cur="$DNS_ALT_UPS" cands c t i j=0 n=0 st ok="" now t0 pids="" d="/data/local/tmp/vpn_tether_alt.$$"
     [ -n "$DNS_FALLBACKS" ] || return 1
     case "$DNSPROXY_SIG" in "direct-doh|"*) ;; *) return 1 ;; esac
-    # основным — только первый запасной (dns.zapret.moe): несколько -u dnsproxy
-    # опрашивает по очереди, и часть ответов пришла бы от Google без
-    # "разблокирующих" адресов
-    # первый запасной, которого нет среди основных (выбран zapret.moe основным —
-    # тогда запасной не он же, а следующий)
-    DNS_ALT_UPS=$(for u in $DNS_FALLBACKS; do case " $DNS_UPSTREAMS " in *" $u "*) ;; *) echo "$u"; break ;; esac; done)
-    [ -n "$DNS_ALT_UPS" ] || return 1
-    if dnsproxy_start "direct-doh" $DNS_ALT_UPS && dnsproxy_probe_cold; then
-        local now t keep="" hold="$DNS_ALT_HOLD"
-        now=$(date +%s)
-        for t in $DNS_ALT_TRIPS; do [ $((now - t)) -lt 1800 ] && keep="$keep $t"; done
-        DNS_ALT_TRIPS="$keep $now"
-        [ "$(echo $DNS_ALT_TRIPS | wc -w)" -ge 2 ] && hold="$DNS_ALT_HOLD_FLAP"
-        log "WARNING: DoH-апстрим не отвечает ($1) — DNS через запасные DoH ($(dns_hosts_of $DNS_ALT_UPS)); на $(dns_hosts_of $DNS_UPSTREAMS) вернусь не раньше чем через $((hold / 60)) мин$([ "$hold" = "$DNS_ALT_HOLD_FLAP" ] && echo ' (он дёргается)')"
-        DNS_ALT_LAST=$now
-        DNS_ALT_SINCE=$now
-        DNS_ALT_OKS=0
-        phone_status_refresh
-        return 0
+    # основным — только один запасной: несколько -u dnsproxy опрашивает по
+    # очереди, и часть ответов пришла бы от Google без "разблокирующих" адресов.
+    # Кандидаты — запасные, которых нет среди основных (выбран zapret.moe
+    # основным — запасной не он же) и кроме текущего: уже на запасном и он
+    # замолчал — следующий, а не сразу к оператору.
+    # Первый живой по списку: раньше брали только первый, и если он лежал — сразу
+    # к оператору (08.11 16:24: not-a-dns молчал 75 с, первым запасным стоял
+    # мёртвый dns.geohide.ru:444, а живой zapret.moe — четвёртым). Кандидатов
+    # проверяем curl-ом параллельно и ждём, пока не станет известен первый
+    # живой по порядку (до ~5 с). Не поднялся на нём dnsproxy — следующий
+    # живой по curl (к этому времени проверки закончились), не больше двух
+    # попыток. Не ответил никто — 5 мин без проверки curl-ом (белые списки:
+    # откат проверяется раз в 30 с) и первый по списку, как раньше.
+    cands=$(for c in $DNS_FALLBACKS; do case " $DNS_UPSTREAMS $cur " in *" $c "*) ;; *) echo "$c" ;; esac; done)
+    [ -n "$cands" ] || return 1
+    now=$(date +%s)
+    if [ $((now - DNS_ALT_SCAN_DEAD)) -ge 300 ] && command -v curl >/dev/null 2>&1; then
+        rm -f "$d".*
+        i=0
+        for c in $cands; do
+            i=$((i + 1))
+            # DoT/DoQ (tls://, quic://) curl-ом не проверить — «жив», решит проба dnsproxy
+            ( case "$c" in https://*) dns_doh_alive "$c" any ;; esac && : > "$d.$i.y" || : > "$d.$i.n" ) &
+            pids="$pids $!"
+        done
+        t0=$(uptime_ms)
+        while :; do
+            i=0; st=dead
+            for c in $cands; do
+                i=$((i + 1))
+                if [ -e "$d.$i.y" ]; then ok="$c"; j=$i; st=done; break; fi
+                [ -e "$d.$i.n" ] || { st=wait; break; }
+            done
+            [ "$st" = wait ] || break
+            [ $(( $(uptime_ms) - t0 )) -ge 5000 ] && break
+            sleep 0.1
+        done
+        # вышло время, а кто-то раньше по списку ещё висит (su + curl -m 4) — первый
+        # уже ответивший живой, где бы он ни стоял
+        i=0
+        [ -n "$ok" ] || for c in $cands; do
+            i=$((i + 1))
+            [ -e "$d.$i.y" ] && { ok="$c"; j=$i; break; }
+        done
+        [ -n "$ok" ] || DNS_ALT_SCAN_DEAD=$now
     fi
+    [ -n "$ok" ] || for c in $cands; do ok="$c"; break; done
+    while [ -n "$ok" ] && [ "$n" -lt 2 ]; do
+        n=$((n + 1))
+        # до dnsproxy_start: по нему он собирает фолбэки запасного
+        DNS_ALT_UPS="$ok"
+        if dnsproxy_start "direct-doh" "$ok" && dnsproxy_probe_cold; then
+            local keep="" hold="$DNS_ALT_HOLD"
+            dns_alt_reap $pids; rm -f "$d".*
+            now=$(date +%s)
+            for t in $DNS_ALT_TRIPS; do [ $((now - t)) -lt 1800 ] && keep="$keep $t"; done
+            # уход с основного — «поездка»; смена одного запасного на другой — нет:
+            # иначе основной считался бы «дёргающимся» и ждал 30 мин вместо 10
+            [ -n "$cur" ] || keep="$keep $now"
+            DNS_ALT_TRIPS="$keep"
+            [ "$(echo $DNS_ALT_TRIPS | wc -w)" -ge 2 ] && hold="$DNS_ALT_HOLD_FLAP"
+            log "WARNING: DoH-апстрим не отвечает ($why) — DNS через запасные DoH ($(dns_hosts_of $ok)); на $(dns_hosts_of $DNS_UPSTREAMS) вернусь не раньше чем через $((hold / 60)) мин$([ "$hold" = "$DNS_ALT_HOLD_FLAP" ] && echo ' (он дёргается)')"
+            DNS_ALT_LAST=$now
+            DNS_ALT_SINCE=$now
+            DNS_ALT_OKS=0
+            phone_status_refresh
+            return 0
+        fi
+        # следующий живой по curl после него (без проверки curl-ом j=0 — некого)
+        ok=""; i=0
+        [ "$j" -gt 0 ] && for c in $cands; do
+            i=$((i + 1))
+            [ "$i" -gt "$j" ] && [ -e "$d.$i.y" ] && { ok="$c"; j=$i; break; }
+        done
+    done
+    dns_alt_reap $pids; rm -f "$d".*
+    # curl их видел, а dnsproxy на них не поднялся (фронтенд жив, DoH нет) — тоже
+    # 5 мин без проверки: иначе в откате каждые 30 с снова проверка и два запуска
+    [ -n "$pids" ] && DNS_ALT_SCAN_DEAD=$now
     # запасные тоже молчат — обратно на основной, дальше откат к оператору
     DNS_ALT_UPS=""
     dnsproxy_start "direct-doh" $DNS_UPSTREAMS
     return 1
 }
 
-# Основной DoH отвечает? Напрямую curl-ом, от группы dnsproxy (мимо AdGuard).
-dns_primary_alive() {
-    local u code
-    set -- $DNS_UPSTREAMS
-    u="$1"
+# Недождавшиеся проверки запасных — не нужны: их curl доработает сам (-m 4).
+# -9, как в yt_dead_off: TERM подоболочке «( … ) &» доходит до trap демона ->
+# cleanup_on_exit (правила, dnsproxy, WARP сняты, а демон работает дальше)
+dns_alt_reap() {
+    local p
+    for p in "$@"; do yt_bg_alive "$p" && kill -9 "$p" 2>/dev/null; done
+}
+
+# DoH-сервер отвечает? Напрямую curl-ом, от группы dnsproxy (мимо AdGuard).
+# dns_doh_alive <url> [any]; any — жив при любом ответе HTTP (TLS с этим именем
+# прошёл, сервер на месте): для выбора запасного, geohide.ru по HTTP/1.1 даёт
+# 503, а dnsproxy (HTTP/2) отвечает (30.10) — решит проба dnsproxy.
+dns_doh_alive() {
+    local u="$1" code
     # проверить нечем (не https / нет curl) — «не жив»: запасной работает, а
     # «жив» гонял бы на мёртвый основной раз в ~30 мин (сценарное ревью)
     case "$u" in https://*) ;; *) return 1 ;; esac
@@ -858,8 +939,12 @@ dns_primary_alive() {
         code=$(curl -s -o /dev/null -m 4 --no-alpn --capath $ca -H 'accept: application/dns-message' -w '%{http_code} %{errormsg}' "$u" 2>/dev/null)
     fi
     case "$code" in 200*|505*|*"HTTP/0.9"*) return 0 ;; esac
+    [ "$2" = "any" ] && case "$code" in ""|000*) ;; *) return 0 ;; esac
     return 1
 }
+
+# Основной DoH отвечает? (первый из DNS_UPSTREAMS)
+dns_primary_alive() { set -- $DNS_UPSTREAMS; dns_doh_alive "$1"; }
 
 dns_alt_recheck() {
     local hold="$DNS_ALT_HOLD"
@@ -1015,8 +1100,21 @@ dns_health() {
 # ============================================================================
 # DNS самого телефона (DNS_PHONE)
 # ============================================================================
+# Обычные (порт 53, без шифрования) DNS-серверы, к которым ходит сам dnsproxy: bootstrap и
+# апстримы вида 1.2.3.4, 1.2.3.4:53, udp://… tcp://… (DoH/DoT — мимо: не порт 53).
+# Без аргумента — их IPv4; «other» — код 0, если среди них есть имя или IPv6 (адрес не исключить)
+dnsproxy_plain_ips() {
+    local u
+    for u in $DNS_BOOTSTRAP $DNS_UPSTREAMS $DNS_FALLBACKS $DNS_META_UPSTREAMS $DNS_VPN_UPSTREAMS; do
+        case "$u" in udp://*|tcp://*) u=${u#*://} ;; *://*) continue ;; esac
+        u=${u%%/*}
+        case "$u" in *:*:*|\[*) echo "x $u"; continue ;; *:*) u=${u%:*} ;; esac
+        case "$u" in '') continue ;; *[!0-9.]*) echo "x $u" ;; *) echo "4 $u" ;; esac
+    done | sort -u | if [ "$1" = other ]; then grep -q '^x '; else sed -n 's/^4 //p'; fi
+}
+
 phone_dns_rules_on() {
-    local t
+    local t _a
     PHONE_DNS_V6=0
     for t in "$iptables" "$ip6tables"; do
         # ip6 nat есть не во всех ядрах (на OnePlus 13T, A15 — нет)
@@ -1027,8 +1125,21 @@ phone_dns_rules_on() {
         # сам dnsproxy (bootstrap :53) — мимо, иначе петля
         [ -n "$DNSPROXY_GID" ] && \
             $t -t nat -A "$CHAIN_PHONE_DNS" -m owner --gid-owner "$DNSPROXY_GID" -j RETURN 2>/dev/null
-        [ "$DNSPROXY_SU_G" = "1" ] || \
-            $t -t nat -A "$CHAIN_PHONE_DNS" -m owner --uid-owner 0 -j RETURN 2>/dev/null
+        # su -g не работает (Magisk < 26): dnsproxy работает от root. Мимо — только root к его
+        # обычным DNS-серверам (bootstrap, апстримы без шифрования), а не весь root: на Android 8
+        # системный резолвер (netd) спрашивает от root за все приложения, и 09.11 на MT6580
+        # мимо DoH шёл DNS всех приложений, кроме Chrome со своим резолвером
+        # Обычный DNS по имени или по IPv6 адресом не исключить, и IPv6 — как раньше: весь root мимо
+        if [ "$DNSPROXY_SU_G" != "1" ]; then
+            if [ "$t" = "$ip6tables" ] || dnsproxy_plain_ips other; then
+                $t -t nat -A "$CHAIN_PHONE_DNS" -m owner --uid-owner 0 -j RETURN 2>/dev/null
+            else
+                for _a in $(dnsproxy_plain_ips); do
+                    $t -t nat -A "$CHAIN_PHONE_DNS" -d "$_a" -p udp --dport 53 -m owner --uid-owner 0 -j RETURN 2>/dev/null
+                    $t -t nat -A "$CHAIN_PHONE_DNS" -d "$_a" -p tcp --dport 53 -m owner --uid-owner 0 -j RETURN 2>/dev/null
+                done
+            fi
+        fi
         $t -t nat -A "$CHAIN_PHONE_DNS" -o lo -j RETURN 2>/dev/null
         $t -t nat -A "$CHAIN_PHONE_DNS" -p udp --dport 53 -j REDIRECT --to-ports "$DNSPROXY_PORT" 2>/dev/null
         $t -t nat -A "$CHAIN_PHONE_DNS" -p tcp --dport 53 -j REDIRECT --to-ports "$DNSPROXY_PORT" 2>/dev/null

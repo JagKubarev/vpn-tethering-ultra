@@ -211,6 +211,9 @@ has_private_ip4() {
         grep -qE 'inet (10|172\.1[6-9]|172\.2[0-9]|172\.3[01]|192\.168)\.'
 }
 
+# Сети нет: WAN пропал или ещё не появлялся после старта (WARP, Opera)
+wan_gone() { [ "$WAN_DOWN_LOGGED" = "1" ] || [ -z "$LAST_WAN_IFACE" ]; }
+
 get_wan_iface() {
     local iface
     iface=$(netd_tether_pairs | awk 'NR == 1 { print $2 }')
