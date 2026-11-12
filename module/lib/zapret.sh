@@ -378,11 +378,11 @@ zapret_zone_re() {
 # .ru/.su/.рф-сайты и сайты Google (list-noauto), которые явно есть во
 # встроенном или своём списке — им обход нужен (заблокированные СМИ, YouTube);
 # файл переписывается только при изменении
-zapret_ru_listed() {
+zapret_ru_listed() {   # [встроенный список]: у nfqws2 — его user.list, а не list-default
     local re
     re=$(zapret_zone_re "$ZAPRET_LIST_RUTLD" "$ZAPRET_LIST_NOAUTO")
     [ -n "$re" ] || re='^$'
-    { sed 's/#.*//' "$ZAPRET_LIST_DEFAULT"; sed 's/#.*//' "$ZAPRET_LIST_USER" 2>/dev/null; } | \
+    { sed 's/#.*//' "${1:-$ZAPRET_LIST_DEFAULT}"; sed 's/#.*//' "$ZAPRET_LIST_USER" 2>/dev/null; } | \
         tr -d ' \r' | tr 'A-Z' 'a-z' | grep -E "$re" | sort -u > "$ZAPRET_RU_RUN.new"
     if cmp -s "$ZAPRET_RU_RUN.new" "$ZAPRET_RU_RUN"; then rm -f "$ZAPRET_RU_RUN.new"; else mv -f "$ZAPRET_RU_RUN.new" "$ZAPRET_RU_RUN"; fi
 }
@@ -523,7 +523,23 @@ zapret2_args() {
  --lua-desync=fake:blob=tls_clienthello_sochi_park:tls_mod=rnd,dupsid:tcp_ts=-1500:badsum:strategy=2
  --lua-desync=hostfakesplit:repeats=4:tcp_ts=-600000:tcp_md5:host=ya.ru:strategy=2
  --payload=http_req --lua-desync=fake:blob=stun_fake:tcp_ts=-5000:badsum:tcp_ts_up --lua-desync=hostfakesplit:host=mail.ru:tcp_ts=-5000:tcp_ts_up"
-    extra="--hostlist=$S/user.list $us --hostlist-auto=$ZAPRET_LIST_AUTO --hostlist-auto-debug=$ZAPRET_AUTO_LOG --hostlist-exclude=$S/exclude.list"
+    # .ru/.su/.рф и Google (list-noauto) — как у nfqws1: профиль по именам их не трогает и в автосписок
+    # не берёт; такие сайты из списков (user.list nfqws2 и свой) — своим профилем перед ним. Google
+    # (Play, YouTube) это не задевает: его адреса — в ipset.list, а профиль по адресам идёт раньше
+    local rux="" ruh=""
+    if grep -q '^[a-z]' "$ZAPRET_LIST_RUTLD" "$ZAPRET_LIST_NOAUTO" 2>/dev/null; then
+        grep -q '^[a-z]' "$ZAPRET_LIST_RUTLD" 2>/dev/null && rux="--hostlist-exclude=$ZAPRET_LIST_RUTLD"
+        grep -q '^[a-z]' "$ZAPRET_LIST_NOAUTO" 2>/dev/null && rux="$rux --hostlist-exclude=$ZAPRET_LIST_NOAUTO"
+        zapret_ru_listed "$S/user.list"
+        [ -s "$ZAPRET_RU_RUN" ] && ruh="--hostlist=$ZAPRET_RU_RUN"
+    fi
+    # ZAPRET_MODE: list — списки nfqws2 и свой + автосписок (MODE_AUTO nfqws2-android) с нашим
+    # порогом; all — все сайты, кроме исключений (MODE_ALL), автосписок не нужен
+    if [ "$ZAPRET_MODE" = "all" ]; then
+        extra="--hostlist-exclude=$S/exclude.list $rux"
+    else
+        extra="--hostlist=$S/user.list $us --hostlist-auto=$ZAPRET_LIST_AUTO --hostlist-auto-fail-threshold=$ZAPRET_AUTO_FAIL --hostlist-auto-debug=$ZAPRET_AUTO_LOG --hostlist-exclude=$S/exclude.list $rux"
+    fi
     ipset="--ipset=$S/ipset.list --ipset-exclude=$S/ipset_exclude.list --ipset-ip=0.0.0.0"
     # DoH через обход (DNS_VIA_ZAPRET): как у nfqws1 — свои профили первыми, подделка с md5 и разрез
     # по середине имени; «как есть» (ZAPRET_DOH_ASIS) — пустой профиль. Свои профили — до hardcorp74
@@ -536,8 +552,10 @@ zapret2_args() {
         [ -n "$dn" ] && doh="$doh--filter-tcp=$dpp --filter-l7=tls $ex --hostlist-domains=$dn $dd --new "
         [ -n "$di" ] && doh="$doh--filter-tcp=$dpp --filter-l7=tls --ipset-ip=$di $dd --new "
     fi
-    # порядок — как _startup_args: свои профили, UDP, QUIC (адреса, имена), TCP (адреса, имена)
-    echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $base $doh$custom --new $udp --new $quic $ipset --new $quic $extra --new $tcp $ipset --new $tcp $extra" | tr '\n' ' ' | tr -s ' '
+    # порядок — как _startup_args: свои профили, UDP, QUIC (адреса, имена), TCP (адреса, имена);
+    # .ru и Google из списков — между адресами и именами
+    [ -n "$ruh" ] && ruh="$ruh --new"
+    echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $base $doh$custom --new $udp --new $quic $ipset --new ${ruh:+$quic $ruh }$quic $extra --new $tcp $ipset --new ${ruh:+$tcp $ruh }$tcp $extra" | tr '\n' ' ' | tr -s ' '
 }
 # правило с портами: multiport, а на ядре без него — по порту
 zapret2_rule() {   # таблица цепочка proto dports|sports порты "доп." цель...
@@ -726,7 +744,7 @@ zapret_start() {
         ZAPRET_ENGINE_RUN="$ZAPRET_ENGINE_EFF"
         if [ "$ZAPRET_ENGINE_EFF" = nfqws2 ]; then
             ZAPRET_ALT_N=0
-            log "zapret: nfqws2 запущен (pid $pid, стратегия hardcorp74 из nfqws2-android, свои списки и автосписок)"
+            log "zapret: nfqws2 запущен (pid $pid, стратегия hardcorp74 из nfqws2-android, $([ "$ZAPRET_MODE" = all ] && echo "все сайты, кроме .ru и Google не из списков" || echo "свои списки и автосписок"))"
             return 0
         fi
         ZAPRET_ALT_N=$(zapret_alt_count "$1")
