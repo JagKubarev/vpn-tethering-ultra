@@ -62,7 +62,7 @@
 # ============================================================================
 # v1.1 — свой DNS для раздачи через dnsproxy (AdGuard, bin/):
 #   - direct: DNS клиентов (любой :53) -> REDIRECT на локальный dnsproxy ->
-#     DoH/DoT (по умолчанию dns.wlrus.cfd), с кэшем и шифрованными фолбэками.
+#     DoH/DoT (по умолчанию dns.zapret.moe), с кэшем и шифрованными фолбэками.
 #     Оператор видит только TLS до DNS-сервера, а не сами запросы.
 #   - VPN: по умолчанию как раньше (DNAT в DNS VPN). Опционально cache/doh —
 #     только если трафик root реально идёт в tun (иначе DNS утёк бы мимо VPN).
@@ -701,7 +701,11 @@ DNS_VPN="dnat"         # VPN-режим:    dnat  = DNAT в DNS из VPN (как
 # (NOERROR без ответов, три раза подряд) — это не ошибка, на запасные dnsproxy
 # не уходит, и GitHub не открывался; not-a-dns, comss и Google отдают адрес.
 # Wlrus — первым запасным
-DNS_UPSTREAMS="https://not-a-dns.quic.best/dns-query"
+# 12.11 (3.26.2): основной — zapret.moe. not-a-dns с утра 12.11 лежал (нет TCP ни напрямую,
+# ни через WARP), api.magicdns.ru и dns.magicdns.ru не отвечают (MagicDNS переехал 4.11 на
+# de.magicdns.ru). Скан 23 DoH на YOTA: zapret.moe 0,5 с, настоящие адреса github.com, YouTube,
+# x.com, 4pda, Instagram (57.14x), прокси 5.129.221.64 — ChatGPT и Gemini 200
+DNS_UPSTREAMS="https://dns.zapret.moe/dns-query"
 # Если основные недоступны. Только шифрованные — иначе запросы ушли бы
 # оператору открытым текстом.
 # Первый, которого нет среди основных, — замена основному; при сбое основным
@@ -734,7 +738,12 @@ DNS_UPSTREAMS="https://not-a-dns.quic.best/dns-query"
 # keyoneday не взят: через прокси и www.google.com, а прокси не докачивает страницу за 8 с
 # zapret.moe — третьим, сразу после MagicDNS (08.11 вечер: geohide и comss не отвечали
 # даже через WARP, zapret.moe — ~270 мс в соединении, прокси для всех трёх ИИ)
-DNS_FALLBACKS="https://dns.wlrus.cfd/dns-query https://api.magicdns.ru/dns-query https://dns.zapret.moe/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query"
+# 12.11: de.magicdns.ru — вторым (0,37 с, настоящие адреса, прокси 94.249.177.102 для ИИ);
+# not-a-dns — третьим (до 12.11 самый ровный, вдруг оживёт); sync.bezmezhau.com (0,53 с,
+# прокси для ИИ, но 4pda.to отдаёт через свой прокси — у нас 4PDA ведёт Opera); wlrus ниже:
+# 12.11 его прокси для ИИ с YOTA мертвы, для 4pda.to — заглушка 8.6.112.0, Instagram —
+# 31.13.72.174 (тайм-аут). dagami не взят: прокси с YOTA не отвечают
+DNS_FALLBACKS="https://de.magicdns.ru/dns-query https://not-a-dns.quic.best/dns-query https://sync.bezmezhau.com/dns-query https://dns.wlrus.cfd/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query"
 # Апстримы для DNS_VPN=doh (идут через туннель)
 DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Чем резолвить имена самих апстримов (dns.wlrus.cfd и т.д.). Подмена тут не
