@@ -837,8 +837,10 @@ zapret_rules_on() {
                 for u in $excl; do
                     $t -t mangle -A "$CHAIN_ZAPRET" -m owner --uid-owner "$u" -j RETURN 2>/dev/null
                 done
-                # dnsproxy — мимо, если не просили DoH через обход (DNS_VIA_ZAPRET)
-                [ -n "$DNSPROXY_GID" ] && [ "$DNS_VIA_ZAPRET" != "1" ] && \
+                # dnsproxy — мимо. С DoH через обход (DNS_VIA_ZAPRET) его TCP, кроме порта 80, уже
+                # в очереди правилом выше; сюда доходят порт 80 (проверка белых списков) и UDP —
+                # без этого у nfqws2 их забирали общие правила (порт 80 — в hardcorp74)
+                [ -n "$DNSPROXY_GID" ] && \
                     $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$DNSPROXY_GID" -j RETURN 2>/dev/null
                 # opera-proxy: его TLS к серверам Opera обход не трогает
                 $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$OPERA_GID" -j RETURN 2>/dev/null
