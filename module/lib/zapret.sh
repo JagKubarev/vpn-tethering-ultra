@@ -495,7 +495,7 @@ zapret_engine() {
     echo nfqws1
 }
 zapret2_args() {
-    local L="$ZAPRET2_DIR/lua" B="$ZAPRET2_DIR/blobs" S="$ZAPRET2_DIR/lists" ex="" us="" base custom udp quic tcp tcpd tcph extra ipset
+    local L="$ZAPRET2_DIR/lua" B="$ZAPRET2_DIR/blobs" S="$ZAPRET2_DIR/lists" ex="" us="" base custom udp quic tcp tcpd tcph tcpt extra ipset
     grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
     grep -q '[a-z0-9]' "$ZAPRET_LIST_USER" 2>/dev/null && us="--hostlist=$ZAPRET_LIST_USER"
     base="--lua-init=@$L/zapret-lib.lua --lua-init=@$L/zapret-antidpi.lua --lua-init=@$L/zapret-auto.lua
@@ -525,6 +525,12 @@ zapret2_args() {
  --lua-desync=hostfakesplit:repeats=4:tcp_ts=-600000:tcp_md5:host=ya.ru:strategy=2"
     tcph="--payload=http_req --lua-desync=fake:blob=stun_fake:tcp_ts=-5000:badsum:tcp_ts_up --lua-desync=hostfakesplit:host=mail.ru:tcp_ts=-5000:tcp_ts_up"
     tcp="--filter-tcp=443,80,1984,5222 --filter-l7=http,tls $ex $tcpd $tcph"
+    # только TLS — для адресов (ipset) и «всех сайтов». Поддельные части Host у HTTP держатся лишь
+    # на метке времени TCP, а Windows её не ставит: 12.11 у ноутбука на раздаче HTTP к адресам
+    # ipset (Akamai, Cloudflare, Google) приходил испорченным — «нет интернета» (проверка
+    # msftconnecttest — 400) и падали сайты с проверкой отзыва сертификата (OCSP по HTTP).
+    # nfqws1 порт 80 не трогал вовсе; HTTP-обход — только сайтам из списков
+    tcpt="--filter-tcp=443,1984,5222 --filter-l7=tls $ex $tcpd"
     # .ru/.su/.рф и Google (list-noauto) — как у nfqws1: профиль по именам их не трогает и в автосписок
     # не берёт; такие сайты из списков (user.list nfqws2 и свой) — своим профилем перед ним. Google
     # (Play, YouTube) это не задевает: его адреса — в ipset.list, а профиль по адресам идёт раньше
@@ -543,7 +549,7 @@ zapret2_args() {
     local tail=""
     if [ "$ZAPRET_MODE" = "all" ]; then
         extra="--hostlist=$S/user.list $us --hostlist-exclude=$S/exclude.list $rux"
-        tail=" --new --filter-tcp=443,1984,5222 --filter-l7=tls $ex $tcpd --hostlist-exclude=$S/exclude.list $rux"
+        tail=" --new $tcpt --hostlist-exclude=$S/exclude.list $rux"
     else
         extra="--hostlist=$S/user.list $us --hostlist-auto=$ZAPRET_LIST_AUTO --hostlist-auto-fail-threshold=$ZAPRET_AUTO_FAIL --hostlist-auto-debug=$ZAPRET_AUTO_LOG --hostlist-exclude=$S/exclude.list $rux"
     fi
@@ -562,7 +568,7 @@ zapret2_args() {
     # порядок — как _startup_args: свои профили, UDP, QUIC (адреса, имена), TCP (адреса, имена);
     # .ru и Google из списков — между адресами и именами
     [ -n "$ruh" ] && ruh="$ruh --new"
-    echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $base $doh$custom --new $udp --new $quic $ipset --new ${ruh:+$quic $ruh }$quic $extra --new $tcp $ipset --new ${ruh:+$tcp $ruh }$tcp $extra$tail" | tr '\n' ' ' | tr -s ' '
+    echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $base $doh$custom --new $udp --new $quic $ipset --new ${ruh:+$quic $ruh }$quic $extra --new $tcpt $ipset --new ${ruh:+$tcp $ruh }$tcp $extra$tail" | tr '\n' ' ' | tr -s ' '
 }
 # правило с портами: multiport, а на ядре без него — по порту
 zapret2_rule() {   # таблица цепочка proto dports|sports порты "доп." цель...
