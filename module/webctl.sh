@@ -517,7 +517,8 @@ case "$1" in
             }
             FILENAME == ARGV[2] {
                 if (NF < 6) next
-                h = $2; ev = $6; split($4, c, " "); cl = c[2]; sub(/:[0-9]+$/, "", cl)
+                # событие — последнее поле: у nfqws2 перед RST есть ещё «rseq N» (7 полей, у nfqws1 — 6)
+                h = $2; ev = $NF; split($4, c, " "); cl = c[2]; sub(/:[0-9]+$/, "", cl)
                 if (ev ~ /^incoming RST/) rst[h]++
                 else if (ev ~ /^retrans/) rt[h]++
                 else if (ev ~ /^redirect/) rd[h]++
