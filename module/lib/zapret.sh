@@ -456,8 +456,9 @@ zapret_nfqws_log_trim() {
 # tls://. Адреса — серверы, заданные адресом, и запасной bootstrap DoH (DNS_BOOTSTRAP_ENC)
 # DoH, которые обход ломает: любой fake доходит до сервера и рвёт TLS (09.11, YOTA: LibreDNS
 # напрямую 3/3, через обход 0/3 с md5sig и badseq; без fake открывается, но без fake не
-# открывается dns.zapret.moe). Им — пустой профиль первым: соединение идёт как есть
-ZAPRET_DOH_ASIS="doh.libredns.gr"
+# открывается dns.zapret.moe). Им — пустой профиль первым: соединение идёт как есть.
+# tamaev-gifts.xyz — так же (12.11, YOTA: через обход 0/5, напрямую 5/5 за 0,1–0,25 с)
+ZAPRET_DOH_ASIS="doh.libredns.gr tamaev-gifts.xyz"
 zapret_doh_targets() {
     local u h hp p n="" i="" ps="" x=""
     for u in $DNS_UPSTREAMS $DNS_FALLBACKS $DNS_META_UPSTREAMS $DNS_BOOTSTRAP_ENC; do
