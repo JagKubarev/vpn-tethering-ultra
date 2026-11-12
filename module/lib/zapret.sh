@@ -477,7 +477,96 @@ zapret_doh_targets() {
     printf '%s|%s|%s|%s\n' "$(_zdt_j $n)" "$(_zdt_j $i)" "$(_zdt_j $ps)" "$(_zdt_j $x)"
 }
 
+# --- движок nfqws2 (ZAPRET_ENGINE=nfqws2): zapret2 со стратегией hardcorp74 -----------
+# Аргументы и правила — как в nfqws2-android v3.0.0 (lib/common.sh: _startup_args, _fw_iface_rules),
+# стратегия strategies/hardcorp74.conf; файлы — zapret2/ (SOURCE.txt). Свои: --uid=0:$ZAPRET_GID
+# (по группе правила пропускают его собственные пакеты — метку на rmnet стирает qcom_qos_reset),
+# --bind-fix, наш список «мимо обхода» (банки, Госуслуги) и свой список сайтов из WebUI.
+# Стратегии сетей и сайтов, подбор, сторож и отбой в этом режиме не работают
+ZAPRET2_TP="80,443,1984,2053,2083,2087,2096,5222,8443"
+ZAPRET2_UP="443,590:600,1400,3478:3481,5349,19294:19344,49152:65535"
+ZAPRET2_PKT=15     # первые пакеты соединения в nfqws2, туда и обратно (PKT_LIMIT_OUT/IN)
+# Каким движком запускать: nfqws2 — если выбран, есть бинарник и Lua и ядро умеет connbytes
+# (без него в nfqws2 ушёл бы весь трафик); иначе прежний nfqws1
+zapret_engine() {
+    [ "$ZAPRET_ENGINE" = nfqws2 ] && [ -n "$NFQWS2_BIN" ] && [ -f "$ZAPRET2_DIR/lua/zapret-lib.lua" ] && \
+        zapret_cap cb && { echo nfqws2; return 0; }
+    echo nfqws1
+}
+zapret2_args() {
+    local L="$ZAPRET2_DIR/lua" B="$ZAPRET2_DIR/blobs" S="$ZAPRET2_DIR/lists" ex="" us="" base custom udp quic tcp extra ipset
+    grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
+    grep -q '[a-z0-9]' "$ZAPRET_LIST_USER" 2>/dev/null && us="--hostlist=$ZAPRET_LIST_USER"
+    base="--lua-init=@$L/zapret-lib.lua --lua-init=@$L/zapret-antidpi.lua --lua-init=@$L/zapret-auto.lua
+ --blob=quic_initial:@$B/quic_initial.bin --blob=tls_clienthello:@$B/tls_clienthello.bin
+ --blob=tls_clienthello_sochi_park:@$B/tls_clienthello_sochi_park.bin --blob=quic_initial_vk_com:@$B/quic_initial_vk_com.bin
+ --blob=quic_initial_5ka_ru:@$B/quic_initial_5ka_ru.bin --blob=quic_initial_steamcommunity_com:@$B/quic_initial_steamcommunity_com.bin
+ --blob=stun_fake:@$B/stun.bin"
+    custom="--filter-tcp=443 --filter-l7=tls $ex --hostlist-domains=googlevideo.com --payload=tls_client_hello
+ --lua-desync=fake:blob=0x00000000:tcp_ack=-66000:tcp_ts_up:repeats=2 --lua-desync=multisplit:pos=midsld --new
+ --filter-tcp=443 --filter-l7=tls $ex --hostlist=$S/youtube.list --payload=tls_client_hello
+ --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+ --lua-desync=fake:blob=tls_clienthello_sochi_park:optional:tcp_seq=-10000:tcp_ack=-66000:badsum:tls_mod=rnd,dupsid,sni=rzd.ru:repeats=4"
+    udp="--filter-udp=590-600,1400,3478-3481,5349,19294-19344,49152-65535 --filter-l7=wireguard,stun,discord,unknown --out-range=<n2
+ --payload=wireguard_initiation,wireguard_response,wireguard_cookie,stun,discord_ip_discovery,unknown
+ --lua-desync=fake:blob=stun_fake:repeats=6:strategy=1 --lua-desync=fake:blob=quic_initial_steamcommunity_com:repeats=4:strategy=1
+ --lua-desync=fake:blob=quic_initial_5ka_ru:repeats=6:strategy=2 --lua-desync=fake:blob=quic_initial_steamcommunity_com:repeats=5:strategy=2
+ --lua-desync=fake:blob=quic_initial_vk_com:ip_autottl=-2,3-20:ip6_autottl=-2,3-20:payload=all:repeats=6:strategy=3"
+    quic="--filter-udp=443 --filter-l7=quic $ex --payload=quic_initial --lua-desync=fake:blob=quic_initial_5ka_ru:repeats=6"
+    tcp="--filter-tcp=443,80,1984,5222 --filter-l7=http,tls $ex --payload=tls_client_hello
+ --lua-desync=circular:fails=2:time=300:retrans=2:nld=2
+ --lua-desync=fake:blob=tls_clienthello_sochi_park:tls_mod=rnd,dupsid:tcp_ts=-1500:badsum:strategy=1
+ --lua-desync=hostfakesplit:repeats=4:tcp_ts=-600000:tcp_md5:host=ya.ru:strategy=1
+ --lua-desync=multisplit:pos=1,sniext-2:seqovl=1:seqovl_pattern=tls_clienthello_sochi_park:strategy=1
+ --lua-desync=fake:blob=stun_fake:tcp_ts=-1500:badsum:strategy=2
+ --lua-desync=fake:blob=tls_clienthello_sochi_park:tls_mod=rnd,dupsid:tcp_ts=-1500:badsum:strategy=2
+ --lua-desync=hostfakesplit:repeats=4:tcp_ts=-600000:tcp_md5:host=ya.ru:strategy=2
+ --payload=http_req --lua-desync=fake:blob=stun_fake:tcp_ts=-5000:badsum:tcp_ts_up --lua-desync=hostfakesplit:host=mail.ru:tcp_ts=-5000:tcp_ts_up"
+    extra="--hostlist=$S/user.list $us --hostlist-auto=$ZAPRET_LIST_AUTO --hostlist-auto-debug=$ZAPRET_AUTO_LOG --hostlist-exclude=$S/exclude.list"
+    ipset="--ipset=$S/ipset.list --ipset-exclude=$S/ipset_exclude.list --ipset-ip=0.0.0.0"
+    # порядок — как _startup_args: свои профили, UDP, QUIC (адреса, имена), TCP (адреса, имена)
+    echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $base $custom --new $udp --new $quic $ipset --new $quic $extra --new $tcp $ipset --new $tcp $extra" | tr '\n' ' ' | tr -s ' '
+}
+# правило с портами: multiport, а на ядре без него — по порту
+zapret2_rule() {   # таблица цепочка proto dports|sports порты "доп." цель...
+    local t="$1" c="$2" pr="$3" d="$4" ps="$5" x="$6" p sd
+    shift 6
+    # shellcheck disable=SC2086
+    $t -t mangle -A "$c" -p "$pr" -m multiport --"$d" "$ps" $x "$@" 2>/dev/null && return 0
+    if [ "$d" = dports ]; then sd="--dport"; else sd="--sport"; fi
+    for p in $(echo "$ps" | tr ',' ' '); do
+        # shellcheck disable=SC2086
+        $t -t mangle -A "$c" -p "$pr" $sd "$p" $x "$@" 2>/dev/null
+    done
+}
+zapret2_rules() {   # таблица: правила очереди nfqws2 в уже открытые цепочки VPN_ZAPRET/_IN
+    local t="$1" q="-j NFQUEUE --queue-num $ZAPRET_QNUM --queue-bypass"
+    local co="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:$ZAPRET2_PKT"
+    local ci="-m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:$ZAPRET2_PKT"
+    # shellcheck disable=SC2086
+    zapret2_rule "$t" "$CHAIN_ZAPRET" udp dports "$ZAPRET2_UP" "" $co $q
+    # shellcheck disable=SC2086
+    zapret2_rule "$t" "$CHAIN_ZAPRET" tcp dports "$ZAPRET2_TP" "" $co $q
+    # FIN/RST — в nfqws2: по ним он закрывает соединения у себя (circular)
+    # shellcheck disable=SC2086
+    zapret2_rule "$t" "$CHAIN_ZAPRET" tcp dports "$ZAPRET2_TP" "--tcp-flags fin fin" $q
+    # shellcheck disable=SC2086
+    zapret2_rule "$t" "$CHAIN_ZAPRET" tcp dports "$ZAPRET2_TP" "--tcp-flags rst rst" $q
+    # ответы: SYN-ACK/FIN/RST и первые пакеты — circular по ним видит, прошёл ли приём
+    # shellcheck disable=SC2086
+    zapret2_rule "$t" "$CHAIN_ZAPRET_IN" tcp sports "$ZAPRET2_TP" "--tcp-flags syn,ack syn,ack" $q
+    # shellcheck disable=SC2086
+    zapret2_rule "$t" "$CHAIN_ZAPRET_IN" tcp sports "$ZAPRET2_TP" "--tcp-flags fin fin" $q
+    # shellcheck disable=SC2086
+    zapret2_rule "$t" "$CHAIN_ZAPRET_IN" tcp sports "$ZAPRET2_TP" "--tcp-flags rst rst" $q
+    # shellcheck disable=SC2086
+    zapret2_rule "$t" "$CHAIN_ZAPRET_IN" udp sports "$ZAPRET2_UP" "" $ci $q
+    # shellcheck disable=SC2086
+    zapret2_rule "$t" "$CHAIN_ZAPRET_IN" tcp sports "$ZAPRET2_TP" "" $ci $q
+}
+
 zapret_args() {
+    [ "$ZAPRET_ENGINE_EFF" = nfqws2 ] && { zapret2_args; return 0; }
     local a="--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6" ex="" g alt rup="" rux="" q dp=""
     # банки и Госуслуги — мимо обхода в любом профиле (и в автосписок не попадут)
     grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
@@ -615,11 +704,19 @@ zapret_start() {
     zapret_auto_clean_ru
     : > "$ZAPRET_LOG"
     # $1 без кавычек: это список аргументов, собранный zapret_args
-    "$NFQWS_BIN" $1 >> "$ZAPRET_LOG" 2>&1 &
+    local bin="$NFQWS_BIN"
+    [ "$ZAPRET_ENGINE_EFF" = nfqws2 ] && bin="$NFQWS2_BIN"
+    "$bin" $1 >> "$ZAPRET_LOG" 2>&1 &
     pid=$!
     sleep 0.5
     if kill -0 "$pid" 2>/dev/null; then
         echo "$pid" > "$ZAPRET_PID_FILE"
+        ZAPRET_ENGINE_RUN="$ZAPRET_ENGINE_EFF"
+        if [ "$ZAPRET_ENGINE_EFF" = nfqws2 ]; then
+            ZAPRET_ALT_N=0
+            log "zapret: nfqws2 запущен (pid $pid, стратегия hardcorp74 из nfqws2-android, свои списки и автосписок)"
+            return 0
+        fi
         ZAPRET_ALT_N=$(zapret_alt_count "$1")
         [ "$ZAPRET_ALT_N" -gt 0 ] && log "zapret: своя стратегия у $ZAPRET_ALT_N сайтов (их основная не открывала)"
         if [ "$ZAPRET_NET_SRC" = "net" ] || [ "$ZAPRET_NET_SRC" = "label" ]; then
@@ -629,7 +726,7 @@ zapret_start() {
         fi
         return 0
     fi
-    log "WARNING: zapret: nfqws не запустился: $(tail -n 2 "$ZAPRET_LOG" 2>/dev/null | tr '\n' ' ' | cut -c1-200)"
+    log "WARNING: zapret: $([ "$ZAPRET_ENGINE_EFF" = nfqws2 ] && echo nfqws2 || echo nfqws) не запустился: $(tail -n 2 "$ZAPRET_LOG" 2>/dev/null | tr '\n' ' ' | cut -c1-200)"
     return 1
 }
 
@@ -694,7 +791,7 @@ zapret_rules_on() {
         # обходе только для раздачи. В nfqws его соединения ловят только профили DoH (имена,
         # адреса, порты), остальное nfqws пропускает как есть
         # shellcheck disable=SC2086
-        [ "$DNS_VIA_ZAPRET" = "1" ] && [ -n "$DNSPROXY_GID" ] && zapret_cap own && \
+        [ "$DNS_VIA_ZAPRET" = "1" ] && [ "$ZAPRET_ENGINE_RUN" != nfqws2 ] && [ -n "$DNSPROXY_GID" ] && zapret_cap own && \
             $t -t mangle -A "$CHAIN_ZAPRET" -p tcp -m owner --gid-owner "$DNSPROXY_GID" $ZAPRET_CB_OUT \
                 -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
         if [ "$ZAPRET_PHONE" = "1" ]; then
@@ -703,7 +800,7 @@ zapret_rules_on() {
                     $t -t mangle -A "$CHAIN_ZAPRET" -m owner --uid-owner "$u" -j RETURN 2>/dev/null
                 done
                 # dnsproxy — мимо, если не просили DoH через обход (DNS_VIA_ZAPRET)
-                [ -n "$DNSPROXY_GID" ] && [ "$DNS_VIA_ZAPRET" != "1" ] && \
+                [ -n "$DNSPROXY_GID" ] && { [ "$DNS_VIA_ZAPRET" != "1" ] || [ "$ZAPRET_ENGINE_RUN" = nfqws2 ]; } && \
                     $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$DNSPROXY_GID" -j RETURN 2>/dev/null
                 # opera-proxy: его TLS к серверам Opera обход не трогает
                 $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$OPERA_GID" -j RETURN 2>/dev/null
@@ -713,7 +810,7 @@ zapret_rules_on() {
             $t -t mangle -A "$CHAIN_ZAPRET" -m owner --socket-exists -j RETURN 2>/dev/null
         fi
         # shellcheck disable=SC2086
-        $t -t mangle -A "$CHAIN_ZAPRET" -p tcp --dport 443 $ZAPRET_CB_OUT \
+        [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] || $t -t mangle -A "$CHAIN_ZAPRET" -p tcp --dport 443 $ZAPRET_CB_OUT \
             -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
         $t -t mangle -C POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null || \
             $t -t mangle -A POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null
@@ -726,7 +823,8 @@ zapret_rules_on() {
         $t -t mangle -A "$CHAIN_ZAPRET_IN" -i lo -j RETURN 2>/dev/null
         $t -t mangle -A "$CHAIN_ZAPRET_IN" -s "$lan" -j RETURN 2>/dev/null
         # без connbytes ответы не шлём: в nfqws ушла бы вся закачка
-        zapret_cap cb && $t -t mangle -A "$CHAIN_ZAPRET_IN" -p tcp --sport 443 \
+        [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && zapret2_rules "$t"
+        [ "$ZAPRET_ENGINE_RUN" != nfqws2 ] && zapret_cap cb && $t -t mangle -A "$CHAIN_ZAPRET_IN" -p tcp --sport 443 \
             -m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3 \
             -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
         $t -t mangle -C PREROUTING -j "$CHAIN_ZAPRET_IN" 2>/dev/null || \
@@ -736,7 +834,10 @@ zapret_rules_on() {
         $t -N "$CHAIN_ZAPRET_QUIC" 2>/dev/null
         $t -F "$CHAIN_ZAPRET_QUIC" 2>/dev/null
         [ "$t" = "$iptables" ] && ZAPRET_QF_ON=0
-        if zapret_qf_on "$t" "$lan"; then
+        if [ "$ZAPRET_ENGINE_RUN" = nfqws2 ]; then
+            zapret_qf_off "$t"
+            while $t -D FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; do :; done
+        elif zapret_qf_on "$t" "$lan"; then
             [ "$t" = "$iptables" ] && ZAPRET_QF_ON=1
             while $t -D FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; do :; done
         elif [ "$ZAPRET_QUIC_BLOCK" = "1" ]; then
@@ -757,6 +858,7 @@ zapret_rules_on() {
 zapret_watchdog() {
     local now due n pid
     [ "$ZAPRET_WATCHDOG" = "1" ] && [ "$ZAPRET_STATE" = "on" ] && [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] || return 0
+    [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && return 0   # подбор и проверка — по аргументам nfqws1
     vpn_up_now && return 0
     now=$(date +%s)
     # первая проверка — через интервал после старта (сеть успеет устояться)
@@ -782,6 +884,7 @@ zapret_watchdog() {
 zapret_sites_check() {
     local now pid
     [ "$ZAPRET_ALT" = "1" ] && [ "$ZAPRET_STATE" = "on" ] && [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] || return 0
+    [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && return 0
     now=$(date +%s)
     # прошлая сорвалась (scan.sh оставил метку) — повтор через ~час: сорвалась
     # часто как раз потому, что ТСПУ резал всё (31.10 14:23), через 15 мин — снова залп
@@ -827,6 +930,8 @@ zapret_down() {
     quic_block_apply    # nfqws нет — клиенты YouTube обратно на закрытие QUIC
     ZAPRET_ARGS_RUN=""
     ZAPRET_EXCL_RUN=""
+    ZAPRET_ENGINE_RUN=""
+    ZAPRET_RULES_ENGINE=""
     ZAPRET_RETRY=0
     ZAPRET_TICK=0
     ZAPRET_NETS_STAMP=""
@@ -909,7 +1014,7 @@ zapret_reconcile() {
     # возможности ядра — и при выключенном zapret: по файлу их берут проверка
     # сайта и регистрация WARP (ядро без connbytes, ревью 27.10)
     [ -n "$ZAPRET_CAPS" ] || zapret_caps
-    if [ "$ZAPRET_ENABLE" != "1" ] || [ -z "$NFQWS_BIN" ]; then
+    if [ "$ZAPRET_ENABLE" != "1" ] || { [ -z "$NFQWS_BIN" ] && [ -z "$NFQWS2_BIN" ]; }; then
         [ "$ZAPRET_STATE" != "off" ] && zapret_down
         return 0
     fi
@@ -954,13 +1059,17 @@ zapret_reconcile() {
             local _ti; _ti=$(read_table_index "$TUN_NAME")
             [ "$_ti" != "$ZAPRET_OWNER_TUN" ] && { zapret_learn_vpn_owner; ZAPRET_OWNER_TUN="$_ti"; }
         fi
-        local _qn="$QUIC_NET"
+        local _qn="$QUIC_NET" _en
+        _en=$(zapret_engine)
+        [ "$_en" != "$ZAPRET_ENGINE" ] && [ "$_en" != "$ZAPRET_ENGINE_EFF" ] && \
+            log "zapret: движок $ZAPRET_ENGINE недоступен ($([ -z "$NFQWS2_BIN" ] && echo "нет nfqws2" || echo "ядро без connbytes")) — работаю на $_en"
+        ZAPRET_ENGINE_EFF="$_en"
         zapret_pick_strategy
         # итог проверки QUIC сменился: в WebUI он виден сразу, а не со следующим событием
         [ "$_qn" != "$QUIC_NET" ] && phone_status_refresh
         args=$(zapret_args)
         excl=$(zapret_vpn_uids)
-        [ "$ZAPRET_STATE" = "on" ] && [ "$args" != "$ZAPRET_ARGS_RUN" ] && \
+        [ "$ZAPRET_STATE" = "on" ] && [ "$args" != "$ZAPRET_ARGS_RUN" ] && [ "$ZAPRET_ENGINE_EFF" != nfqws2 ] && \
             log "zapret: аргументы nfqws сменились (сеть «${NET_LABEL:-не определена}», стратегия $ZAPRET_EFF_STRATEGY — $(case "$ZAPRET_NET_SRC" in net) echo своя ;; label) echo "как у «$NET_LABEL»" ;; *) echo общая ;; esac)) — перезапускаю"
     fi
 
@@ -979,6 +1088,8 @@ zapret_reconcile() {
             return 0
         fi
         ZAPRET_ARGS_RUN="$args"
+        # сменился движок — у nfqws2 другие правила очереди: пересобрать их ниже
+        [ "$ZAPRET_STATE" = "on" ] && [ "$ZAPRET_ENGINE_RUN" != "$ZAPRET_RULES_ENGINE" ] && ZAPRET_STATE="starting"
         # Был включён (смена стратегии, nfqws умер) — правила на месте, их
         # не трогаем: пока nfqws перезапускался, --queue-bypass пропускал пакеты
         # (подделка QUIC — по новым аргументам: профиль UDP мог появиться или уйти)
@@ -1018,6 +1129,7 @@ zapret_reconcile() {
             ZAPRET_RETRY_LOGGED=0
         fi
         ZAPRET_EXCL_RUN="$excl"
+        ZAPRET_RULES_ENGINE="$ZAPRET_ENGINE_RUN"
         ZAPRET_STATE="on"
         quic_block_apply    # подделка QUIC возможна только при работающем nfqws
         phone_status_refresh

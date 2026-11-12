@@ -111,7 +111,9 @@ yt_dead_hooks_off() {
 yt_dead_on() {
     yt_dead_hooks_off
     # без string (zapret_caps) мёртвые серверы не узнать — выключено
-    if [ "$YT_DEAD_FAILFAST" != "1" ] || [ -z "$CONNTRACK_BIN" ] || ! zapret_cap str; then
+    # nfqws2 (ZAPRET_ENGINE): без отбоя — 12.11 шортсы на nfqws2 без него стартовали чаще, чем
+    # наш nfqws1 даже без отбоя; в фоне отбой оставлял плеер на закрытом сервере
+    if [ "$YT_DEAD_FAILFAST" != "1" ] || [ -z "$CONNTRACK_BIN" ] || ! zapret_cap str || [ "$ZAPRET_ENGINE_RUN" = nfqws2 ]; then
         yt_dead_off
         return 0
     fi

@@ -824,7 +824,15 @@ NET_PROFILE_ADAPTIVE=0
 # VPN-клиенты не вмешивается. Помогает против блокировок по имени сайта
 # (YouTube, Discord, X...), не помогает против блокировок по IP.
 ZAPRET_ENABLE=1         # по умолчанию с 3.3
-ZAPRET_MODE=list        # list = встроенный + свой + автосписок, all = все HTTPS
+ZAPRET_MODE=list        # list = встроенный + свой + автосписок, all = все HTTPS (только nfqws1)
+# Движок обхода. nfqws2 (zapret2, Lua) со стратегией hardcorp74 из nfqws2-android: сам
+# переключает приёмы для сайта после двух неудач (circular), видит ответы сервера. 12.11 на YOTA,
+# шортсы по 80: не начался за 12 с — nfqws2 19, наш nfqws1 без отбоя 45–47 (QUIC не причина),
+# среднее ожидание 4,1 против 7,2–8,0 с. В режиме nfqws2 стратегии сетей и сайтов, сторож,
+# подбор, отбой мёртвых и обрыв медленных видеосерверов не работают — они построены вокруг
+# аргументов nfqws1. nfqws1 — прежний движок; на него же модуль уходит, если nfqws2 нет
+# или ядро без connbytes
+ZAPRET_ENGINE=nfqws2    # nfqws2 | nfqws1
 ZAPRET_PHONE=1          # 1 = и приложения телефона (кроме VPN-клиентов)
 # Приложения телефона мимо обхода (пакеты через пробел) — как VPN-клиенты.
 # 30.10, 4PDA: OnePlus 6 (ядро 4.9, без connbytes) — ВТБ и ОТП не ходили в сеть
@@ -1010,6 +1018,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
         ZAPRET_AUTO_FAIL)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 2 ] && [ "$val" -le 10 ] || ok=0 ;; esac ;;
         ZAPRET_MODE)     case "$val" in list|all) ;; *) ok=0 ;; esac ;;
+        ZAPRET_ENGINE)   case "$val" in nfqws1|nfqws2) ;; *) ok=0 ;; esac ;;
         WARP_CONF)       # имя конфига, как в warp/warp.sh; пусто — по порядку
             case "$val" in *[!A-Za-z0-9_.-]*|.*) ok=0 ;; esac
             [ ${#val} -le 40 ] || ok=0 ;;
@@ -1074,7 +1083,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS DNS_VIA_ZAPRET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_DEAD_WARP ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS DNS_VIA_ZAPRET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_DEAD_WARP ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -1387,6 +1396,15 @@ NFQWS_BIN=""
 for _c in $_NQ_CANDIDATES; do
     [ -x "$_c" ] && NFQWS_BIN="$_c" && break
 done
+# nfqws2 (ZAPRET_ENGINE=nfqws2): бинарник той же архитектуры, Lua, подделки и списки — zapret2/
+NFQWS2_BIN=""
+for _c in $(echo "$_NQ_CANDIDATES" | sed 's#/bin/nfqws-#/bin/nfqws2-#g'); do
+    [ -x "$_c" ] && NFQWS2_BIN="$_c" && break
+done
+ZAPRET2_DIR="$MODULE_DIR/zapret2"
+ZAPRET_ENGINE_RUN=""      # каким движком запущен обход сейчас (nfqws1 | nfqws2)
+ZAPRET_ENGINE_EFF=""      # каким движком будет запущен (zapret_engine: выбран и доступен)
+ZAPRET_RULES_ENGINE=""    # под какой движок стоят правила очереди
 # --- WARP (AmneziaWG) ---
 case "$(uname -m 2>/dev/null)" in
     aarch64|arm64) _WG_ARCH="arm64" ;;
@@ -1630,7 +1648,7 @@ fi
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
 [ "$STATUS_IN_DESCRIPTION" = "1" ] || set_description "$MODULE_DESC_DEFAULT"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
-log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}]/yt=$QUIC_BLOCK_YT/fake=$QUIC_YT_FAKE ZAPRET=$ZAPRET_ENABLE/$ZAPRET_MODE/$ZAPRET_STRATEGY/per_net=$ZAPRET_PER_NET YT_DEAD=$YT_DEAD_FAILFAST YT_SLOW=$YT_SLOW_RETRY WATCHDOG=$ZAPRET_WATCHDOG/${ZAPRET_WATCHDOG_MIN}m META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
+log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}]/yt=$QUIC_BLOCK_YT/fake=$QUIC_YT_FAKE ZAPRET=$ZAPRET_ENABLE/$ZAPRET_ENGINE/$ZAPRET_MODE/$ZAPRET_STRATEGY/per_net=$ZAPRET_PER_NET YT_DEAD=$YT_DEAD_FAILFAST YT_SLOW=$YT_SLOW_RETRY WATCHDOG=$ZAPRET_WATCHDOG/${ZAPRET_WATCHDOG_MIN}m META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
 
 disable_hw_offload
 stealth_apply

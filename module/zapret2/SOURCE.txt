@@ -1,0 +1,5 @@
+nfqws2 (bin/nfqws2-arm64, bin/nfqws2-arm), Lua-скрипты (lua/), подделки (blobs/), списки (lists/)
+и стратегия hardcorp74 — из nfqws2-android v3.0.0 (github.com/Dea1hwa1cher/nfqws2-android,
+выпуск 10.11.2026), лицензия MIT (LICENSE рядом). nfqws2 и Lua-скрипты — zapret2, bol-van
+(github.com/bol-van/zapret2), MIT. Бинарники — сборка nfqws2-android под Android (NDK r27d).
+Стратегия hardcorp74 — автор hardcorp74 (через rndnaame/nfqws-menu), 02.11.2026.

@@ -133,6 +133,7 @@ update_status() {
         echo "curl_src=$CURL_SRC"
         echo "zapret_auto=$(cat "$ZAPRET_LIST_AUTO" 2>/dev/null | grep -c '[a-z0-9]')"
         echo "zapret_per_net=$ZAPRET_PER_NET"
+        echo "zapret_engine=$ZAPRET_ENGINE_RUN"
         echo "zapret_strategy=$ZAPRET_EFF_STRATEGY"
         echo "zapret_eff_args=$ZAPRET_EFF_ARGS"
         echo "zapret_eff_yt=$ZAPRET_EFF_YT"
