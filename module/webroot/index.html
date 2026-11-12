@@ -586,7 +586,7 @@ details > summary::after { border-color: currentColor; }
 <h2>Сайты</h2>
 <div class="card">
   <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
-  <div class="row col" data-dep="ZAPRET_ENABLE">
+  <div class="row col" data-dep="ZAPRET_ENABLE" data-nfqws1>
     <div class="txt"><div class="t">Какие сайты обходить</div></div>
     <select data-key="ZAPRET_MODE">
       <option value="list">Из списков и найденные автоматически</option>
@@ -1252,10 +1252,11 @@ function renderStatus(s) {
     let zt = 'включён';
     if (/cb=0/.test(s.zapret_caps || '')) zt += ' · упрощённый режим (ядро без connbytes)';
     if (/own=0/.test(s.zapret_caps || '')) zt += ' · без исключений по приложениям (старое ядро)';
-    if (s.zapret_strategy) zt += ' · ' + esc(stratName(s.zapret_strategy, s.zapret_eff_args)) +
+    if (s.zapret_engine === 'nfqws2') zt += ' · nfqws2, стратегия hardcorp74 (сама меняет приём для сайта)';
+    else if (s.zapret_strategy) zt += ' · ' + esc(stratName(s.zapret_strategy, s.zapret_eff_args)) +
       (s.zapret_src === 'net' ? ' (своя для «' + esc(s.net_label) + '»)' : s.zapret_src === 'label' ? ' (как у «' + esc(s.net_label) + '», код сети ' + esc(s.net_key) + ')' : ' (общая)');
-    if (s.zapret_eff_yt) zt += ' · YouTube: ' + esc(stratLabel(s.zapret_eff_yt));
-    if (s.zapret_eff_dc) zt += ' · Discord: ' + esc(stratLabel(s.zapret_eff_dc));
+    if (s.zapret_eff_yt && s.zapret_engine !== 'nfqws2') zt += ' · YouTube: ' + esc(stratLabel(s.zapret_eff_yt));
+    if (s.zapret_eff_dc && s.zapret_engine !== 'nfqws2') zt += ' · Discord: ' + esc(stratLabel(s.zapret_eff_dc));
     if (+s.zapret_auto > 0) zt += ' · найдено сайтов: ' + esc(s.zapret_auto);
     h += kvRow('Обход блокировок', zt, 'green');
     if (s.ggc === 'on') h += kvRow('YouTube', 'мимо кэша оператора', 'green');
@@ -1286,7 +1287,8 @@ function renderStatus(s) {
   renderWarpState(w);
   renderOpera(s);
   // что и для чего работает сейчас: общая, YouTube, отдельные сайты
-  if ($('#zSum')) $('#zSum').textContent = s.zapret === 'on' ? 'Сейчас работает:\nОбщая: ' + stratName(s.zapret_strategy, s.zapret_eff_args) +
+  if ($('#zSum')) $('#zSum').textContent = s.zapret === 'on' && s.zapret_engine === 'nfqws2' ? 'Сейчас работает: nfqws2 (zapret2), стратегия hardcorp74 — приём для каждого сайта он выбирает сам' :
+    s.zapret === 'on' ? 'Сейчас работает:\nОбщая: ' + stratName(s.zapret_strategy, s.zapret_eff_args) +
     '\nYouTube: ' + (s.zapret_eff_yt ? 'своя, ' + stratLabel(s.zapret_eff_yt) : 'та же, что общая') +
     '\nDiscord: ' + (s.zapret_eff_dc ? 'своя, ' + stratLabel(s.zapret_eff_dc) : 'та же, что общая') +
     '\nQUIC YouTube: ' + (s.quic_net === '1' ? 'подделка проходит' : s.quic_net === '0' ? 'подделка не проходит' : 'не проверялся') + (s.quic_fake ? ', подделка включена' : ', закрыт') +

@@ -488,8 +488,9 @@ ZAPRET2_UP="443,590:600,1400,3478:3481,5349,19294:19344,49152:65535"
 ZAPRET2_PKT=15     # первые пакеты соединения в nfqws2, туда и обратно (PKT_LIMIT_OUT/IN)
 # Каким движком запускать: nfqws2 — если выбран, есть бинарник и Lua и ядро умеет connbytes
 # (без него в nfqws2 ушёл бы весь трафик); иначе прежний nfqws1
+ZAPRET2_FAIL=0     # nfqws2 не запустился — до выключения обхода работаю на nfqws1
 zapret_engine() {
-    [ "$ZAPRET_ENGINE" = nfqws2 ] && [ -n "$NFQWS2_BIN" ] && [ -f "$ZAPRET2_DIR/lua/zapret-lib.lua" ] && \
+    [ "$ZAPRET2_FAIL" != 1 ] && [ "$ZAPRET_ENGINE" = nfqws2 ] && [ -n "$NFQWS2_BIN" ] && [ -f "$ZAPRET2_DIR/lua/zapret-lib.lua" ] && \
         zapret_cap cb && { echo nfqws2; return 0; }
     echo nfqws1
 }
@@ -524,8 +525,19 @@ zapret2_args() {
  --payload=http_req --lua-desync=fake:blob=stun_fake:tcp_ts=-5000:badsum:tcp_ts_up --lua-desync=hostfakesplit:host=mail.ru:tcp_ts=-5000:tcp_ts_up"
     extra="--hostlist=$S/user.list $us --hostlist-auto=$ZAPRET_LIST_AUTO --hostlist-auto-debug=$ZAPRET_AUTO_LOG --hostlist-exclude=$S/exclude.list"
     ipset="--ipset=$S/ipset.list --ipset-exclude=$S/ipset_exclude.list --ipset-ip=0.0.0.0"
+    # DoH через обход (DNS_VIA_ZAPRET): как у nfqws1 — свои профили первыми, подделка с md5 и разрез
+    # по середине имени; «как есть» (ZAPRET_DOH_ASIS) — пустой профиль. Свои профили — до hardcorp74
+    local doh="" dt dn di dpp dx dd
+    if [ "$DNS_VIA_ZAPRET" = "1" ]; then
+        dt=$(zapret_doh_targets)
+        dn=${dt%%"|"*}; dt=${dt#*"|"}; di=${dt%%"|"*}; dt=${dt#*"|"}; dpp=${dt%%"|"*}; dx=${dt#*"|"}
+        dd="--payload=tls_client_hello --lua-desync=fake:blob=tls_clienthello:tcp_md5 --lua-desync=multidisorder:pos=midsld"
+        [ -n "$dx" ] && doh="--filter-tcp=$dpp --hostlist-domains=$dx --new "
+        [ -n "$dn" ] && doh="$doh--filter-tcp=$dpp --filter-l7=tls $ex --hostlist-domains=$dn $dd --new "
+        [ -n "$di" ] && doh="$doh--filter-tcp=$dpp --filter-l7=tls --ipset-ip=$di $dd --new "
+    fi
     # порядок — как _startup_args: свои профили, UDP, QUIC (адреса, имена), TCP (адреса, имена)
-    echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $base $custom --new $udp --new $quic $ipset --new $quic $extra --new $tcp $ipset --new $tcp $extra" | tr '\n' ' ' | tr -s ' '
+    echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $base $doh$custom --new $udp --new $quic $ipset --new $quic $extra --new $tcp $ipset --new $tcp $extra" | tr '\n' ' ' | tr -s ' '
 }
 # правило с портами: multiport, а на ядре без него — по порту
 zapret2_rule() {   # таблица цепочка proto dports|sports порты "доп." цель...
@@ -791,7 +803,7 @@ zapret_rules_on() {
         # обходе только для раздачи. В nfqws его соединения ловят только профили DoH (имена,
         # адреса, порты), остальное nfqws пропускает как есть
         # shellcheck disable=SC2086
-        [ "$DNS_VIA_ZAPRET" = "1" ] && [ "$ZAPRET_ENGINE_RUN" != nfqws2 ] && [ -n "$DNSPROXY_GID" ] && zapret_cap own && \
+        [ "$DNS_VIA_ZAPRET" = "1" ] && [ -n "$DNSPROXY_GID" ] && zapret_cap own && \
             $t -t mangle -A "$CHAIN_ZAPRET" -p tcp -m owner --gid-owner "$DNSPROXY_GID" $ZAPRET_CB_OUT \
                 -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
         if [ "$ZAPRET_PHONE" = "1" ]; then
@@ -800,7 +812,7 @@ zapret_rules_on() {
                     $t -t mangle -A "$CHAIN_ZAPRET" -m owner --uid-owner "$u" -j RETURN 2>/dev/null
                 done
                 # dnsproxy — мимо, если не просили DoH через обход (DNS_VIA_ZAPRET)
-                [ -n "$DNSPROXY_GID" ] && { [ "$DNS_VIA_ZAPRET" != "1" ] || [ "$ZAPRET_ENGINE_RUN" = nfqws2 ]; } && \
+                [ -n "$DNSPROXY_GID" ] && [ "$DNS_VIA_ZAPRET" != "1" ] && \
                     $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$DNSPROXY_GID" -j RETURN 2>/dev/null
                 # opera-proxy: его TLS к серверам Opera обход не трогает
                 $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$OPERA_GID" -j RETURN 2>/dev/null
@@ -932,6 +944,7 @@ zapret_down() {
     ZAPRET_EXCL_RUN=""
     ZAPRET_ENGINE_RUN=""
     ZAPRET_RULES_ENGINE=""
+    ZAPRET2_FAIL=0
     ZAPRET_RETRY=0
     ZAPRET_TICK=0
     ZAPRET_NETS_STAMP=""
@@ -1077,7 +1090,19 @@ zapret_reconcile() {
     if [ "$args" != "$ZAPRET_ARGS_RUN" ] || ! zapret_alive; then
         [ "$ZAPRET_STATE" = "on" ] && [ "$args" = "$ZAPRET_ARGS_RUN" ] && \
             log "WARNING: zapret: nfqws умер, перезапускаю"
-        if ! zapret_start "$args"; then
+        # nfqws2 упал при запуске (Lua, файлы, старое ядро) — не ждать минуту без обхода, а сразу nfqws1
+        local _st=0
+        if [ "$ZAPRET_ENGINE_EFF" = nfqws2 ]; then
+            if zapret_start "$args"; then
+                _st=1
+            else
+                ZAPRET2_FAIL=1
+                ZAPRET_ENGINE_EFF=nfqws1
+                log "WARNING: zapret: nfqws2 не запустился — работаю на nfqws1 до выключения обхода"
+                args=$(zapret_args)
+            fi
+        fi
+        if [ "$_st" = 0 ] && ! zapret_start "$args"; then
             zapret_rules_off
             ZAPRET_STATE="fail"
             ZAPRET_ARGS_RUN=""
@@ -1105,7 +1130,7 @@ zapret_reconcile() {
         ZAPRET_HOOK_TICK=0
         if ! $iptables -t mangle -C POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null || \
            { [ "$ZAPRET_QF_ON" = "1" ] && ! $iptables -t mangle -C POSTROUTING -p udp --dport 443 -j "$CHAIN_ZAPRET_QF" 2>/dev/null; } || \
-           { [ "$ZAPRET_QF_ON" != "1" ] && [ "$ZAPRET_QUIC_BLOCK" = "1" ] && ! $iptables -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; } || \
+           { [ "$ZAPRET_QF_ON" != "1" ] && [ "$ZAPRET_QUIC_BLOCK" = "1" ] && [ "$ZAPRET_ENGINE_RUN" != nfqws2 ] && ! $iptables -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; } || \
            { case "$GGC_STATE" in v4*) ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null ;; *) false ;; esac; } || \
            { [ "$YT_DEAD_STATE" = "on" ] && ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null; } || \
            { [ "$YT_GGC_BLOCK" = "1" ] && [ "$GGC_FAILS" -gt 0 ] && [ "$GGC_FAILS" -lt 3 ] && zapret_cap str; } || \
