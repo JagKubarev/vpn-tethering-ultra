@@ -495,7 +495,7 @@ zapret_engine() {
     echo nfqws1
 }
 zapret2_args() {
-    local L="$ZAPRET2_DIR/lua" B="$ZAPRET2_DIR/blobs" S="$ZAPRET2_DIR/lists" ex="" us="" base custom udp quic tcp extra ipset
+    local L="$ZAPRET2_DIR/lua" B="$ZAPRET2_DIR/blobs" S="$ZAPRET2_DIR/lists" ex="" us="" base custom udp quic tcp tcpd tcph extra ipset
     grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
     grep -q '[a-z0-9]' "$ZAPRET_LIST_USER" 2>/dev/null && us="--hostlist=$ZAPRET_LIST_USER"
     base="--lua-init=@$L/zapret-lib.lua --lua-init=@$L/zapret-antidpi.lua --lua-init=@$L/zapret-auto.lua
@@ -514,15 +514,17 @@ zapret2_args() {
  --lua-desync=fake:blob=quic_initial_5ka_ru:repeats=6:strategy=2 --lua-desync=fake:blob=quic_initial_steamcommunity_com:repeats=5:strategy=2
  --lua-desync=fake:blob=quic_initial_vk_com:ip_autottl=-2,3-20:ip6_autottl=-2,3-20:payload=all:repeats=6:strategy=3"
     quic="--filter-udp=443 --filter-l7=quic $ex --payload=quic_initial --lua-desync=fake:blob=quic_initial_5ka_ru:repeats=6"
-    tcp="--filter-tcp=443,80,1984,5222 --filter-l7=http,tls $ex --payload=tls_client_hello
+    # приёмы TLS (circular) и HTTP — порознь: в режиме all «все сайты» получают только TLS (ниже)
+    tcpd="--payload=tls_client_hello
  --lua-desync=circular:fails=2:time=300:retrans=2:nld=2
  --lua-desync=fake:blob=tls_clienthello_sochi_park:tls_mod=rnd,dupsid:tcp_ts=-1500:badsum:strategy=1
  --lua-desync=hostfakesplit:repeats=4:tcp_ts=-600000:tcp_md5:host=ya.ru:strategy=1
  --lua-desync=multisplit:pos=1,sniext-2:seqovl=1:seqovl_pattern=tls_clienthello_sochi_park:strategy=1
  --lua-desync=fake:blob=stun_fake:tcp_ts=-1500:badsum:strategy=2
  --lua-desync=fake:blob=tls_clienthello_sochi_park:tls_mod=rnd,dupsid:tcp_ts=-1500:badsum:strategy=2
- --lua-desync=hostfakesplit:repeats=4:tcp_ts=-600000:tcp_md5:host=ya.ru:strategy=2
- --payload=http_req --lua-desync=fake:blob=stun_fake:tcp_ts=-5000:badsum:tcp_ts_up --lua-desync=hostfakesplit:host=mail.ru:tcp_ts=-5000:tcp_ts_up"
+ --lua-desync=hostfakesplit:repeats=4:tcp_ts=-600000:tcp_md5:host=ya.ru:strategy=2"
+    tcph="--payload=http_req --lua-desync=fake:blob=stun_fake:tcp_ts=-5000:badsum:tcp_ts_up --lua-desync=hostfakesplit:host=mail.ru:tcp_ts=-5000:tcp_ts_up"
+    tcp="--filter-tcp=443,80,1984,5222 --filter-l7=http,tls $ex $tcpd $tcph"
     # .ru/.su/.рф и Google (list-noauto) — как у nfqws1: профиль по именам их не трогает и в автосписок
     # не берёт; такие сайты из списков (user.list nfqws2 и свой) — своим профилем перед ним. Google
     # (Play, YouTube) это не задевает: его адреса — в ipset.list, а профиль по адресам идёт раньше
@@ -531,12 +533,17 @@ zapret2_args() {
         grep -q '^[a-z]' "$ZAPRET_LIST_RUTLD" 2>/dev/null && rux="--hostlist-exclude=$ZAPRET_LIST_RUTLD"
         grep -q '^[a-z]' "$ZAPRET_LIST_NOAUTO" 2>/dev/null && rux="$rux --hostlist-exclude=$ZAPRET_LIST_NOAUTO"
         zapret_ru_listed "$S/user.list"
-        [ -s "$ZAPRET_RU_RUN" ] && ruh="--hostlist=$ZAPRET_RU_RUN"
+        # exclude.list nfqws2 — и здесь: в zru googleapis.com с поддоменами, а там fcm/gcm (push)
+        [ -s "$ZAPRET_RU_RUN" ] && ruh="--hostlist=$ZAPRET_RU_RUN --hostlist-exclude=$S/exclude.list"
     fi
     # ZAPRET_MODE: list — списки nfqws2 и свой + автосписок (MODE_AUTO nfqws2-android) с нашим
-    # порогом; all — все сайты, кроме исключений (MODE_ALL), автосписок не нужен
+    # порогом. all — как у nfqws1: все сайты только по TLS; QUIC и HTTP (порт 80) — по спискам, как
+    # в list. Без автосписка: профиль с ним забирает себе все сайты (следит за обрывами), и до
+    # профиля «все сайты» после него дело бы не дошло
+    local tail=""
     if [ "$ZAPRET_MODE" = "all" ]; then
-        extra="--hostlist-exclude=$S/exclude.list $rux"
+        extra="--hostlist=$S/user.list $us --hostlist-exclude=$S/exclude.list $rux"
+        tail=" --new --filter-tcp=443,1984,5222 --filter-l7=tls $ex $tcpd --hostlist-exclude=$S/exclude.list $rux"
     else
         extra="--hostlist=$S/user.list $us --hostlist-auto=$ZAPRET_LIST_AUTO --hostlist-auto-fail-threshold=$ZAPRET_AUTO_FAIL --hostlist-auto-debug=$ZAPRET_AUTO_LOG --hostlist-exclude=$S/exclude.list $rux"
     fi
@@ -555,7 +562,7 @@ zapret2_args() {
     # порядок — как _startup_args: свои профили, UDP, QUIC (адреса, имена), TCP (адреса, имена);
     # .ru и Google из списков — между адресами и именами
     [ -n "$ruh" ] && ruh="$ruh --new"
-    echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $base $doh$custom --new $udp --new $quic $ipset --new ${ruh:+$quic $ruh }$quic $extra --new $tcp $ipset --new ${ruh:+$tcp $ruh }$tcp $extra" | tr '\n' ' ' | tr -s ' '
+    echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $base $doh$custom --new $udp --new $quic $ipset --new ${ruh:+$quic $ruh }$quic $extra --new $tcp $ipset --new ${ruh:+$tcp $ruh }$tcp $extra$tail" | tr '\n' ' ' | tr -s ' '
 }
 # правило с портами: multiport, а на ядре без него — по порту
 zapret2_rule() {   # таблица цепочка proto dports|sports порты "доп." цель...
@@ -744,7 +751,7 @@ zapret_start() {
         ZAPRET_ENGINE_RUN="$ZAPRET_ENGINE_EFF"
         if [ "$ZAPRET_ENGINE_EFF" = nfqws2 ]; then
             ZAPRET_ALT_N=0
-            log "zapret: nfqws2 запущен (pid $pid, стратегия hardcorp74 из nfqws2-android, $([ "$ZAPRET_MODE" = all ] && echo "все сайты, кроме .ru и Google не из списков" || echo "свои списки и автосписок"))"
+            log "zapret: nfqws2 запущен (pid $pid, стратегия hardcorp74 из nfqws2-android, $([ "$ZAPRET_MODE" = all ] && echo "TLS всех сайтов, кроме .ru и Google не из списков; QUIC и HTTP — по спискам" || echo "свои списки и автосписок"))"
             return 0
         fi
         ZAPRET_ALT_N=$(zapret_alt_count "$1")
@@ -819,10 +826,11 @@ zapret_rules_on() {
         zapret_cap own && $t -t mangle -A "$CHAIN_ZAPRET" -m owner --gid-owner "$ZAPRET_GID" -j RETURN 2>/dev/null
         # DoH через обход: dnsproxy — в очередь с любым портом TCP (443, :444 GeoHide, 853 DoT) и при
         # обходе только для раздачи. В nfqws его соединения ловят только профили DoH (имена,
-        # адреса, порты), остальное nfqws пропускает как есть
+        # адреса, порты), остальное nfqws пропускает как есть. Кроме порта 80: от этой группы идёт
+        # проверка белых списков (zapret_http_ok, «мимо обхода»), а у nfqws2 порт 80 — в hardcorp74
         # shellcheck disable=SC2086
         [ "$DNS_VIA_ZAPRET" = "1" ] && [ -n "$DNSPROXY_GID" ] && zapret_cap own && \
-            $t -t mangle -A "$CHAIN_ZAPRET" -p tcp -m owner --gid-owner "$DNSPROXY_GID" $ZAPRET_CB_OUT \
+            $t -t mangle -A "$CHAIN_ZAPRET" -p tcp ! --dport 80 -m owner --gid-owner "$DNSPROXY_GID" $ZAPRET_CB_OUT \
                 -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
         if [ "$ZAPRET_PHONE" = "1" ]; then
             if zapret_cap own; then
