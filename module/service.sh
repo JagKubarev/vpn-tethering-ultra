@@ -742,8 +742,12 @@ DNS_UPSTREAMS="https://dns.zapret.moe/dns-query"
 # not-a-dns — третьим (до 12.11 самый ровный, вдруг оживёт); sync.bezmezhau.com (0,53 с,
 # прокси для ИИ, но 4pda.to отдаёт через свой прокси — у нас 4PDA ведёт Opera); wlrus ниже:
 # 12.11 его прокси для ИИ с YOTA мертвы, для 4pda.to — заглушка 8.6.112.0, Instagram —
-# 31.13.72.174 (тайм-аут). dagami не взят: прокси с YOTA не отвечают
-DNS_FALLBACKS="https://de.magicdns.ru/dns-query https://not-a-dns.quic.best/dns-query https://sync.bezmezhau.com/dns-query https://dns.wlrus.cfd/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query"
+# 31.13.72.174 (тайм-аут). dagami не взят: прокси с YOTA не отвечают.
+# Владельцы неизвестны — только в запасных: api.magicinfo.art (1 с, настоящие адреса, прокси
+# только для ИИ) — выше wlrus; dns.semqka.xyz отдаёт своим прокси 45.198.0.84 и x.com, discord.com
+# (голос Discord по UDP через него не пойдёт), tamaev-gifts.xyz — www.youtube.com и github.com
+# (2.26.80.94: YouTube мимо отбоя застрявших) — ниже wlrus
+DNS_FALLBACKS="https://de.magicdns.ru/dns-query https://not-a-dns.quic.best/dns-query https://sync.bezmezhau.com/dns-query https://api.magicinfo.art/dns-query https://dns.wlrus.cfd/dns-query https://dns.semqka.xyz/dns-query https://tamaev-gifts.xyz/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query"
 # Апстримы для DNS_VPN=doh (идут через туннель)
 DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Чем резолвить имена самих апстримов (dns.wlrus.cfd и т.д.). Подмена тут не
