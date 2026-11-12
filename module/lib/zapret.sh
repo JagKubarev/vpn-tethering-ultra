@@ -498,7 +498,8 @@ zapret2_args() {
     local L="$ZAPRET2_DIR/lua" B="$ZAPRET2_DIR/blobs" S="$ZAPRET2_DIR/lists" ex="" us="" base custom udp quic tcp tcpd tcph tcpt extra ipset
     grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
     grep -q '[a-z0-9]' "$ZAPRET_LIST_USER" 2>/dev/null && us="--hostlist=$ZAPRET_LIST_USER"
-    base="--lua-init=@$L/zapret-lib.lua --lua-init=@$L/zapret-antidpi.lua --lua-init=@$L/zapret-auto.lua
+    # vpn-tether.lua — свои обманки: fool_nots (badseq+badack, если у пакета нет метки времени TCP)
+    base="--lua-init=@$L/zapret-lib.lua --lua-init=@$L/zapret-antidpi.lua --lua-init=@$L/zapret-auto.lua --lua-init=@$L/vpn-tether.lua
  --blob=quic_initial:@$B/quic_initial.bin --blob=tls_clienthello:@$B/tls_clienthello.bin
  --blob=tls_clienthello_sochi_park:@$B/tls_clienthello_sochi_park.bin --blob=quic_initial_vk_com:@$B/quic_initial_vk_com.bin
  --blob=quic_initial_5ka_ru:@$B/quic_initial_5ka_ru.bin --blob=quic_initial_steamcommunity_com:@$B/quic_initial_steamcommunity_com.bin
@@ -514,16 +515,19 @@ zapret2_args() {
  --lua-desync=fake:blob=quic_initial_5ka_ru:repeats=6:strategy=2 --lua-desync=fake:blob=quic_initial_steamcommunity_com:repeats=5:strategy=2
  --lua-desync=fake:blob=quic_initial_vk_com:ip_autottl=-2,3-20:ip6_autottl=-2,3-20:payload=all:repeats=6:strategy=3"
     quic="--filter-udp=443 --filter-l7=quic $ex --payload=quic_initial --lua-desync=fake:blob=quic_initial_5ka_ru:repeats=6"
-    # приёмы TLS (circular) и HTTP — порознь: в режиме all «все сайты» получают только TLS (ниже)
+    # приёмы TLS (circular) и HTTP — порознь: в режиме all «все сайты» получают только TLS (ниже).
+    # fool=fool_nots(_ack) — свои (vpn-tether.lua): у соединения без метки времени TCP (Windows-
+    # клиенты раздачи) tcp_ts ничего не делает и подделки доходят до сервера — тогда badseq/badack.
+    # С меткой — без изменений. Стенд 12.11, без меток: 69 из 72 против 30; с метками 70 против 68
     tcpd="--payload=tls_client_hello
  --lua-desync=circular:fails=2:time=300:retrans=2:nld=2
- --lua-desync=fake:blob=tls_clienthello_sochi_park:tls_mod=rnd,dupsid:tcp_ts=-1500:badsum:strategy=1
- --lua-desync=hostfakesplit:repeats=4:tcp_ts=-600000:tcp_md5:host=ya.ru:strategy=1
+ --lua-desync=fake:blob=tls_clienthello_sochi_park:tls_mod=rnd,dupsid:tcp_ts=-1500:badsum:fool=fool_nots_ack:strategy=1
+ --lua-desync=hostfakesplit:repeats=4:tcp_ts=-600000:tcp_md5:host=ya.ru:fool=fool_nots:strategy=1
  --lua-desync=multisplit:pos=1,sniext-2:seqovl=1:seqovl_pattern=tls_clienthello_sochi_park:strategy=1
  --lua-desync=fake:blob=stun_fake:tcp_ts=-1500:badsum:strategy=2
- --lua-desync=fake:blob=tls_clienthello_sochi_park:tls_mod=rnd,dupsid:tcp_ts=-1500:badsum:strategy=2
- --lua-desync=hostfakesplit:repeats=4:tcp_ts=-600000:tcp_md5:host=ya.ru:strategy=2"
-    tcph="--payload=http_req --lua-desync=fake:blob=stun_fake:tcp_ts=-5000:badsum:tcp_ts_up --lua-desync=hostfakesplit:host=mail.ru:tcp_ts=-5000:tcp_ts_up"
+ --lua-desync=fake:blob=tls_clienthello_sochi_park:tls_mod=rnd,dupsid:tcp_ts=-1500:badsum:fool=fool_nots_ack:strategy=2
+ --lua-desync=hostfakesplit:repeats=4:tcp_ts=-600000:tcp_md5:host=ya.ru:fool=fool_nots:strategy=2"
+    tcph="--payload=http_req --lua-desync=fake:blob=stun_fake:tcp_ts=-5000:badsum:tcp_ts_up --lua-desync=hostfakesplit:host=mail.ru:tcp_ts=-5000:tcp_ts_up:fool=fool_nots"
     tcp="--filter-tcp=443,80,1984,5222 --filter-l7=http,tls $ex $tcpd $tcph"
     # только TLS — для адресов (ipset) и «всех сайтов». Поддельные части Host у HTTP держатся лишь
     # на метке времени TCP, а Windows её не ставит: 12.11 у ноутбука на раздаче HTTP к адресам

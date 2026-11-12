@@ -3,3 +3,5 @@ nfqws2 (bin/nfqws2-arm64, bin/nfqws2-arm), Lua-скрипты (lua/), подде
 выпуск 10.11.2026), лицензия MIT (LICENSE рядом). nfqws2 и Lua-скрипты — zapret2, bol-van
 (github.com/bol-van/zapret2), MIT. Бинарники — сборка nfqws2-android под Android (NDK r27d).
 Стратегия hardcorp74 — автор hardcorp74 (через rndnaame/nfqws-menu), 02.11.2026.
+Кроме lua/vpn-tether.lua — он свой (VPN Tether, GPL-3.0, как модуль): обманки fool_nots и
+fool_nots_ack для соединений без метки времени TCP (Windows-клиенты раздачи), 12.11.2026.

@@ -504,7 +504,7 @@ details > summary::after { border-color: currentColor; }
     </select>
   </div>
 </div>
-<div class="hint" id="zEngWin">Ноутбук или ПК на Windows через раздачу: включите на нём метки времени TCP — один раз, в командной строке от администратора: <code id="zEngWinCmd" style="user-select:all">netsh interface tcp set global timestamps=enabled</code>. Без них nfqws2 портит часть соединений: Windows пишет «Нет подключения к интернету», часть сайтов не открывается.
+<div class="hint" id="zEngWin">Ноутбук или ПК на Windows через раздачу: если часть сайтов не открывается или Windows пишет «Нет подключения к интернету», включите на нём метки времени TCP — один раз, в командной строке от администратора: <code id="zEngWinCmd" style="user-select:all">netsh interface tcp set global timestamps=enabled</code>. Без них модуль подстраивает приёмы под Windows сам, с ними обход работает как для телефона.
   <br><button class="btn small" id="zEngWinCopy" style="margin-top:6px">Скопировать команду</button></div>
 
 <h2 data-nfqws1>Подбор стратегии</h2>
