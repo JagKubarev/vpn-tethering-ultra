@@ -505,7 +505,7 @@ zapret2_args() {
  --blob=quic_initial_5ka_ru:@$B/quic_initial_5ka_ru.bin --blob=quic_initial_steamcommunity_com:@$B/quic_initial_steamcommunity_com.bin
  --blob=stun_fake:@$B/stun.bin"
     custom="--filter-tcp=443 --filter-l7=tls $ex --hostlist-domains=googlevideo.com --payload=tls_client_hello
- --lua-desync=fake:blob=0x00000000:tcp_ack=-66000:tcp_ts_up:repeats=2 --lua-desync=multisplit:pos=midsld --new
+ --lua-desync=fake:blob=0x00000000:tcp_ack=-66000:tcp_ts_up:fool=fool_nots:repeats=2 --lua-desync=multisplit:pos=midsld --new
  --filter-tcp=443 --filter-l7=tls $ex --hostlist=$S/youtube.list --payload=tls_client_hello
  --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
  --lua-desync=fake:blob=tls_clienthello_sochi_park:optional:tcp_seq=-10000:tcp_ack=-66000:badsum:tls_mod=rnd,dupsid,sni=rzd.ru:repeats=4"
@@ -529,11 +529,11 @@ zapret2_args() {
  --lua-desync=hostfakesplit:repeats=4:tcp_ts=-600000:tcp_md5:host=ya.ru:fool=fool_nots:strategy=2"
     tcph="--payload=http_req --lua-desync=fake:blob=stun_fake:tcp_ts=-5000:badsum:tcp_ts_up --lua-desync=hostfakesplit:host=mail.ru:tcp_ts=-5000:tcp_ts_up:fool=fool_nots"
     tcp="--filter-tcp=443,80,1984,5222 --filter-l7=http,tls $ex $tcpd $tcph"
-    # только TLS — для адресов (ipset) и «всех сайтов». Поддельные части Host у HTTP держатся лишь
-    # на метке времени TCP, а Windows её не ставит: 12.11 у ноутбука на раздаче HTTP к адресам
-    # ipset (Akamai, Cloudflare, Google) приходил испорченным — «нет интернета» (проверка
-    # msftconnecttest — 400) и падали сайты с проверкой отзыва сертификата (OCSP по HTTP).
-    # nfqws1 порт 80 не трогал вовсе; HTTP-обход — только сайтам из списков
+    # только TLS — для адресов (ipset) и «всех сайтов»; HTTP-обход — только сайтам из списков,
+    # как у nfqws1 (тот порт 80 не трогал вовсе). Сняли 12.11, пока у Windows-клиентов раздачи
+    # HTTP к адресам ipset (Akamai, Cloudflare, Google) приходил испорченным — «нет интернета»
+    # (msftconnecttest — 400), падала проверка отзыва сертификата (OCSP по HTTP). Причину с тех
+    # пор лечит fool_nots; вернуть HTTP адресам ipset — только после замера с Windows без меток
     tcpt="--filter-tcp=443,1984,5222 --filter-l7=tls $ex $tcpd"
     # .ru/.su/.рф и Google (list-noauto) — как у nfqws1: профиль по именам их не трогает и в автосписок
     # не берёт; такие сайты из списков (user.list nfqws2 и свой) — своим профилем перед ним. Google

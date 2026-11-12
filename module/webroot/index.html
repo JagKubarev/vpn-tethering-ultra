@@ -1550,7 +1550,11 @@ $$('[data-key]:not(.seg)').forEach((el) => {
 // текст — в буфер обмена: navigator.clipboard (нужен защищённый контекст и разрешение WebView),
 // иначе старый способ — выделить скрытое поле и execCommand('copy'), его понимает любой WebView
 async function copyText(s) {
-  try { await navigator.clipboard.writeText(s); return true; } catch (e) { /* дальше — старый способ */ }
+  try {
+    // в WebView запрос к буферу может не завершиться вовсе — ждём не дольше 1,5 с, затем старый способ
+    await Promise.race([navigator.clipboard.writeText(s), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 1500))]);
+    return true;
+  } catch (e) { /* дальше — старый способ */ }
   const ta = document.createElement('textarea');
   ta.value = s; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
   document.body.appendChild(ta); ta.select();
@@ -2272,13 +2276,11 @@ $('#logPrev').addEventListener('click', async () => {
   showLog();
 });
 $('#logCopy').addEventListener('click', async () => {
-  const text = $('#log').textContent;
-  try { await navigator.clipboard.writeText(text); toast('Скопировано'); }
-  catch (e) {
-    const r = document.createRange(); r.selectNodeContents($('#log'));
-    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
-    toast(document.execCommand('copy') ? 'Скопировано' : 'Выделено — скопируйте вручную');
-  }
+  if (await copyText($('#log').textContent)) { toast('Скопировано'); return; }
+  // не скопировалось — выделить лог, чтобы скопировать вручную
+  const r = document.createRange(); r.selectNodeContents($('#log'));
+  const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+  toast('Выделено — скопируйте вручную');
 });
 
 // ---------------------------------------------------------------- zapret: списки и проверка
