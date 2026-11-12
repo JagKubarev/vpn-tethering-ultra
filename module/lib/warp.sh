@@ -19,6 +19,7 @@ WARP_CHECK_SECS=60       # проверка трафиком, пока всё х
 WARP_BAD_SECS=600        # конфиг, на котором не поднялось, — не брать 10 мин
 WARP_RETRY_SECS=300      # все конфиги не поднялись / их нет — повтор через 5 мин
 WARP_NONET_RETRY=30      # не поднялся, и напрямую сети нет — тот же конфиг через 30 с
+WARP_WL_RETRY=300        # то же при белом списке оператора: он на часы, а перебор адресов ~50 с
 WARP_STATE=off           # off | starting | up | fail
 WARP_CUR=""              # конфиг в работе
 WARP_PID=""
@@ -327,6 +328,10 @@ warp_tg_dead() {
     return 1
 }
 
+# пауза до повтора и заметка в статус, когда туннель молчит, а дело не в конфиге
+warp_nonet_wait() { if [ "$ZAPRET_WL" = "1" ]; then echo "$WARP_WL_RETRY"; else echo "$WARP_NONET_RETRY"; fi; }
+warp_nonet_note() { if [ "$ZAPRET_WL" = "1" ]; then echo "белый список"; else echo "нет сети"; fi; }
+
 # Сеть вообще есть? Туннель молчит — проверка мимо него (Cloudflare, Google по IP).
 # Метро 29.10 11:15–11:22: связь пропадала каждые ~2 мин, и WARP браковал
 # конфиг за конфигом (4 штуки), хотя молчало всё — DoH, YouTube. Белые списки
@@ -334,6 +339,10 @@ warp_tg_dead() {
 # (только «дошёл ли ответ» — -k, сертификат не важен)
 warp_uplink() {
     local u
+    # Белый список (zapret_whitelist_check): 1.1.1.1 и 8.8.8.8 на части адресов оператора
+    # в нём открыты, а адреса WARP закрыты — «сеть есть», и конфиги шли в брак один за
+    # другим (11.11 18:44–18:46: три конфига за две минуты, потом по кругу раз в 5 мин)
+    [ "$ZAPRET_WL" = "1" ] && return 1
     # при подъёме без хендшейка warp_probe ещё не звали — флаг пуст, и curl
     # шёл бы от root через прокси AdGuard
     if [ -z "$WARP_SU_G" ]; then
@@ -431,8 +440,12 @@ warp_reconcile() {
     case "$WARP_STATE" in
         off|fail)
             if [ "$WARP_STATE" = fail ] && [ "$now" -lt "$WARP_RETRY_TS" ]; then
-                # конфиги создали/импортировали в WebUI — сразу, не через 5 мин
-                [ "$WARP_NOTE" = "нет конфигов" ] && [ -n "$(warp_conf_names)" ] || return 0
+                if [ "$WARP_NOTE" = "белый список" ] && [ "$ZAPRET_WL" != "1" ]; then
+                    :   # список снят — сразу, не ждать остаток WARP_WL_RETRY
+                else
+                    # конфиги создали/импортировали в WebUI — сразу, не через 5 мин
+                    [ "$WARP_NOTE" = "нет конфигов" ] && [ -n "$(warp_conf_names)" ] || return 0
+                fi
             fi
             [ -n "$WARP_ENSURE_PID" ] && return 0   # конфиги ещё создаются
             if ! n=$(warp_pick); then
@@ -474,8 +487,8 @@ warp_reconcile() {
                         # и напрямую сети нет (метро) — конфиг не виноват: тот же заново
                         # пауза: из off тот же конфиг поднимался бы сразу, и без сети
                         # (белые списки — часами) перебор адресов и перезапуски шли по кругу
-                        log "WARP: $WARP_CUR — нет хендшейка, но и напрямую сети нет — конфиг не бракую, повтор через ${WARP_NONET_RETRY} с"
-                        warp_down; WARP_RETRY_TS=$((now + WARP_NONET_RETRY)); warp_set_state fail "нет сети"
+                        log "WARP: $WARP_CUR — нет хендшейка, но напрямую тоже — $(warp_nonet_note) — конфиг не бракую, повтор через $(warp_nonet_wait) с"
+                        warp_down; WARP_RETRY_TS=$((now + $(warp_nonet_wait))); warp_set_state fail "$(warp_nonet_note)"
                         return 0
                     fi
                     if [ "$WARP_RU_TRY" = 1 ]; then
@@ -518,8 +531,8 @@ warp_reconcile() {
                     log "WARP: $WARP_CUR — через $WARP_EP_CUR нет трафика, беру $WARP_EP_Q (российская)"
                     warp_ep_next
                 elif [ $WARP_FAILS -ge 3 ] && ! warp_uplink; then
-                    log "WARP: $WARP_CUR — нет трафика ($(warp_hs_note)), но и напрямую сети нет — конфиг не бракую, повтор через ${WARP_NONET_RETRY} с"
-                    warp_down; WARP_RETRY_TS=$((now + WARP_NONET_RETRY)); warp_set_state fail "нет сети"
+                    log "WARP: $WARP_CUR — нет трафика ($(warp_hs_note)), но напрямую тоже — $(warp_nonet_note) — конфиг не бракую, повтор через $(warp_nonet_wait) с"
+                    warp_down; WARP_RETRY_TS=$((now + $(warp_nonet_wait))); warp_set_state fail "$(warp_nonet_note)"
                 elif [ $WARP_FAILS -ge 3 ]; then
                     log "WARP: $WARP_CUR — нет трафика через туннель ($(warp_hs_note)), беру следующий"
                     warp_mark_bad "$WARP_CUR"; warp_down; warp_set_state off ""
@@ -592,6 +605,19 @@ warp_reconcile() {
                 # Wi-Fi -> Wi-Fi без пропадания WAN). Конфиг не виноват
                 WARP_NETCHG=0
                 warp_down "сменилась сеть"; warp_set_state off ""
+            elif [ "$ZAPRET_WL" = "1" ]; then
+                # белый список: туннель молчит часами, а проверка каждые 10 с — это до 11 с
+                # curl на круг демона. После трёх промахов подряд (как без списка: весной
+                # при списке WARP жил, один промах — не повод) снимаем и пробуем раз в
+                # WARP_WL_RETRY. Конфиг не бракуем
+                WARP_FAILS=$((WARP_FAILS + 1))
+                WARP_CHECK_TS=$((now - WARP_CHECK_SECS + 10))
+                if [ $WARP_FAILS -ge 3 ]; then
+                    log "WARP: $WARP_CUR не отвечает, у оператора белый список — снимаю, повтор через $WARP_WL_RETRY с"
+                    warp_down; WARP_RETRY_TS=$(( $(date +%s) + WARP_WL_RETRY )); warp_set_state fail "белый список"
+                else
+                    log "WARP: $WARP_CUR не отвечает ($WARP_FAILS/3)"
+                fi
             elif ! warp_uplink; then
                 # мимо туннеля тоже тишина — конфиг не виноват: держим его,
                 # проверяем чаще; оживёт сеть — «снова отвечает». Промахи — с нуля:

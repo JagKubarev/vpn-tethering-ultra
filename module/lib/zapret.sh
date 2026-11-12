@@ -837,24 +837,34 @@ zapret_down() {
 # ничего не откроет, а сторож видит «стратегия не открывает» и каждые 15 мин
 # гоняет подбор (~4 мин, сотни TLS), проверка сайтов срывается, отбой YouTube
 # отбивает всё подряд. Признак дешёвый и только после отката DNS (DoH и
-# запасные молчат): мимо обхода TLS до 1.1.1.1 и 9.9.9.9 не проходит, а до
-# Яндекса проходит. Раз в минуту; ожил любой зарубежный — обход обратно.
-zapret_tls_ok() {   # $1 — IP; мимо обхода и AdGuard (группа dnsproxy), через WAN
+# запасные молчат): мимо обхода четыре зарубежных адреса из разных сетей по
+# порту 80 не отвечают, а Яндекс отвечает. Раз в минуту; ожил любой зарубежный —
+# обход обратно.
+# 11.11 (YOTA): признаком были TLS до 1.1.1.1 и 9.9.9.9, а 1.1.1.1 и 8.8.8.8 на
+# части адресов оператора в списке открыты (16 адресов из 35) — на них модуль
+# решал «списков нет» и включал обход: за 20 минут пауза шесть раз снималась
+# и ставилась. Порт 80 по адресу, без имени: ТСПУ его обычным сайтам не
+# закрывает, а в списке он отбит или молчит (замер 23:11 — все четыре 000 за
+# 25–57 мс, Яндекс 406). Адреса: Google, GitHub, Cloudflare, Apple
+ZAPRET_WL_FOREIGN="216.239.38.120 140.82.121.4 104.16.124.96 17.253.144.10"
+zapret_url_ok() {   # $1 — URL с адресом; мимо обхода и AdGuard (группа dnsproxy), через WAN
     local cmd c
-    cmd="$CURL_BIN -sk -o /dev/null -m 3 --interface $LAST_WAN_IFACE -w %{http_code} https://$1/"
+    cmd="$CURL_BIN -sk -o /dev/null -m 3 --interface $LAST_WAN_IFACE -w %{http_code} $1"
     if [ "$DNSPROXY_SU_G" = "1" ]; then c=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else c=$(eval "$cmd" 2>/dev/null); fi
     [ -n "$c" ] && [ "$c" != "000" ]
 }
+zapret_http_ok() { zapret_url_ok "http://$1/"; }    # $1 — IP, порт 80
+zapret_tls_ok() { zapret_url_ok "https://$1/"; }    # $1 — IP, TLS
 ZAPRET_WL_HITS=0       # подряд проверок «похоже на белые списки» (вход — со второй)
 zapret_whitelist_check() {
-    local now f p1 p2 p
+    local now f a p ps alive
     # дешёвое — первым: без отката DNS и без паузы делать нечего
     [ "$ZAPRET_WL" = "1" ] || [ "$DNS_DEGRADED" = "1" ] || { ZAPRET_WL_HITS=0; return 0; }
     [ "$ZAPRET_ENABLE" = "1" ] && [ -n "$NFQWS_BIN" ] && [ -n "$LAST_WAN_IFACE" ] || { ZAPRET_WL=0; ZAPRET_WL_HITS=0; return 0; }
     # VPN: прямой путь не проверить, и обход раздаче не нужен
     vpn_up_now && { ZAPRET_WL=0; ZAPRET_WL_HITS=0; return 0; }
-    # DoH ожил — белых списков нет (в них молчат все DoH), даже если 1.1.1.1 и
-    # 9.9.9.9 оператор закрыл отдельно (как 8.8.8.8 3 июля) — иначе пауза навсегда
+    # DoH ожил — белых списков нет (в них молчат все DoH), даже если проверочные
+    # адреса оператор закрыл отдельно (как 8.8.8.8 3 июля) — иначе пауза навсегда
     if [ "$ZAPRET_WL" = "1" ] && [ "$DNS_DEGRADED" != "1" ]; then
         log "zapret: DoH снова отвечает — белых списков нет, обход включаю"
         ZAPRET_WL=0; ZAPRET_WL_HITS=0; return 0
@@ -866,25 +876,30 @@ zapret_whitelist_check() {
     ZAPRET_WL_LAST=$now
     # зарубежные — параллельно: цикл демона стоит, пока идёт проверка
     f="/data/local/tmp/vpn_tether_wl.$$"
-    rm -f "$f".1 "$f".2
-    ( zapret_tls_ok 1.1.1.1 && : > "$f".1 ) </dev/null >/dev/null 2>&1 & p1=$!
-    ( zapret_tls_ok 9.9.9.9 && : > "$f".2 ) </dev/null >/dev/null 2>&1 & p2=$!
+    rm -f "$f".*
+    ps=""
+    for a in $ZAPRET_WL_FOREIGN; do
+        ( zapret_http_ok "$a" && : > "$f.$a" ) </dev/null >/dev/null 2>&1 &
+        ps="$ps $!"
+    done
     # до конца, а не до сигнала: USR1 (Action, «Применить») прерывает wait, и
     # недоделанная проверка считалась провалом — ложная пауза обхода (ревью PR #19)
-    for p in $p1 $p2; do while kill -0 "$p" 2>/dev/null; do wait "$p" 2>/dev/null; done; done
-    if [ -f "$f".1 ] || [ -f "$f".2 ]; then
+    for p in $ps; do while kill -0 "$p" 2>/dev/null; do wait "$p" 2>/dev/null; done; done
+    alive=0
+    for a in $ZAPRET_WL_FOREIGN; do [ -f "$f.$a" ] && alive=1; done
+    if [ "$alive" = 1 ]; then
         [ "$ZAPRET_WL" = "1" ] && log "zapret: зарубежные адреса снова открываются — белых списков нет, обход включаю"
         ZAPRET_WL=0; ZAPRET_WL_HITS=0
     elif zapret_tls_ok 77.88.55.242; then
         ZAPRET_WL_HITS=$((ZAPRET_WL_HITS + 1))
         # вход — со второй проверки подряд (минута): одна неудача — не повод
         if [ "$ZAPRET_WL" != "1" ] && [ "$ZAPRET_WL_HITS" -ge 2 ]; then
-            log "zapret: похоже, белые списки оператора (Яндекс открывается, 1.1.1.1 и 9.9.9.9 — нет, 2 проверки подряд) — обход на паузе, проверяю раз в минуту"
+            log "zapret: похоже, белые списки оператора (Яндекс открывается, четыре зарубежных адреса — нет, 2 проверки подряд) — обход на паузе, проверяю раз в минуту"
             ZAPRET_WL=1
         fi
     fi
     # не отвечает и Яндекс — нет связи вообще: состояние не меняем
-    rm -f "$f".1 "$f".2
+    rm -f "$f".*
 }
 
 # Каждая итерация цикла. Дорогое (dumpsys, stat пакетов) — раз в ~30с.

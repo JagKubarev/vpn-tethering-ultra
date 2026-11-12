@@ -581,6 +581,18 @@ opera_reconcile() {
         esac
         return 0
     fi
+    # Белый список оператора (zapret_whitelist_check): серверы Opera и её API закрыты по
+    # адресу, а сеть «есть» — 11.11 opera-proxy перезапускался каждые 6–120 с, перебирая
+    # регионы («All API proxy candidates failed»). Не запускаем, пока список не снят;
+    # работающий прокси не трогаем — упадёт сам, тогда и остановимся здесь
+    if [ "$ZAPRET_WL" = "1" ] && [ "$OPERA_STATE" != "on" ] && ! vpn_up_now; then
+        case "$OPERA_STATE" in
+            off) ;;
+            *) opera_down nonet; log "opera: остановлен (у оператора белый список)" ;;
+        esac
+        OPERA_NONET=1
+        return 0
+    fi
     # сеть вернулась, прокси жив — проверить сразу
     [ "$OPERA_NONET" = "1" ] && { OPERA_NONET=0; OPERA_TICK=15; }
     # появление VPN снимает перенаправление сразу, без второго замера
