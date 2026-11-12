@@ -15,6 +15,7 @@
 [![Android](https://img.shields.io/badge/Android-arm64%20%7C%20armv7-3ddc84?logo=android&logoColor=white)](#совместимость)
 
 [Скачать](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest) ·
+[Приложение (APK)](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest/download/VPN_Tether.apk) ·
 [Telegram](https://t.me/kubarev_mods) ·
 [Чат](https://t.me/+LyVq9jqT-802MGIy) ·
 [4PDA](https://4pda.to/forum/index.php?showtopic=1097835) ·
@@ -110,7 +111,7 @@
    В списке модулей он называется **VPN Tether** (с 3.26.0; id `vpn-to-hotspot-usb` прежний).
 3. Включите раздачу Wi-Fi или USB как обычно. Режим переключается кнопкой **Action** у модуля,
    настройки — в **WebUI**. В KernelSU и APatch WebUI открывается из менеджера, в Magisk —
-   через приложение **VPN Tether** (`VPN_Tether_v*.apk` в том же релизе, Android 8.0+;
+   через приложение **VPN Tether** ([скачать APK](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest/download/VPN_Tether.apk) — лежит в каждом релизе, Android 8.0+;
    подробнее — [app/README.md](app/README.md)). Оно же открывает WebUI и на KernelSU без менеджера.
 
 При первой установке создаётся `/data/adb/vpn_tether.conf` с закомментированными примерами.
