@@ -134,6 +134,8 @@ update_status() {
         echo "zapret_auto=$(cat "$ZAPRET_LIST_AUTO" 2>/dev/null | grep -c '[a-z0-9]')"
         echo "zapret_per_net=$ZAPRET_PER_NET"
         echo "zapret_engine=$ZAPRET_ENGINE_RUN"
+        # стратегия nfqws2, которой он запущен (имя файла; нет файла — hardcorp74), и свои приёмы
+        [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && echo "zapret2_strategy=$(basename "$(zapret2_strat_file)" .conf)$([ -n "$ZAPRET2_ARGS" ] && echo +)"
         echo "zapret_strategy=$ZAPRET_EFF_STRATEGY"
         echo "zapret_eff_args=$ZAPRET_EFF_ARGS"
         echo "zapret_eff_yt=$ZAPRET_EFF_YT"

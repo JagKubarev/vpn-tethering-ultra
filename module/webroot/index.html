@@ -497,11 +497,56 @@ details > summary::after { border-color: currentColor; }
 <div class="card">
   <div class="row col" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Движок обхода</div>
-      <div class="s" id="zEngSub">nfqws2 (zapret2) сам подбирает приём для каждого сайта. nfqws1 — прежний движок со своими стратегиями, подбором и сторожем.</div></div>
+      <div class="s" id="zEngSub">nfqws2 (zapret2) — стратегии из nfqws2-android, многие сами перебирают приёмы для каждого сайта. nfqws1 — прежний движок со своими стратегиями, подбором и сторожем.</div></div>
     <select data-key="ZAPRET_ENGINE">
-      <option value="nfqws2">nfqws2 (zapret2, стратегия hardcorp74)</option>
+      <option value="nfqws2">nfqws2 (zapret2)</option>
       <option value="nfqws1">nfqws1 (прежний)</option>
     </select>
+  </div>
+  <div class="row col" data-dep="ZAPRET_ENABLE" data-nfqws2>
+    <div class="txt"><div class="t">Стратегия nfqws2</div>
+      <div class="s">Готовые наборы приёмов из nfqws2-android, после тире — автор. Порты, списки, исключения и DoH — модуля, для Windows-клиентов раздачи приёмы подстраиваются сами.</div></div>
+    <select data-key="ZAPRET2_STRATEGY">
+      <option value="hardcorp74">hardcorp74 — по умолчанию</option>
+      <option value="alt">alt — Flowseal</option>
+      <option value="alt10">alt10 — Flowseal</option>
+      <option value="alt11">alt11 — Flowseal</option>
+      <option value="alt12">alt12 — Flowseal</option>
+      <option value="alt13">alt13 — Flowseal</option>
+      <option value="alt2">alt2 — Flowseal</option>
+      <option value="alt3">alt3 — Flowseal</option>
+      <option value="alt4">alt4 — Flowseal</option>
+      <option value="alt4_mod">alt4_mod — Flowseal</option>
+      <option value="alt5">alt5 — Flowseal</option>
+      <option value="alt6">alt6 — Flowseal</option>
+      <option value="alt7">alt7 — Flowseal</option>
+      <option value="alt8">alt8 — Flowseal</option>
+      <option value="alt9">alt9 — Flowseal</option>
+      <option value="anti_throttle">anti_throttle — Zephyron</option>
+      <option value="eduncey">eduncey</option>
+      <option value="exp">exp — Flowseal</option>
+      <option value="fake_disorder">fake_disorder — TheFirstNoob</option>
+      <option value="fake_tls_auto">fake_tls_auto — Flowseal</option>
+      <option value="fake_tls_auto_alt">fake_tls_auto_alt — Flowseal</option>
+      <option value="fake_tls_auto_alt2">fake_tls_auto_alt2 — Flowseal</option>
+      <option value="fake_tls_auto_alt3">fake_tls_auto_alt3 — Flowseal</option>
+      <option value="krushaaa">krushaaa</option>
+      <option value="MartinBacker">MartinBacker</option>
+      <option value="nzapret">nzapret</option>
+      <option value="rostelecom">rostelecom — Flowseal</option>
+      <option value="simple_fake">simple_fake — Flowseal</option>
+      <option value="simple_fake_alt">simple_fake_alt — Flowseal</option>
+      <option value="simple_fake_alt2">simple_fake_alt2 — Flowseal</option>
+      <option value="universal_v12">universal_v12 — Zephyron</option>
+      <option value="universal_v13">universal_v13 — RixyPow</option>
+      <option value="Uvvi2">Uvvi2</option>
+      <option value="z2r_rocket">z2r_rocket — IndeecFOX</option>
+      <option value="z_attacker">z_attacker — GAME-OVER-op</option>
+    </select>
+    <details style="margin-top:8px"><summary>Свои приёмы TCP</summary>
+      <input type="text" data-key="ZAPRET2_ARGS" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="--payload=tls_client_hello --lua-desync=...">
+      <div class="s muted" style="font-size:12px;margin-top:4px">Вместо приёмов выбранной стратегии для TCP, её подделки (по имени) и Lua остаются. Только --payload, --lua-desync, --in-range, --out-range. Пусто — приёмы стратегии.</div>
+    </details>
   </div>
 </div>
 <div class="hint" id="zEngWin">Ноутбук или ПК на Windows через раздачу: если часть сайтов не открывается или Windows пишет «Нет подключения к интернету», включите на нём метки времени TCP — один раз, в командной строке от администратора: <code id="zEngWinCmd" style="user-select:all">netsh interface tcp set global timestamps=enabled</code>. Без них модуль подстраивает приёмы под Windows сам, с ними обход работает как для телефона.
@@ -1254,7 +1299,7 @@ function renderStatus(s) {
     let zt = 'включён';
     if (/cb=0/.test(s.zapret_caps || '')) zt += ' · упрощённый режим (ядро без connbytes)';
     if (/own=0/.test(s.zapret_caps || '')) zt += ' · без исключений по приложениям (старое ядро)';
-    if (s.zapret_engine === 'nfqws2') zt += ' · nfqws2, стратегия hardcorp74 (сама меняет приём для сайта)';
+    if (s.zapret_engine === 'nfqws2') zt += ' · nfqws2, ' + esc(z2Name(s.zapret2_strategy));
     else if (s.zapret_strategy) zt += ' · ' + esc(stratName(s.zapret_strategy, s.zapret_eff_args)) +
       (s.zapret_src === 'net' ? ' (своя для «' + esc(s.net_label) + '»)' : s.zapret_src === 'label' ? ' (как у «' + esc(s.net_label) + '», код сети ' + esc(s.net_key) + ')' : ' (общая)');
     if (s.zapret_eff_yt && s.zapret_engine !== 'nfqws2') zt += ' · YouTube: ' + esc(stratLabel(s.zapret_eff_yt));
@@ -1289,7 +1334,7 @@ function renderStatus(s) {
   renderWarpState(w);
   renderOpera(s);
   // что и для чего работает сейчас: общая, YouTube, отдельные сайты
-  if ($('#zSum')) $('#zSum').textContent = s.zapret === 'on' && s.zapret_engine === 'nfqws2' ? 'Сейчас работает: nfqws2 (zapret2), стратегия hardcorp74 — приём для каждого сайта он выбирает сам' :
+  if ($('#zSum')) $('#zSum').textContent = s.zapret === 'on' && s.zapret_engine === 'nfqws2' ? 'Сейчас работает: nfqws2 (zapret2), ' + z2Name(s.zapret2_strategy) :
     s.zapret === 'on' ? 'Сейчас работает:\nОбщая: ' + stratName(s.zapret_strategy, s.zapret_eff_args) +
     '\nYouTube: ' + (s.zapret_eff_yt ? 'своя, ' + stratLabel(s.zapret_eff_yt) : 'та же, что общая') +
     '\nDiscord: ' + (s.zapret_eff_dc ? 'своя, ' + stratLabel(s.zapret_eff_dc) : 'та же, что общая') +
@@ -1369,7 +1414,7 @@ async function loadStatus() {
 let DEF = {}, USR = {}, CUR = {};   // умолчания, из файла, текущие в форме
 const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAMS','DNS_FALLBACKS','DNS_VPN_UPSTREAMS',
   'DNS_BOOTSTRAP','DNS_HEALTH_INTERVAL','DNS_HEALTH_RECOVER','KILL_SWITCH','KILL_SWITCH_STRICT','NET_PROFILE_ADAPTIVE',
-  'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_ENGINE','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE','ZAPRET_EXCL_APPS',
+  'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_ENGINE','ZAPRET2_STRATEGY','ZAPRET2_ARGS','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE','ZAPRET_EXCL_APPS',
   'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','DNS_VIA_ZAPRET','YT_GGC_BLOCK','YT_DEAD_FAILFAST','YT_DEAD_WARP','ZAPRET_WATCHDOG','ZAPRET_AUTOPICK','ZAPRET_WATCHDOG_MIN',
   'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','YT_SLOW_RETRY','ZAPRET_AUTO_FAIL',
   'WARP_ENABLE','WARP_CONF','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_COUNTRY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
@@ -1387,7 +1432,7 @@ async function loadConf() {
   const r = await ctl('conf');
   DEF = {}; USR = {};
   r.out.split('\n').forEach((l) => {
-    const m = /^([DU]) ([A-Z_]+)=(.*)$/.exec(l);
+    const m = /^([DU]) ([A-Z0-9_]+)=(.*)$/.exec(l);   // ключи бывают с цифрами (ZAPRET2_*)
     if (m) (m[1] === 'D' ? DEF : USR)[m[2]] = m[3];
   });
   CUR = {}; KEYS.forEach((k) => { CUR[k] = saved(k); });
@@ -1508,6 +1553,7 @@ function renderDeps() {
   $$('[data-offnote]').forEach((n) => { n.hidden = CUR[n.dataset.offnote] === '1'; });
   // nfqws2: стратегии, подбор и сторож — только у nfqws1, у nfqws2 свой перебор приёмов
   $$('[data-nfqws1]').forEach((el) => { el.style.display = CUR.ZAPRET_ENGINE === 'nfqws2' ? 'none' : ''; });
+  $$('[data-nfqws2]').forEach((el) => { el.style.display = CUR.ZAPRET_ENGINE === 'nfqws2' ? '' : 'none'; });
   // подсказка про метки времени Windows — только nfqws2 (hardcorp74 на них держится) и при включённом обходе
   $('#zEngWin').style.display = CUR.ZAPRET_ENGINE === 'nfqws2' && CUR.ZAPRET_ENABLE === '1' ? '' : 'none';
   $('#zArgsBox').style.display = CUR.ZAPRET_STRATEGY === 'custom' ? '' : 'none';
@@ -1809,6 +1855,11 @@ async function waitAck(token, sec) {
 const KEY_TITLE = { WARP_TELEGRAM: 'Telegram через WARP', OPERA_TELEGRAM: 'Telegram через Opera', WARP_GOOGLE: 'Google через WARP',
   OPERA_GOOGLE: 'Google через Opera', WARP_DOMAINS: 'Сайты через WARP', OPERA_DOMAINS: 'Сайты через Opera',
   WARP_APPS: 'Приложения через WARP', OPERA_APPS: 'Приложения через Opera', OPERA_COUNTRY: 'Регион Opera' };
+// стратегия nfqws2 из статуса: «имя» или «имя+» (свои приёмы TCP)
+function z2Name(v) {
+  v = v || 'hardcorp74';
+  return 'стратегия ' + v.replace(/\+$/, '') + (/\+$/.test(v) ? ' + свои приёмы TCP' : '');
+}
 function keyTitle(k) {
   if (KEY_TITLE[k]) return KEY_TITLE[k];
   const el = $('[data-key="' + k + '"]'), t = el && el.closest('.row') && el.closest('.row').querySelector('.t');
@@ -2795,7 +2846,7 @@ function mockExec(cmd) {
     target: 'vpn', usr: { DNSPROXY_ENABLE: '1', WARP_ENABLE: '1' }, zlist: '', ack: '', wave: /wave/.test(location.search) ? 1 : 0,   // WARP включён — вкладка не серая при warp=up
   });
   // set/unset/zlist-set запоминаются, чтобы после «Применить» форма не откатывалась
-  const mset = /^set ([A-Z_]+) '(.*)'$/.exec(a), munset = /^unset ([A-Z_]+)$/.exec(a);
+  const mset = /^set ([A-Z0-9_]+) '(.*)'$/.exec(a), munset = /^unset ([A-Z0-9_]+)$/.exec(a);
   if (mset) { M.usr[mset[1]] = mset[2].replace(/'\\''/g, "'"); return { errno: 0, out: 'OK' }; }
   if (munset) { delete M.usr[munset[1]]; return { errno: 0, out: 'OK' }; }
   if (/^zlist-set /.test(a)) {
@@ -2805,7 +2856,7 @@ function mockExec(cmd) {
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=предпросмотр\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
     '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=' + (M.target === 'vpn' ? 'wifi:Дом_5G' : 'mobile:25011') + '\nnet_label=' + (M.target === 'vpn' ? 'Дом_5G' : 'YOTA') + '\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nwan=rmnet_data1\nexit=' + (Math.floor(Date.now() / 1000) - 120) + '|rmnet_data1|188.162.73.24|RU|' + (M.wave ? '000|204' : '204|204') + '\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nwarp=up\nwarp_conf=warp-2\nwarp_note=\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD ZAPRET_ENGINE=nfqws2\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.zapret.moe/dns-query\nD DNS_FALLBACKS=https://de.magicdns.ru/dns-query https://not-a-dns.quic.best/dns-query https://sync.bezmezhau.com/dns-query https://api.magicinfo.art/dns-query https://dns.wlrus.cfd/dns-query https://dns.semqka.xyz/dns-query https://tamaev-gifts.xyz/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD DNS_VIA_ZAPRET=0\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=1\nD OPERA_API_PROXY=\nD OPERA_COUNTRY=EU\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD ZAPRET_ENGINE=nfqws2\nD ZAPRET2_STRATEGY=hardcorp74\nD ZAPRET2_ARGS=\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.zapret.moe/dns-query\nD DNS_FALLBACKS=https://de.magicdns.ru/dns-query https://not-a-dns.quic.best/dns-query https://sync.bezmezhau.com/dns-query https://api.magicinfo.art/dns-query https://dns.wlrus.cfd/dns-query https://dns.semqka.xyz/dns-query https://tamaev-gifts.xyz/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD DNS_VIA_ZAPRET=0\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=1\nD OPERA_API_PROXY=\nD OPERA_COUNTRY=EU\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD YT_SLOW_RETRY=1\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
     Object.keys(M.usr).map((k) => 'U ' + k + '=' + M.usr[k] + '\n').join('') };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +

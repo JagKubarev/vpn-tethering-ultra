@@ -236,7 +236,7 @@ case "$1" in
 
     unset)
         key="$2"
-        case "$key" in ''|*[!A-Z_]*) echo "ERR ключ"; exit 1 ;; esac
+        case "$key" in ''|*[!A-Z0-9_]*) echo "ERR ключ"; exit 1 ;; esac   # с цифрами: ZAPRET2_*
         [ -f "$CONF" ] || { echo "OK"; exit 0; }
         K="$key" awk '
             BEGIN { k = ENVIRON["K"] }

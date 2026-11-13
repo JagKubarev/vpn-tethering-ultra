@@ -1,7 +1,9 @@
 nfqws2 (bin/nfqws2-arm64, bin/nfqws2-arm), Lua-скрипты (lua/), подделки (blobs/), списки (lists/)
-и стратегия hardcorp74 — из nfqws2-android v3.0.0 (github.com/Dea1hwa1cher/nfqws2-android,
-выпуск 10.11.2026), лицензия MIT (LICENSE рядом). nfqws2 и Lua-скрипты — zapret2, bol-van
-(github.com/bol-van/zapret2), MIT. Бинарники — сборка nfqws2-android под Android (NDK r27d).
-Стратегия hardcorp74 — автор hardcorp74 (через rndnaame/nfqws-menu), 02.11.2026.
+и стратегии (strategies/*.conf, авторы — strategies/meta.tsv) — из nfqws2-android v3.0.0
+(github.com/Dea1hwa1cher/nfqws2-android, выпуск 10.11.2026), лицензия MIT (LICENSE рядом). nfqws2 и
+Lua-скрипты — zapret2, bol-van (github.com/bol-van/zapret2), MIT; custom_funcs.lua и zapret-custom.lua —
+из nfqws2-android (zapret-custom.lua — из Zapret-2-GUI). Бинарники — сборка nfqws2-android под Android
+(NDK r27d). Стратегии — из nfqws-menu (rndnaame) и других проектов, указанных в meta.tsv; взяты все,
+кроме smart и турецких tr_*, вместе с подделками и списками, на которые они ссылаются (13.11.2026).
 Кроме lua/vpn-tether.lua — он свой (VPN Tether, GPL-3.0, как модуль): обманки fool_nots и
 fool_nots_ack для соединений без метки времени TCP (Windows-клиенты раздачи), 12.11.2026.

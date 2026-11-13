@@ -477,12 +477,13 @@ zapret_doh_targets() {
     printf '%s|%s|%s|%s\n' "$(_zdt_j $n)" "$(_zdt_j $i)" "$(_zdt_j $ps)" "$(_zdt_j $x)"
 }
 
-# --- движок nfqws2 (ZAPRET_ENGINE=nfqws2): zapret2 со стратегией hardcorp74 -----------
-# Аргументы и правила — как в nfqws2-android v3.0.0 (lib/common.sh: _startup_args, _fw_iface_rules),
-# стратегия strategies/hardcorp74.conf; файлы — zapret2/ (SOURCE.txt). Свои: --uid=0:$ZAPRET_GID
-# (по группе правила пропускают его собственные пакеты — метку на rmnet стирает qcom_qos_reset),
-# --bind-fix, наш список «мимо обхода» (банки, Госуслуги) и свой список сайтов из WebUI.
-# Стратегии сетей и сайтов, подбор, сторож и отбой в этом режиме не работают
+# --- движок nfqws2 (ZAPRET_ENGINE=nfqws2): zapret2, стратегии nfqws2-android ---------------
+# Стратегия — файл zapret2/strategies/<ZAPRET2_STRATEGY>.conf в формате nfqws2-android v3.0.0
+# (авторы — strategies/meta.tsv, файлы — zapret2/SOURCE.txt). Из него берутся только приёмы: основа
+# (Lua, подделки), TCP, QUIC, UDP и свои профили стратегии. Порты, режимы, списки, исключения и
+# профили DoH — наши. Свои: --uid=0:$ZAPRET_GID (по группе правила пропускают его собственные
+# пакеты — метку на rmnet стирает qcom_qos_reset), --bind-fix, список «мимо обхода» (банки,
+# Госуслуги), свой список сайтов из WebUI. Порты и лимит пакетов у всех стратегий выпуска одни
 ZAPRET2_TP="80,443,1984,2053,2083,2087,2096,5222,8443"
 ZAPRET2_UP="443,590:600,1400,3478:3481,5349,19294:19344,49152:65535"
 ZAPRET2_PKT=15     # первые пакеты соединения в nfqws2, туда и обратно (PKT_LIMIT_OUT/IN)
@@ -494,47 +495,64 @@ zapret_engine() {
         zapret_cap cb && { echo nfqws2; return 0; }
     echo nfqws1
 }
+# Файл выбранной стратегии; нет такого — hardcorp74
+zapret2_strat_file() {
+    local f="$ZAPRET2_DIR/strategies/${ZAPRET2_STRATEGY:-hardcorp74}.conf"
+    [ -f "$f" ] || f="$ZAPRET2_DIR/strategies/hardcorp74.conf"
+    echo "$f"
+}
+# Одна переменная из файла стратегии — одной строкой. Файл — модуля (формат nfqws2-android:
+# присваивания с $LUA_DIR/$BLOBS_DIR/$LISTS_DIR), читается в подоболочке
+zapret2_strat_var() {   # файл ПЕРЕМЕННАЯ
+    (
+        LUA_DIR="$ZAPRET2_DIR/lua"; BLOBS_DIR="$ZAPRET2_DIR/blobs"; LISTS_DIR="$ZAPRET2_DIR/lists"; LOG_DIR=/dev/null
+        . "$1" >/dev/null 2>&1
+        eval "printf '%s' \"\$$2\""
+    ) | tr '\n\t' '  ' | tr -s ' '
+}
+# Подделкам, которые держатся на метке времени TCP (tcp_ts, tcp_ts_up), — свои обманки из
+# vpn-tether.lua: у соединения без метки (Windows-клиенты раздачи) tcp_ts ничего не делает и
+# подделка доходит до сервера как настоящая; тогда badseq+badack (с badsum — только badack).
+# С меткой ничего не меняется. Только функции, где обманки идут лишь на подделки (fake,
+# hostfakesplit, fakedsplit, fakeddisorder); у multisplit/multidisorder они легли бы на настоящие
+# сегменты. Уже со сдвигом seq или своим fool= — не трогаем. Стенд 12.11 (hardcorp74, YOTA):
+# без меток 69 из 72 против 30, с метками 70 против 68
+zapret2_fool() {
+    awk '{
+        for (i = 1; i <= NF; i++) {
+            t = $i
+            if (t ~ /^--lua-desync=(fake|hostfakesplit|fakedsplit|fakeddisorder):/ && t ~ /tcp_ts(=|_up)/) {
+                if (t ~ /tcp_seq=/ || t ~ /:fool=/) { } else if (t ~ /:badsum/) t = t ":fool=fool_nots_ack"; else t = t ":fool=fool_nots"
+            }
+            printf "%s%s", (i > 1 ? " " : ""), t
+        }
+        print ""
+    }'
+}
 zapret2_args() {
-    local L="$ZAPRET2_DIR/lua" B="$ZAPRET2_DIR/blobs" S="$ZAPRET2_DIR/lists" ex="" us="" base custom udp quic tcp tcpd tcph tcpt extra ipset
+    local L="$ZAPRET2_DIR/lua" B="$ZAPRET2_DIR/blobs" S="$ZAPRET2_DIR/lists" ex="" us="" f base custom udp quic tcp tcpt extra ipset P=""
     grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
     grep -q '[a-z0-9]' "$ZAPRET_LIST_USER" 2>/dev/null && us="--hostlist=$ZAPRET_LIST_USER"
-    # vpn-tether.lua — свои обманки: fool_nots (badseq+badack, если у пакета нет метки времени TCP)
-    base="--lua-init=@$L/zapret-lib.lua --lua-init=@$L/zapret-antidpi.lua --lua-init=@$L/zapret-auto.lua --lua-init=@$L/vpn-tether.lua
- --blob=quic_initial:@$B/quic_initial.bin --blob=tls_clienthello:@$B/tls_clienthello.bin
- --blob=tls_clienthello_sochi_park:@$B/tls_clienthello_sochi_park.bin --blob=quic_initial_vk_com:@$B/quic_initial_vk_com.bin
- --blob=quic_initial_5ka_ru:@$B/quic_initial_5ka_ru.bin --blob=quic_initial_steamcommunity_com:@$B/quic_initial_steamcommunity_com.bin
- --blob=stun_fake:@$B/stun.bin"
-    custom="--filter-tcp=443 --filter-l7=tls $ex --hostlist-domains=googlevideo.com --payload=tls_client_hello
- --lua-desync=fake:blob=0x00000000:tcp_ack=-66000:tcp_ts_up:fool=fool_nots:repeats=2 --lua-desync=multisplit:pos=midsld --new
- --filter-tcp=443 --filter-l7=tls $ex --hostlist=$S/youtube.list --payload=tls_client_hello
- --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
- --lua-desync=fake:blob=tls_clienthello_sochi_park:optional:tcp_seq=-10000:tcp_ack=-66000:badsum:tls_mod=rnd,dupsid,sni=rzd.ru:repeats=4"
-    udp="--filter-udp=590-600,1400,3478-3481,5349,19294-19344,49152-65535 --filter-l7=wireguard,stun,discord,unknown --out-range=<n2
- --payload=wireguard_initiation,wireguard_response,wireguard_cookie,stun,discord_ip_discovery,unknown
- --lua-desync=fake:blob=stun_fake:repeats=6:strategy=1 --lua-desync=fake:blob=quic_initial_steamcommunity_com:repeats=4:strategy=1
- --lua-desync=fake:blob=quic_initial_5ka_ru:repeats=6:strategy=2 --lua-desync=fake:blob=quic_initial_steamcommunity_com:repeats=5:strategy=2
- --lua-desync=fake:blob=quic_initial_vk_com:ip_autottl=-2,3-20:ip6_autottl=-2,3-20:payload=all:repeats=6:strategy=3"
-    quic="--filter-udp=443 --filter-l7=quic $ex --payload=quic_initial --lua-desync=fake:blob=quic_initial_5ka_ru:repeats=6"
-    # приёмы TLS (circular) и HTTP — порознь: в режиме all «все сайты» получают только TLS (ниже).
-    # fool=fool_nots(_ack) — свои (vpn-tether.lua): у соединения без метки времени TCP (Windows-
-    # клиенты раздачи) tcp_ts ничего не делает и подделки доходят до сервера — тогда badseq/badack.
-    # С меткой — без изменений. Стенд 12.11, без меток: 69 из 72 против 30; с метками 70 против 68
-    tcpd="--payload=tls_client_hello
- --lua-desync=circular:fails=2:time=300:retrans=2:nld=2
- --lua-desync=fake:blob=tls_clienthello_sochi_park:tls_mod=rnd,dupsid:tcp_ts=-1500:badsum:fool=fool_nots_ack:strategy=1
- --lua-desync=hostfakesplit:repeats=4:tcp_ts=-600000:tcp_md5:host=ya.ru:fool=fool_nots:strategy=1
- --lua-desync=multisplit:pos=1,sniext-2:seqovl=1:seqovl_pattern=tls_clienthello_sochi_park:strategy=1
- --lua-desync=fake:blob=stun_fake:tcp_ts=-1500:badsum:strategy=2
- --lua-desync=fake:blob=tls_clienthello_sochi_park:tls_mod=rnd,dupsid:tcp_ts=-1500:badsum:fool=fool_nots_ack:strategy=2
- --lua-desync=hostfakesplit:repeats=4:tcp_ts=-600000:tcp_md5:host=ya.ru:fool=fool_nots:strategy=2"
-    tcph="--payload=http_req --lua-desync=fake:blob=stun_fake:tcp_ts=-5000:badsum:tcp_ts_up --lua-desync=hostfakesplit:host=mail.ru:tcp_ts=-5000:tcp_ts_up:fool=fool_nots"
-    tcp="--filter-tcp=443,80,1984,5222 --filter-l7=http,tls $ex $tcpd $tcph"
-    # только TLS — для адресов (ipset) и «всех сайтов»; HTTP-обход — только сайтам из списков,
-    # как у nfqws1 (тот порт 80 не трогал вовсе). Сняли 12.11, пока у Windows-клиентов раздачи
-    # HTTP к адресам ipset (Akamai, Cloudflare, Google) приходил испорченным — «нет интернета»
-    # (msftconnecttest — 400), падала проверка отзыва сертификата (OCSP по HTTP). Причину с тех
-    # пор лечит fool_nots; вернуть HTTP адресам ipset — только после замера с Windows без меток
-    tcpt="--filter-tcp=443,1984,5222 --filter-l7=tls $ex $tcpd"
+    f=$(zapret2_strat_file)
+    # основа стратегии + свои: vpn-tether.lua (fool_nots) и подделка vt_tls для профилей DoH (своё
+    # имя: у чужой стратегии tls_clienthello может не быть или быть другим файлом)
+    base="$(zapret2_strat_var "$f" NFQWS_BASE_ARGS) --lua-init=@$L/vpn-tether.lua --blob=vt_tls:@$B/tls_clienthello.bin"
+    custom=$(zapret2_strat_var "$f" NFQWS_ARGS_CUSTOM)
+    udp=$(zapret2_strat_var "$f" NFQWS_ARGS_UDP)
+    quic=$(zapret2_strat_var "$f" NFQWS_ARGS_QUIC)
+    tcp=$(zapret2_strat_var "$f" NFQWS_ARGS)
+    # свои приёмы TCP (ZAPRET2_ARGS) — вместо приёмов стратегии; её подделки и Lua остаются
+    [ -n "$ZAPRET2_ARGS" ] && tcp="--filter-tcp=443,80,1984,5222 --filter-l7=http,tls $ZAPRET2_ARGS"
+    # «мимо обхода» — в каждый профиль по именам (в своих профилях стратегии — в каждый)
+    [ -n "$custom" ] && custom="$(echo "$custom" | sed "s# --new # $ex --new #g") $ex"
+    [ -n "$quic" ] && quic="$quic $ex"
+    tcp="$tcp $ex"
+    # только TLS — для адресов (ipset) и «всех сайтов»: те же приёмы, без порта 80 и HTTP;
+    # HTTP-обход — только сайтам из списков, как у nfqws1 (тот порт 80 не трогал вовсе). Сняли 12.11,
+    # пока у Windows-клиентов раздачи HTTP к адресам ipset (Akamai, Cloudflare, Google) приходил
+    # испорченным — «нет интернета» (msftconnecttest — 400), падала проверка отзыва сертификата
+    # (OCSP по HTTP). Причину с тех пор лечит fool_nots; вернуть — только после замера
+    tcpt=$(echo "$tcp" | sed 's/--filter-tcp=[^ ]*/--filter-tcp=443,1984,5222/; s/--filter-l7=[^ ]*/--filter-l7=tls/')
     # .ru/.su/.рф и Google (list-noauto) — как у nfqws1: профиль по именам их не трогает и в автосписок
     # не берёт; такие сайты из списков (user.list nfqws2 и свой) — своим профилем перед ним. Google
     # (Play, YouTube) это не задевает: его адреса — в ipset.list, а профиль по адресам идёт раньше
@@ -550,29 +568,45 @@ zapret2_args() {
     # порогом. all — как у nfqws1: все сайты только по TLS; QUIC и HTTP (порт 80) — по спискам, как
     # в list. Без автосписка: профиль с ним забирает себе все сайты (следит за обрывами), и до
     # профиля «все сайты» после него дело бы не дошло
-    local tail=""
     if [ "$ZAPRET_MODE" = "all" ]; then
         extra="--hostlist=$S/user.list $us --hostlist-exclude=$S/exclude.list $rux"
-        tail=" --new $tcpt --hostlist-exclude=$S/exclude.list $rux"
     else
         extra="--hostlist=$S/user.list $us --hostlist-auto=$ZAPRET_LIST_AUTO --hostlist-auto-fail-threshold=$ZAPRET_AUTO_FAIL --hostlist-auto-debug=$ZAPRET_AUTO_LOG --hostlist-exclude=$S/exclude.list $rux"
     fi
     ipset="--ipset=$S/ipset.list --ipset-exclude=$S/ipset_exclude.list --ipset-ip=0.0.0.0"
+    # профили — через --new; пустой (у стратегии нет UDP или QUIC) пропускаем
+    _z2p() { [ -n "$1" ] && P="${P:+$P --new }$1"; }
     # DoH через обход (DNS_VIA_ZAPRET): как у nfqws1 — свои профили первыми, подделка с md5 и разрез
-    # по середине имени; «как есть» (ZAPRET_DOH_ASIS) — пустой профиль. Свои профили — до hardcorp74
-    local doh="" dt dn di dpp dx dd
+    # по середине имени; «как есть» (ZAPRET_DOH_ASIS) — пустой профиль
+    local dt dn di dpp dx dd
     if [ "$DNS_VIA_ZAPRET" = "1" ]; then
         dt=$(zapret_doh_targets)
         dn=${dt%%"|"*}; dt=${dt#*"|"}; di=${dt%%"|"*}; dt=${dt#*"|"}; dpp=${dt%%"|"*}; dx=${dt#*"|"}
-        dd="--payload=tls_client_hello --lua-desync=fake:blob=tls_clienthello:tcp_md5 --lua-desync=multidisorder:pos=midsld"
-        [ -n "$dx" ] && doh="--filter-tcp=$dpp --hostlist-domains=$dx --new "
-        [ -n "$dn" ] && doh="$doh--filter-tcp=$dpp --filter-l7=tls $ex --hostlist-domains=$dn $dd --new "
-        [ -n "$di" ] && doh="$doh--filter-tcp=$dpp --filter-l7=tls --ipset-ip=$di $dd --new "
+        dd="--payload=tls_client_hello --lua-desync=fake:blob=vt_tls:tcp_md5 --lua-desync=multidisorder:pos=midsld"
+        [ -n "$dx" ] && _z2p "--filter-tcp=$dpp --hostlist-domains=$dx"
+        [ -n "$dn" ] && _z2p "--filter-tcp=$dpp --filter-l7=tls $ex --hostlist-domains=$dn $dd"
+        [ -n "$di" ] && _z2p "--filter-tcp=$dpp --filter-l7=tls --ipset-ip=$di $dd"
     fi
     # порядок — как _startup_args: свои профили, UDP, QUIC (адреса, имена), TCP (адреса, имена);
     # .ru и Google из списков — между адресами и именами
-    [ -n "$ruh" ] && ruh="$ruh --new"
-    echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $base $doh$custom --new $udp --new $quic $ipset --new ${ruh:+$quic $ruh }$quic $extra --new $tcpt $ipset --new ${ruh:+$tcp $ruh }$tcp $extra$tail" | tr '\n' ' ' | tr -s ' '
+    _z2p "$custom"
+    _z2p "$udp"
+    if [ -n "$quic" ]; then
+        _z2p "$quic $ipset"
+        [ -n "$ruh" ] && _z2p "$quic $ruh"
+        _z2p "$quic $extra"
+    fi
+    _z2p "$tcpt $ipset"
+    [ -n "$ruh" ] && _z2p "$tcp $ruh"
+    _z2p "$tcp $extra"
+    [ "$ZAPRET_MODE" = "all" ] && _z2p "$tcpt --hostlist-exclude=$S/exclude.list $rux"
+    echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $base $P" | tr '\n' ' ' | tr -s ' ' | zapret2_fool
+}
+# Название стратегии и автор (meta.tsv) — для журнала и WebUI
+zapret2_strat_label() {
+    local n
+    n=$(basename "$(zapret2_strat_file)" .conf)
+    echo "$n$(awk -F'\t' -v n="$n" '$1 == n { printf " (%s)", $2 }' "$ZAPRET2_DIR/strategies/meta.tsv" 2>/dev/null)"
 }
 # правило с портами: multiport, а на ядре без него — по порту
 zapret2_rule() {   # таблица цепочка proto dports|sports порты "доп." цель...
@@ -761,7 +795,7 @@ zapret_start() {
         ZAPRET_ENGINE_RUN="$ZAPRET_ENGINE_EFF"
         if [ "$ZAPRET_ENGINE_EFF" = nfqws2 ]; then
             ZAPRET_ALT_N=0
-            log "zapret: nfqws2 запущен (pid $pid, стратегия hardcorp74 из nfqws2-android, $([ "$ZAPRET_MODE" = all ] && echo "TLS всех сайтов, кроме .ru и Google не из списков; QUIC и HTTP — по спискам" || echo "свои списки и автосписок"))"
+            log "zapret: nfqws2 запущен (pid $pid, стратегия $(zapret2_strat_label), $([ "$ZAPRET_MODE" = all ] && echo "TLS всех сайтов, кроме .ru и Google не из списков; QUIC и HTTP — по спискам" || echo "свои списки и автосписок"))"
             return 0
         fi
         ZAPRET_ALT_N=$(zapret_alt_count "$1")
