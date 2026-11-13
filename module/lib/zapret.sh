@@ -517,6 +517,12 @@ zapret2_strat_load() {   # файл
     { read -r Z2_BASE; read -r Z2_CUSTOM; read -r Z2_UDP; read -r Z2_QUIC; read -r Z2_TCP; } <<EOF
 $_o
 EOF
+    # hostfakesplit_alt — из zapret-smart.lua, а alt13 и eduncey его не подключают: nfqws2 не
+    # запускался («desync function 'hostfakesplit_alt' does not exist», подбор 13.11 на YOTA).
+    # Файл при загрузке только объявляет функции и таблицы — умный режим сам не включается
+    case "$Z2_BASE" in *zapret-smart.lua*) ;; *)
+        case "$Z2_CUSTOM $Z2_UDP $Z2_QUIC $Z2_TCP" in *hostfakesplit_alt*) Z2_BASE="$Z2_BASE --lua-init=@$ZAPRET2_DIR/lua/zapret-smart.lua" ;; esac ;;
+    esac
 }
 # Наше (исключения, списки, адреса) — к каждому профилю стратегии: у z2r_rocket в TCP их три через
 # --new, и дописанное в конец строки досталось бы только последнему — первые два шли бы на все
@@ -535,14 +541,14 @@ zapret2_scan_args() {   # имя очередь
 # vpn-tether.lua: у соединения без метки (Windows-клиенты раздачи) tcp_ts ничего не делает и
 # подделка доходит до сервера как настоящая; тогда badseq+badack (с badsum — только badack).
 # С меткой ничего не меняется. Только функции, где обманки идут лишь на подделки (fake,
-# hostfakesplit, fakedsplit, fakeddisorder); у multisplit/multidisorder они легли бы на настоящие
-# сегменты. Уже со сдвигом seq или своим fool= — не трогаем. Стенд 12.11 (hardcorp74, YOTA):
+# hostfakesplit и hostfakesplit_alt, fakedsplit, fakeddisorder); у multisplit/multidisorder они
+# легли бы на настоящие сегменты. Уже со сдвигом seq или своим fool= — не трогаем. Стенд 12.11 (hardcorp74, YOTA):
 # без меток 69 из 72 против 30, с метками 70 против 68
 zapret2_fool() {
     awk '{
         for (i = 1; i <= NF; i++) {
             t = $i
-            if (t ~ /^--lua-desync=(fake|hostfakesplit|fakedsplit|fakeddisorder):/ && t ~ /tcp_ts(=|_up)/) {
+            if (t ~ /^--lua-desync=(fake|hostfakesplit|hostfakesplit_alt|fakedsplit|fakeddisorder):/ && t ~ /tcp_ts(=|_up)/) {
                 if (t ~ /tcp_seq=/ || t ~ /:fool=/) { } else if (t ~ /:badsum/) t = t ":fool=fool_nots_ack"; else t = t ":fool=fool_nots"
             }
             printf "%s%s", (i > 1 ? " " : ""), t
@@ -562,6 +568,8 @@ zapret2_args() {
     custom="$Z2_CUSTOM"; udp="$Z2_UDP"; quic="$Z2_QUIC"; tcp="$Z2_TCP"
     # свои приёмы TCP (ZAPRET2_ARGS) — вместо приёмов стратегии; её подделки и Lua остаются
     [ -n "$ZAPRET2_ARGS" ] && tcp="--filter-tcp=443,80,1984,5222 --filter-l7=http,tls $ZAPRET2_ARGS"
+    # hostfakesplit_alt в своих приёмах — zapret-smart.lua, как в zapret2_strat_load для файла
+    case "$base" in *zapret-smart.lua*) ;; *) case "$ZAPRET2_ARGS" in *hostfakesplit_alt*) base="$base --lua-init=@$L/zapret-smart.lua" ;; esac ;; esac
     # «мимо обхода» — в каждый профиль по именам
     custom=$(zapret2_add "$custom" "$ex")
     quic=$(zapret2_add "$quic" "$ex")
