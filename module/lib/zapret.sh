@@ -606,7 +606,8 @@ zapret2_args() {
 zapret2_strat_label() {
     local n
     n=$(basename "$(zapret2_strat_file)" .conf)
-    echo "$n$(awk -F'\t' -v n="$n" '$1 == n { printf " (%s)", $2 }' "$ZAPRET2_DIR/strategies/meta.tsv" 2>/dev/null)"
+    # автор — в скобках, если это не имя самой стратегии (hardcorp74, MartinBacker)
+    echo "$n$(awk -F'\t' -v n="$n" '$1 == n && $2 != n { printf " (%s)", $2 }' "$ZAPRET2_DIR/strategies/meta.tsv" 2>/dev/null)"
 }
 # правило с портами: multiport, а на ядре без него — по порту
 zapret2_rule() {   # таблица цепочка proto dports|sports порты "доп." цель...
