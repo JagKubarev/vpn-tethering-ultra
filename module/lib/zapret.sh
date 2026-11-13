@@ -497,7 +497,7 @@ zapret_engine() {
 }
 # Файл выбранной стратегии; нет такого — hardcorp74
 zapret2_strat_file() {
-    local f="$ZAPRET2_DIR/strategies/${ZAPRET2_STRATEGY:-hardcorp74}.conf"
+    local f="$ZAPRET2_DIR/strategies/${ZAPRET2_EFF:-${ZAPRET2_STRATEGY:-hardcorp74}}.conf"
     [ -f "$f" ] || f="$ZAPRET2_DIR/strategies/hardcorp74.conf"
     echo "$f"
 }
@@ -714,8 +714,19 @@ zapret_pick_strategy() {
     ZAPRET_EFF_YT=""
     ZAPRET_EFF_DC=""
     ZAPRET_NET_SRC="default"
+    ZAPRET2_EFF="$ZAPRET2_STRATEGY"
+    ZAPRET2_NET_SRC="default"
     QUIC_NET=""
     [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] || return 0
+    # nfqws2 — своя запись сети (свой файл); не годится — общая, как у nfqws1
+    local n2
+    n2=$(zapret2_net_entry "$NET_KEY" "$NET_LABEL" "$ZAPRET2_DIR/strategies"); rc=$?
+    if [ -n "$n2" ]; then
+        ZAPRET2_EFF="$n2"; ZAPRET2_NET_SRC="net"; [ "$rc" = 3 ] && ZAPRET2_NET_SRC="label"
+    elif [ "$rc" = 2 ] && [ "$ZAPRET2_NET_BAD" != "$NET_KEY" ]; then
+        log "WARNING: zapret: запись nfqws2 для сети «$NET_LABEL» в $ZAPRET2_NETS_FILE не прошла проверку — общая стратегия"
+        ZAPRET2_NET_BAD="$NET_KEY"
+    fi
     QUIC_NET=$(K="$NET_KEY" L="$NET_LABEL" awk -F'|' '$1 == ENVIRON["K"] { k = $3 } ENVIRON["L"] != "" && $2 == ENVIRON["L"] { l = $3 } END { print ((k != "") ? k : l) }' "$ZAPRET_QUIC_FILE" 2>/dev/null)
     e=$(zapret_net_entry "$NET_KEY" "$NET_LABEL"); rc=$?
     if [ "$rc" = 2 ]; then
@@ -943,7 +954,6 @@ zapret_rules_on() {
 zapret_watchdog() {
     local now due n pid
     [ "$ZAPRET_WATCHDOG" = "1" ] && [ "$ZAPRET_STATE" = "on" ] && [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] || return 0
-    [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && return 0   # подбор и проверка — по аргументам nfqws1
     vpn_up_now && return 0
     now=$(date +%s)
     # первая проверка — через интервал после старта (сеть успеет устояться)
@@ -969,7 +979,7 @@ zapret_watchdog() {
 zapret_sites_check() {
     local now pid
     [ "$ZAPRET_ALT" = "1" ] && [ "$ZAPRET_STATE" = "on" ] && [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] || return 0
-    [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && return 0
+    [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && return 0   # сайты со своей стратегией — пока только у nfqws1
     now=$(date +%s)
     # прошлая сорвалась (scan.sh оставил метку) — повтор через ~час: сорвалась
     # часто как раз потому, что ТСПУ резал всё (31.10 14:23), через 15 мин — снова залп

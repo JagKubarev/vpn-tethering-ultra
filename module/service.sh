@@ -659,9 +659,18 @@ umask 022
 # второй демон. 20.10 так и было: "service.sh --get" у 2.2.1 запускал второй
 # демон, два экземпляра сносили правила друг друга (и MTU каскадом вниз).
 case "$1" in
-    ''|--defaults|--check|--check-lines|--get|--zapret-strategy) ;;
+    ''|--defaults|--check|--check-lines|--get|--zapret-strategy|--zapret2-strategy) ;;
     *) echo "service.sh: неизвестный аргумент '$1'" >&2; exit 2 ;;
 esac
+# Служебные вызовы зовут обычным sh (scan.sh, webctl.sh), а в Android 8 awk нет, в 9 он падает на
+# «!» — тогда awk из busybox, как в webctl.sh и scan.sh. 13.11 MT6580: стратегия сети для scan.sh
+# не находилась (--zapret2-strategy давал общую). Демон идёт под busybox менеджера, ему не нужно
+if [ -n "$1" ]; then
+    _BB=/data/adb/ksu/bin/busybox
+    [ -x "$_BB" ] || _BB=/data/adb/magisk/busybox
+    [ -x "$_BB" ] || _BB=/data/adb/ap/bin/busybox
+    ( echo x | awk '!/y/' ) >/dev/null 2>&1 || awk() { "$_BB" awk "$@"; }
+fi
 
 # ==================== USER CONFIG (0=выкл, 1=вкл) ====================
 DISABLE_HW_OFFLOAD=1   # выключать аппаратный tethering offload
@@ -981,6 +990,9 @@ DNS_META_UPSTREAMS="https://dns.google/dns-query" # должен учитыва�
 USER_CONF="/data/adb/vpn_tether.conf"
 USER_CONF_NOTE=""
 ZAPRET_NETS_FILE="/data/adb/vpn_tether_zapret_nets"   # ключ|стратегия|аргументы|название|заметка|дата
+# nfqws2 — свои файлы (стратегия — имя файла zapret2/strategies): записи двух движков не смешиваются
+ZAPRET2_NETS_FILE="/data/adb/vpn_tether_zapret2_nets" # ключ|стратегия|название|заметка|дата
+ZAPRET2_HIST_FILE="/data/adb/vpn_tether_zapret2_hist" # ключ|стратегия|дата|заметка — прежние рабочие (сторож)
 
 zapret_strategy_valid() {
     case "$1" in fakeddisorder|md5sig|md5sig2|badseq|disorder|seqovl|custom) return 0 ;; esac
@@ -1204,6 +1216,33 @@ zapret_net_entry() {
     printf '%s|%s|%s|%s\n' "$st" "$za" "$yt" "$dc"
     return $rc
 }
+# nfqws2: стратегия, запомненная для сети $1 (или сети с тем же названием $2 — код 3);
+# нет записи — код 1, имя не годится или нет такого файла ($3 — каталог стратегий) — код 2
+zapret2_net_entry() {
+    local line n rc=0
+    [ -n "$1" ] && [ -f "$ZAPRET2_NETS_FILE" ] || return 1
+    line=$(K="$1" awk -F'|' '$1 == ENVIRON["K"] { l = $0 } END { if (l != "") print l }' "$ZAPRET2_NETS_FILE" 2>/dev/null)
+    if [ -z "$line" ] && [ -n "$2" ]; then
+        line=$(L="$2" awk -F'|' '$3 == ENVIRON["L"] { l = $0 } END { if (l != "") print l }' "$ZAPRET2_NETS_FILE" 2>/dev/null)
+        rc=3
+    fi
+    [ -n "$line" ] || return 1
+    n=$(printf '%s\n' "$line" | cut -d'|' -f2)
+    case "$n" in ''|*[!A-Za-z0-9_]*) return 2 ;; esac
+    [ -f "$3/$n.conf" ] || return 2
+    echo "$n"
+    return $rc
+}
+# Для scan.sh и WebUI: стратегия nfqws2 сети (своя, иначе общая из vpn_tether.conf, нет файла — hardcorp74)
+#   --zapret2-strategy КЛЮЧ [НАЗВАНИЕ]
+if [ "$1" = "--zapret2-strategy" ]; then
+    _d="${0%/*}/zapret2/strategies"; _n=""
+    [ "$ZAPRET_PER_NET" = "1" ] && _n=$(zapret2_net_entry "$2" "$3" "$_d")
+    [ -n "$_n" ] || _n="$ZAPRET2_STRATEGY"
+    [ -f "$_d/$_n.conf" ] || _n=hardcorp74
+    echo "$_n"
+    exit 0
+fi
 # Для WebUI ("проверить сайт"): стратегия с учётом vpn_tether.conf и, если
 # передан ключ сети, — запомненной для неё
 #   --zapret-strategy КЛЮЧ [НАЗВАНИЕ] [yt|dc|full]
@@ -1535,6 +1574,9 @@ ZAPRET_EFF_YT=""       # своя стратегия YouTube для сети (п
 ZAPRET_EFF_DC=""       # то же для Discord
 QUIC_NET=""            # итог проверки QUIC этой сети: 1, 0 или пусто
 ZAPRET_NET_SRC=""      # net | default
+ZAPRET2_EFF=""         # стратегия nfqws2 сейчас: своя сети или общая (ZAPRET2_STRATEGY)
+ZAPRET2_NET_SRC=""     # net | label | default — откуда ZAPRET2_EFF
+ZAPRET2_NET_BAD=""     # сеть, про чью негодную запись nfqws2 уже написали в журнал
 ZAPRET_NETS_STAMP=""   # stat файла стратегий сетей на прошлой проверке
 ZAPRET_NET_DIRTY=0     # 1 = пересобрать аргументы nfqws сейчас
 ZAPRET_NET_BAD=""      # ключ, про битую запись которого уже написали в лог
@@ -1610,7 +1652,7 @@ LOG_REPEAT_THRESHOLD=5
 
 # ------------------------------------------------------------------------
 # Функции демона — в lib/, по областям. Подключает только сам демон:
-# служебные вызовы (--defaults, --check, --check-lines, --get, --zapret-strategy) выходят
+# служебные вызовы (--defaults, --check, --check-lines, --get, --zapret-strategy, --zapret2-strategy) выходят
 # выше и lib/ не читают. MODULE_DIR задан выше (раньше нельзя: см.
 # is_our_daemon). В файлах есть и переменные состояния — порядок подключения
 # тот же, в каком они шли здесь, когда всё было одним файлом.

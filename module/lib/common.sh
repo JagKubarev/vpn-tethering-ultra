@@ -136,6 +136,7 @@ update_status() {
         echo "zapret_engine=$ZAPRET_ENGINE_RUN"
         # стратегия nfqws2, которой он запущен (имя файла; нет файла — hardcorp74), и свои приёмы
         [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && echo "zapret2_strategy=$(basename "$(zapret2_strat_file)" .conf)$([ -n "$ZAPRET2_ARGS" ] && echo +)"
+        [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && echo "zapret2_src=$ZAPRET2_NET_SRC"
         echo "zapret_strategy=$ZAPRET_EFF_STRATEGY"
         echo "zapret_eff_args=$ZAPRET_EFF_ARGS"
         echo "zapret_eff_yt=$ZAPRET_EFF_YT"

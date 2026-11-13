@@ -77,8 +77,22 @@ QYT="www.youtube.com i.ytimg.com youtubei.googleapis.com"
 QH=rr1---sn-gvnuxaxjvh-n8vz.googlevideo.com
 ZQUIC=/data/adb/vpn_tether_zapret_quic      # ключ|название|1 подделка проходит, 0 нет|epoch
 QBY=0
-nq_up() { # nq_up "<аргументы с @G/@Q>" -> nfqws на очереди сканера, $NQPID
-    local real
+nq_up() { # nq_up "<аргументы с @G/@Q>" | "z2:<стратегия nfqws2>" -> nfqws на очереди сканера, $NQPID
+    local real _i
+    case "$1" in
+        z2:*)
+            # лог прошлого прогона — вон до запуска: иначе в нём уже есть «copy_packet», ожидание
+            # ниже кончалось сразу, и проверка шла, пока очередь ещё ничья (13.11: все, кроме первой, «не открыли»)
+            rm -f "$TMP/nq.log"
+            set -f
+            "$NQ2" $(z2_args "${1#z2:}") > "$TMP/nq.log" 2>&1 &
+            NQPID=$!
+            set +f
+            # nfqws2 грузит Lua и подделки: до привязки к очереди пакеты шли бы мимо (--queue-bypass)
+            _i=0
+            while [ $_i -lt 30 ] && kill -0 "$NQPID" 2>/dev/null && ! grep -q 'copy_packet' "$TMP/nq.log" 2>/dev/null; do sleep 0.1; _i=$((_i + 1)); done
+            return 0 ;;
+    esac
     real=$(echo "$1" | sed "s#@G#@$ZDIR/tls_clienthello_www_google_com.bin#g; s#@Q#@$ZDIR/quic_initial_www_google_com.bin#g")
     # группа 3998 = ZAPRET_GID из service.sh: основной zapret её не трогает
     "$NQ" --qnum=$Q --uid=0:3998 --bind-fix4 $real > "$TMP/nq.log" 2>&1 &
@@ -180,6 +194,32 @@ quic_check() { # итог — в $QMSG; не понятно или нет свя
 }
 
 case "$(uname -m)" in aarch64|arm64) NQ="$MODDIR/bin/nfqws-arm64" ;; *) NQ="$MODDIR/bin/nfqws-arm" ;; esac
+# Движок: тот, что сейчас запущен (статус демона), иначе выбранный в настройках. У nfqws2
+# стратегия в таблице, истории и записи сети — «z2:<имя файла стратегии>» (zapret2/strategies),
+# у nfqws1 — аргументы. Свои файлы сетей и истории — у демона ZAPRET2_NETS_FILE/ZAPRET2_HIST_FILE
+ENG=$(sed -n 's/^zapret_engine=//p' "$MODDIR/status" 2>/dev/null)
+[ -n "$ENG" ] || ENG=$(sh "$MODDIR/service.sh" --get ZAPRET_ENGINE 2>/dev/null)
+case "$(uname -m)" in aarch64|arm64) NQ2="$MODDIR/bin/nfqws2-arm64" ;; *) NQ2="$MODDIR/bin/nfqws2-arm" ;; esac
+HIST2=/data/adb/vpn_tether_zapret2_hist
+if [ "$ENG" = nfqws2 ]; then
+    ZAPRET2_DIR="$MODDIR/zapret2"
+    # zapret2_strat_var, zapret2_fool — та же сборка стратегии, что у демона (в файле только
+    # функции и переменные; имена с функциями сканера не совпадают)
+    . "$MODDIR/lib/zapret.sh"
+fi
+# Аргументы nfqws2 сканера для стратегии: её основа и свои профили (YouTube и т.п. — по её
+# спискам), её приёмы TCP — ко всем сайтам набора; fool_nots — как у демона
+z2_args() { # имя
+    local f="$ZAPRET2_DIR/strategies/$1.conf" base custom tcp
+    base="$(zapret2_strat_var "$f" NFQWS_BASE_ARGS) --lua-init=@$ZAPRET2_DIR/lua/vpn-tether.lua"
+    custom=$(zapret2_strat_var "$f" NFQWS_ARGS_CUSTOM)
+    tcp=$(zapret2_strat_var "$f" NFQWS_ARGS)
+    echo "--qnum=$Q --uid=0:3998 --bind-fix4 $base ${custom:+$custom --new }$tcp" | zapret2_fool
+}
+# все стратегии nfqws2: первой — $1 (текущая сети), дальше по имени
+z2_list() {
+    { [ -n "$1" ] && echo "$1"; ls "$ZAPRET2_DIR/strategies" 2>/dev/null | sed -n 's/\.conf$//p'; } | awk '!s[$0]++'
+}
 WAN=$(sed -n 's/^wan=//p' "$MODDIR/status" 2>/dev/null)
 IPT="iptables -w 2"
 TMP="$OUT.tmp"
@@ -302,14 +342,17 @@ fi
 [ -n "$WAN" ] || { st state=error msg="модуль ещё не видел сеть оператора"; exit 1; }
 ip -4 addr show "$WAN" 2>/dev/null | grep -q "inet " || { st state=error msg="у $WAN нет адреса — сеть только что сменилась? Повторите через полминуты"; exit 1; }
 [ -x "$NQ" ] || { st state=error msg="нет nfqws"; exit 1; }
+[ "$ENG" = nfqws2 ] && { [ -x "$NQ2" ] && [ -f "$MODDIR/zapret2/lua/zapret-lib.lua" ] || { st state=error msg="нет nfqws2 или его Lua"; exit 1; }; }
 mkdir -p "$TMP"
 # Сеть, в которой подбираем: лучшая стратегия запоминается для неё
 NETID=$(sh "$ZDIR/netid.sh" "$WAN" 2>/dev/null | head -1)
 PERNET=$(sh "$MODDIR/service.sh" --get ZAPRET_PER_NET 2>/dev/null)
 AUTOPICK=$(sh "$MODDIR/service.sh" --get ZAPRET_AUTOPICK 2>/dev/null)   # 0: только показывать, не запоминать
 if [ -n "$GRP" ]; then
+    [ "$ENG" = nfqws2 ] && { st state=error msg="у nfqws2 YouTube и Discord — часть стратегии: подберите общую"; exit 1; }
     [ "$PERNET" = 1 ] && [ -n "${NETID%%"|"*}" ] || { st state=error msg="своя стратегия YouTube и Discord — только при «своей стратегии для каждой сети» и понятной сети"; exit 1; }
 fi
+[ "$MODE" = sites ] && [ "$ENG" = nfqws2 ] && { st state=error msg="сайты со своей стратегией — пока только у nfqws1"; exit 1; }
 if [ "$MODE" = sites ]; then
     [ "$PERNET" = 1 ] && [ -n "${NETID%%"|"*}" ] || { st state=error msg="своя стратегия сайтов — только при «своей стратегии для каждой сети» и понятной сети"; exit 1; }
     if [ -z "$SITES_ARG" ]; then
@@ -833,7 +876,12 @@ if [ "$MODE" = "check" ]; then
         exit 0
     }
     # текущая — оба профиля (своя YouTube, если есть), с пометками @G/@Q
-    CUR=$(strat_of full)
+    if [ "$ENG" = nfqws2 ]; then
+        CUR="z2:$(sh "$MODDIR/service.sh" --zapret2-strategy "${NETID%%"|"*}" "${NETID#*"|"}" 2>/dev/null)"
+        [ "$CUR" = z2: ] && CUR=""
+    else
+        CUR=$(strat_of full)
+    fi
     # не узнали текущую — проверять нечего (раньше пустой CUR тоже шёл как «нет связи»)
     [ -n "$CUR" ] || { st state=error msg="не удалось узнать текущую стратегию сети"; exit 1; }
     S_total=2
@@ -933,8 +981,16 @@ if [ "$MODE" = "check" ]; then
     KEYS=$(L="${NETID#*"|"}" K="${NETID%%"|"*}" awk -F'|' '$4 == ENVIRON["L"] { printf "%s ", $1 } END { print ENVIRON["K"] }' "$ZNETS" 2>/dev/null)
     [ -n "$KEYS" ] || KEYS="${NETID%%"|"*}"
     # строка истории: "общая|youtube|discord" (пусто — как общая)
+    if [ "$ENG" = nfqws2 ]; then
+        # история nfqws2: ключ|стратегия|дата|заметка; сети с тем же названием — по их ключам в ZNETS2
+        KEYS=$(L="${NETID#*"|"}" K="${NETID%%"|"*}" awk -F'|' '$3 == ENVIRON["L"] { printf "%s ", $1 } END { print ENVIRON["K"] }' /data/adb/vpn_tether_zapret2_nets 2>/dev/null)
+        [ -n "$KEYS" ] || KEYS="${NETID%%"|"*}"
+        KS=" $KEYS " awk -F'|' 'index(ENVIRON["KS"], " " $1 " ") && $2 != "" { l[++n] = "z2:" $2 "||" } END { for (i = n; i >= 1; i--) if (!(l[i] in s)) { s[l[i]] = 1; print l[i] } }' \
+            "$HIST2" 2>/dev/null > "$TMP/hist"
+    else
     KS=" $KEYS " awk -F'|' 'index(ENVIRON["KS"], " " $1 " ") && $2 == "custom" && $3 != "" { l[++n] = $3 "|" $6 "|" $7 } END { for (i = n; i >= 1; i--) if (!(l[i] in s)) { s[l[i]] = 1; print l[i] } }' \
         "$HIST" 2>/dev/null | grep -vE -e '--wssize|syndata' > "$TMP/hist"
+    fi
     S_total=$((S_done + $(wc -l < "$TMP/hist")))
     st stage="пробую прежние стратегии"
     while IFS= read -r h; do
@@ -947,7 +1003,11 @@ if [ "$MODE" = "check" ]; then
                 st state=done stage="готово" msg="сеть сменилась во время проверки — не запоминаю"
                 exit 0
             fi
-            r=$(sh "$MODDIR/webctl.sh" znet-set custom "$a" "автопроверка: прежняя рабочая" "$y" "$d" 2>/dev/null)
+            if [ "$ENG" = nfqws2 ]; then
+                r=$(sh "$MODDIR/webctl.sh" znet2-set "${a#z2:}" "автопроверка: прежняя рабочая" 2>/dev/null)
+            else
+                r=$(sh "$MODDIR/webctl.sh" znet-set custom "$a" "автопроверка: прежняя рабочая" "$y" "$d" 2>/dev/null)
+            fi
             # не сохранилась — не «починил», а дальше по истории и подбор (ревью PR #20)
             case "$r" in
                 OK*) ;;
@@ -963,7 +1023,19 @@ if [ "$MODE" = "check" ]; then
     MODE=quick
 fi
 
-if [ "$MODE" = "quick" ]; then
+if [ "$ENG" = nfqws2 ] && { [ "$MODE" = quick ] || [ "$MODE" = full ]; }; then
+    # Стратегий nfqws2 немного (35), и каждая сама перебирает приёмы — пробуем все: по времени
+    # как быстрый подбор nfqws1. Текущая сети — первой
+    [ -n "$CUR" ] || CUR="z2:$(sh "$MODDIR/service.sh" --zapret2-strategy "${NETID%%"|"*}" "${NETID#*"|"}" 2>/dev/null)"
+    z2_list "${CUR#z2:}" > "$TMP/z2list"
+    S_total=$((S_done + $(wc -l < "$TMP/z2list")))
+    st stage="подбор стратегии nfqws2"
+    while IFS= read -r a; do
+        [ -n "$a" ] && run_strat "z2:$a" "$([ "$MODE" = full ] && echo полный || echo быстрый)"
+        # от сторожа — до первой, открывшей всё без поломок, как у nfqws1
+        [ "$MODE0" = check ] && tail -n 1 "$OUT.results" | awk -F'|' '{ exit !($2 > 0 && $1 == $2 && $3 == 0) }' && break
+    done < "$TMP/z2list"
+elif [ "$MODE" = "quick" ]; then
     # проверенные шаблоны (autottl убран: ломал обычные сайты во всех 6 проверенных сетях)
     # Четыре с badseq в конце — из Zapret-Manager и Flowseal: 05.11 на YOTA открыли
     # 10 из 10 сайтов и качали с именем видеосервера в обоих кругах (8–27 Мбит/с).
@@ -1236,8 +1308,8 @@ if [ -n "$BG" ]; then
     BEST="${BG%%"|"*}|$ga"                         # "открыла|аргументы" (остальные сайты)
     gy=$(echo "$BG" | cut -d'|' -f2)               # сколько YouTube открывает общая
     gd=$(echo "$BG" | cut -d'|' -f3)               # и сколько Discord
-    [ "$NBY" -gt 0 ] && BEST_YT=$(grp_best yt 8 "$gy" "$ga")
-    [ "$NBD" -gt 0 ] && BEST_DC=$(grp_best dc 9 "$gd" "$ga")
+    [ "$NBY" -gt 0 ] && [ "$ENG" != nfqws2 ] && BEST_YT=$(grp_best yt 8 "$gy" "$ga")
+    [ "$NBD" -gt 0 ] && [ "$ENG" != nfqws2 ] && BEST_DC=$(grp_best dc 9 "$gd" "$ga")
 fi
 if [ "$PERNET" = "1" ] && [ -n "$BEST" ]; then
     if [ -z "${NETID%%"|"*}" ]; then
@@ -1252,9 +1324,14 @@ if [ "$PERNET" = "1" ] && [ -n "$BEST" ]; then
         else
             how="открыла $((${BEST%%"|"*} + gy + gd)) из $NB"
         fi
-        r=$(sh "$MODDIR/webctl.sh" znet-set custom "${BEST#*"|"}" "подбор: $how" "$(own_arg "$BEST_YT" "$YT_RE")" "$(own_arg "$BEST_DC" "$DC_RE")" 2>/dev/null)
+        if [ "$ENG" = nfqws2 ]; then
+            _b="${BEST#*"|"}"
+            r=$(sh "$MODDIR/webctl.sh" znet2-set "${_b#z2:}" "подбор: $how" 2>/dev/null)
+        else
+            r=$(sh "$MODDIR/webctl.sh" znet-set custom "${BEST#*"|"}" "подбор: $how" "$(own_arg "$BEST_YT" "$YT_RE")" "$(own_arg "$BEST_DC" "$DC_RE")" 2>/dev/null)
+        fi
         case "$r" in
-            OK*) MSG="лучшая запомнена для сети «${NETID#*"|"}» ($how)" ;;
+            OK*) MSG="лучшая$([ "$ENG" = nfqws2 ] && echo " (${BEST#*"|z2:"})") запомнена для сети «${NETID#*"|"}» ($how)" ;;
             *)   MSG="не удалось запомнить: ${r#ERR }" ;;
         esac
     fi

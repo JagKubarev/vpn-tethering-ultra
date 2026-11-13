@@ -67,6 +67,8 @@ ZAUTO_WHO=/data/adb/vpn_tether_zapret_auto.who   # «p адрес телефон
 ZSCAN=/data/local/tmp/vpn_tether_zscan
 ZNETS=/data/adb/vpn_tether_zapret_nets
 ZHIST=/data/adb/vpn_tether_zapret_hist      # ключ|стратегия|аргументы|дата|заметка|аргументы_YouTube|аргументы_Discord — прежние стратегии сетей
+ZNETS2=/data/adb/vpn_tether_zapret2_nets    # nfqws2: ключ|стратегия|название|заметка|дата (стратегия — имя файла zapret2/strategies)
+ZHIST2=/data/adb/vpn_tether_zapret2_hist    # nfqws2: ключ|стратегия|дата|заметка — прежние рабочие, сторож пробует их первыми
 ZEVENTS=/data/adb/vpn_tether_zapret_events  # дата|сеть|событие — журнал сторожа и подбора
 ZALT=/data/adb/vpn_tether_zapret_alt        # ключ|название|сайт|аргументы|дата — своя стратегия сайтов
 ZSKIP=/data/adb/vpn_tether_zapret_altskip   # ключ|сайт|epoch — не открылись ничем
@@ -824,6 +826,41 @@ case "$1" in
     zevents)
         n="${2:-30}"; case "$n" in ''|*[!0-9]*) n=30 ;; esac
         [ -f "$ZEVENTS" ] && tail -n "$n" "$ZEVENTS"
+        ;;
+    # --- nfqws2: стратегия сети — имя файла стратегии, свои файлы (с nfqws1 не смешиваются) ---
+    znet2)
+        d=$(cur_net); k=${d%%"|"*}
+        echo "C $k|${d#*"|"}"
+        [ -f "$ZNETS2" ] && grep '|' "$ZNETS2" | sed 's/^/N /'
+        [ -n "$k" ] && [ -f "$ZHIST2" ] && K="$k" awk -F'|' '$1 == ENVIRON["K"] { print "H " $0 }' "$ZHIST2"
+        ;;
+    znet2-set)
+        n="$2"
+        note=$(printf '%s' "$3" | tr -d '\r\n|' | cut -c1-120)
+        sh "$MODDIR/service.sh" --check ZAPRET2_STRATEGY "$n" 2>/dev/null && [ -f "$MODDIR/zapret2/strategies/$n.conf" ] || { echo "ERR нет такой стратегии"; exit 1; }
+        # ручной выбор — не посреди подбора и не в историю (как у znet-set)
+        manual=0; case "$note" in *вручную*) manual=1 ;; esac
+        [ "$manual" = 1 ] && zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
+        d=$(cur_net); k=${d%%"|"*}; l=${d#*"|"}
+        [ -n "$k" ] || { echo "ERR не понял, что за сеть (нет Wi-Fi/мобильной сети или модуль её ещё не видел)"; exit 1; }
+        {
+            [ -f "$ZNETS2" ] && K="$k" awk -F'|' '$1 != ENVIRON["K"]' "$ZNETS2"
+            printf '%s|%s|%s|%s|%s\n' "$k" "$n" "$l" "$note" "$(date '+%Y-%m-%d %H:%M')"
+        } > "$ZNETS2.tmp" && chmod 600 "$ZNETS2.tmp" && mv -f "$ZNETS2.tmp" "$ZNETS2"
+        # история сети: та же стратегия — в конец, 8 последних на сеть
+        if [ "$manual" != 1 ]; then {
+            [ -f "$ZHIST2" ] && K="$k" N="$n" awk -F'|' '$1 == ENVIRON["K"] && $2 == ENVIRON["N"] { next } { print }' "$ZHIST2"
+            printf '%s|%s|%s|%s\n' "$k" "$n" "$(date '+%Y-%m-%d %H:%M')" "$note"
+        } | K="$k" awk -F'|' '{ l[NR] = $0; key[NR] = $1 } END { for (i = NR; i >= 1; i--) if (key[i] != ENVIRON["K"] || ++c <= 8) keep[i] = 1; for (i = 1; i <= NR; i++) if (keep[i]) print l[i] }' > "$ZHIST2.tmp" &&             chmod 600 "$ZHIST2.tmp" && mv -f "$ZHIST2.tmp" "$ZHIST2"
+        fi
+        echo "OK $l"
+        ;;
+    znet2-del)
+        [ -n "$2" ] || { echo "ERR ключ"; exit 1; }
+        zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
+        [ -f "$ZNETS2" ] || { echo "OK"; exit 0; }
+        K="$2" awk -F'|' '$1 != ENVIRON["K"]' "$ZNETS2" > "$ZNETS2.tmp" && chmod 600 "$ZNETS2.tmp" && mv -f "$ZNETS2.tmp" "$ZNETS2"
+        echo "OK"
         ;;
     znet-del)
         [ -n "$2" ] || { echo "ERR ключ"; exit 1; }

@@ -505,7 +505,7 @@ details > summary::after { border-color: currentColor; }
   </div>
   <div class="row col" data-dep="ZAPRET_ENABLE" data-nfqws2>
     <div class="txt"><div class="t">Стратегия nfqws2</div>
-      <div class="s">Готовые наборы приёмов из nfqws2-android, после тире — автор. Порты, списки, исключения и DoH — модуля, для Windows-клиентов раздачи приёмы подстраиваются сами.</div></div>
+      <div class="s">Готовые наборы приёмов из nfqws2-android, после тире — автор. Это общая: со «Стратегией для каждой сети» у сети может быть своя (ниже, в «Стратегии»). Порты, списки, исключения и DoH — модуля, для Windows-клиентов раздачи приёмы подстраиваются сами.</div></div>
     <select data-key="ZAPRET2_STRATEGY">
       <option value="hardcorp74">hardcorp74 — по умолчанию</option>
       <option value="alt">alt — Flowseal</option>
@@ -552,8 +552,8 @@ details > summary::after { border-color: currentColor; }
 <div class="hint" id="zEngWin">Ноутбук или ПК на Windows через раздачу: если часть сайтов не открывается или Windows пишет «Нет подключения к интернету», включите на нём метки времени TCP — один раз, в командной строке от администратора: <code id="zEngWinCmd" style="user-select:all">netsh interface tcp set global timestamps=enabled</code>. Без них модуль подстраивает приёмы под Windows сам, с ними обход работает как для телефона.
   <br><button class="btn small" id="zEngWinCopy" style="margin-top:6px">Скопировать команду</button></div>
 
-<h2 data-nfqws1>Подбор стратегии</h2>
-<div class="card" data-nfqws1>
+<h2>Подбор стратегии</h2>
+<div class="card">
   <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
   <div class="pad">
   <div class="s muted" style="font-size:13px;margin-top:2px">Ищет рабочую стратегию для этой сети по сайтам ниже, в фоне. При сбое автопроверка запускает его сама.</div>
@@ -563,10 +563,13 @@ details > summary::after { border-color: currentColor; }
     <button class="btn" id="scFull">Полный · ~7 мин</button>
     <button class="btn" id="scStop" style="display:none">Остановить</button>
   </div>
+  <div class="s muted" style="font-size:13px;margin-top:10px" data-nfqws2>У nfqws2 подбор пробует все его стратегии (35), быстрый и полный одинаковы. YouTube и Discord — часть стратегии, отдельно не подбираются.</div>
+  <div data-nfqws1>
   <div class="s muted" style="font-size:13px;margin-top:10px">YouTube и Discord часто работают лучше со своей стратегией: запустите подбор, дождитесь конца и примените лучшую в таблице. Общая не меняется, замер скачивает до 110 МБ.</div>
   <div class="btn-row eq mt8">
     <button class="btn" id="scYt">YouTube · ~4 мин</button>
     <button class="btn" id="scDc">Discord · ~4 мин</button>
+  </div>
   </div>
   <div class="btn-row eq mt8">
     <button class="btn" id="scQ">Проверить QUIC · ~30 с</button>
@@ -576,16 +579,21 @@ details > summary::after { border-color: currentColor; }
   </div>
 </div>
 
-<h2 data-nfqws1>Стратегия</h2>
-<div class="card" data-nfqws1>
+<h2>Стратегия</h2>
+<div class="card">
   <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
-  <div class="tip" id="pickTip">Для лучшей работы подберите стратегию под свою сеть, отдельно для YouTube и Discord: кнопки в «Подборе стратегии» выше.</div>
+  <div class="tip" id="pickTip" data-nfqws1>Для лучшей работы подберите стратегию под свою сеть, отдельно для YouTube и Discord: кнопки в «Подборе стратегии» выше.</div>
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Стратегия для каждой сети</div>
       <div class="s">Своя для каждой сети Wi-Fi и оператора, переключается сама.</div></div>
     <label class="sw"><input type="checkbox" data-key="ZAPRET_PER_NET"><span></span></label>
   </div>
-  <div class="row col" id="znetBox">
+  <div class="row col" id="z2netBox" data-nfqws2>
+    <div class="txt"><div class="t">Эта сеть: <span id="z2netCur">—</span></div>
+      <div class="s" id="z2netInfo"></div></div>
+    <select id="z2netSel" aria-label="Стратегия nfqws2 для этой сети"></select>
+  </div>
+  <div class="row col" id="znetBox" data-nfqws1>
     <div class="txt"><div class="t">Эта сеть: <span id="znetCur">—</span></div>
       <div class="s" id="znetInfo"></div><div class="s" id="zSum" style="white-space:pre-line;margin-top:6px"></div></div>
     <div class="s muted" style="margin-top:8px">Общая</div>
@@ -601,7 +609,7 @@ details > summary::after { border-color: currentColor; }
     <div class="s muted" id="znetListHead" style="font-size:13px;margin-top:12px"></div>
     <div id="znetList"></div>
   </div>
-  <div class="row col" data-dep="ZAPRET_ENABLE">
+  <div class="row col" data-dep="ZAPRET_ENABLE" data-nfqws1>
     <div class="txt"><div class="t" id="zStratTitle">Стратегия</div>
       <div class="s" id="zStratSub">Способ обхода блокировок.</div></div>
     <select data-key="ZAPRET_STRATEGY">
@@ -1299,7 +1307,8 @@ function renderStatus(s) {
     let zt = 'включён';
     if (/cb=0/.test(s.zapret_caps || '')) zt += ' · упрощённый режим (ядро без connbytes)';
     if (/own=0/.test(s.zapret_caps || '')) zt += ' · без исключений по приложениям (старое ядро)';
-    if (s.zapret_engine === 'nfqws2') zt += ' · nfqws2, ' + esc(z2Name(s.zapret2_strategy));
+    if (s.zapret_engine === 'nfqws2') zt += ' · nfqws2, ' + esc(z2Name(s.zapret2_strategy)) +
+      (s.zapret2_src === 'net' ? ' (своя для «' + esc(s.net_label) + '»)' : s.zapret2_src === 'label' ? ' (как у «' + esc(s.net_label) + '»)' : ' (общая)');
     else if (s.zapret_strategy) zt += ' · ' + esc(stratName(s.zapret_strategy, s.zapret_eff_args)) +
       (s.zapret_src === 'net' ? ' (своя для «' + esc(s.net_label) + '»)' : s.zapret_src === 'label' ? ' (как у «' + esc(s.net_label) + '», код сети ' + esc(s.net_key) + ')' : ' (общая)');
     if (s.zapret_eff_yt && s.zapret_engine !== 'nfqws2') zt += ' · YouTube: ' + esc(stratLabel(s.zapret_eff_yt));
@@ -1558,7 +1567,7 @@ function renderDeps() {
   $('#zEngWin').style.display = CUR.ZAPRET_ENGINE === 'nfqws2' && CUR.ZAPRET_ENABLE === '1' ? '' : 'none';
   $('#zArgsBox').style.display = CUR.ZAPRET_STRATEGY === 'custom' ? '' : 'none';
   const pn = CUR.ZAPRET_PER_NET === '1';
-  $('#znetBox').style.display = pn ? '' : 'none';
+  $('#znetBox').style.display = pn && CUR.ZAPRET_ENGINE !== 'nfqws2' ? '' : 'none';   // у nfqws2 — свой блок (z2netBox)
   $('#znetBox').classList.toggle('off', CUR.ZAPRET_ENABLE !== '1');
   $('#zStratTitle').textContent = pn ? 'Стратегия по умолчанию' : 'Стратегия';
   $('#zwdMin').textContent = fmtMin(CUR.ZAPRET_WATCHDOG_MIN, 15);
@@ -2486,7 +2495,13 @@ $('#scSites').value = SC_DEFAULT;
 let scTimer = null, scWasRunning = false, scSeq = 0;
 let scCur = {};   // применённая вручную, пока статус демона не обновился: группа -> аргументы
 
+// стратегия nfqws2: «имя — автор», как в выборе
+function z2Label(n) {
+  const o = Array.from($('[data-key=ZAPRET2_STRATEGY]').options).find((x) => x.value === n);
+  return o ? o.textContent.replace(/ — по умолчанию$/, '') : n;
+}
 function stratLabel(a) {
+  if (/^z2:/.test(a || '')) return 'nfqws2: ' + z2Label(a.slice(3));
   const g = (re) => { const m = re.exec(a); return m ? m[1] : ''; };
   const mode = g(/--dpi-desync=(\S+)/).replace(/,/g, ' + ');
   const fool = g(/--dpi-desync-fooling=(\S+)/) || (g(/--dpi-desync-ttl=(\d+)/) ? 'ttl ' + g(/--dpi-desync-ttl=(\d+)/) : '') || (/--dpi-desync-autottl/.test(a) ? 'autottl' : '');
@@ -2559,8 +2574,9 @@ async function scRefresh() {
   if (s.grp) rows.forEach((r) => { r.maxBrk = 0; });
   // что работает сейчас: только что применённая, иначе из статуса демона
   const st0 = ST || {};
-  const cu = s.grp && scCur[s.grp];   // минуты хватает: дальше верен статус демона (могла смениться сеть)
-  const curA = cu && Date.now() - cu.t < 60000 ? cu.a : s.grp ? st0['zapret_eff_' + s.grp] || st0.zapret_eff_args : st0.zapret_eff_args;
+  const cu = scCur[s.grp || ''];   // минуты хватает: дальше верен статус демона (могла смениться сеть)
+  const curA = cu && Date.now() - cu.t < 60000 ? cu.a : st0.zapret_engine === 'nfqws2' ? 'z2:' + (st0.zapret2_strategy || '').replace(/\+$/, '')
+    : s.grp ? st0['zapret_eff_' + s.grp] || st0.zapret_eff_args : st0.zapret_eff_args;
   const spText = (r) => !s.grp ? '' : r.sp === undefined ? ' · скорость не мерили' : r.sp ? ' · ' + Math.round(r.sp / 128) + ' Мбит/с' : ' · файл не скачался';
   $('#scRes').innerHTML = rows.length ? rows.map((r, i) => {
     const full = r.maxBrk === 0 && r.open === blocked.length && blocked.length > 0;
@@ -2607,6 +2623,25 @@ $('#scRes').addEventListener('click', async (e) => {
     scRefresh();
     return;
   }
+  if (/^z2:/.test(a)) {
+    // nfqws2: своя для сети — в его файл; иначе — общая стратегия nfqws2
+    if (saved('ZAPRET_PER_NET') === '1') {
+      busy(true);
+      const r = await ctlBg('znet2-set ' + q(a.slice(3)) + ' ' + q('выбрана из подбора'));
+      if (!isOk(r)) { busy(false); toast(errText(r, 'Не получилось')); return; }
+      scCur[''] = { a, t: Date.now() };
+      toast('Запомнено для сети «' + (r.out || '').replace(/^OK\s*/, '') + '»');
+      await loadZ2net();
+      busy(false);
+      if (saved('ZAPRET_ENABLE') !== '1') { CUR.ZAPRET_ENABLE = '1'; renderForm(); $('#applyBtn').click(); }
+      scRefresh();
+      return;
+    }
+    CUR.ZAPRET2_STRATEGY = a.slice(3); CUR.ZAPRET_ENABLE = '1';
+    renderForm();
+    $('#applyBtn').click();
+    return;
+  }
   if (saved('ZAPRET_PER_NET') === '1') {
     // своя стратегия сети: запоминаем для текущей сети, общую не трогаем
     await loadZnet();
@@ -2645,7 +2680,45 @@ const quickOpts = (val, skip) => '<optgroup label="Быстрый подбор">
   '<option value="' + esc(val(a, i)) + '">' + esc((i + 1) + ' · ' + stratLabel(a)) + '</option>').join('') + '</optgroup>' +
   '<option value="input">Ввести вручную…</option>';
 
+// nfqws2: своя стратегия сети (файл zapret2_nets), прежние рабочие — для выбора вручную
+let Z2N = { cur: '', curLabel: '', list: [], hist: [] };
+async function loadZ2net() {
+  const r = await ctl('znet2');
+  const z = { cur: '', curLabel: '', list: [], hist: [] };
+  (r.out || '').split('\n').forEach((l) => {
+    const f = l.slice(2).split('|');
+    if (l.indexOf('C ') === 0) { z.cur = f[0] || ''; z.curLabel = z.cur ? (f[1] || z.cur) : ''; }
+    else if (l.indexOf('N ') === 0 && f[0]) z.list.push({ key: f[0], name: f[1] || '', label: f[2] || f[0], note: f[3] || '', date: f[4] || '' });
+    else if (l.indexOf('H ') === 0 && f[1]) z.hist.unshift({ name: f[1], date: f[2] || '', note: f[3] || '' });
+  });
+  Z2N = z;
+  const e = z.list.find((x) => x.key === z.cur) || (z.curLabel ? z.list.filter((x) => x.label === z.curLabel).pop() : undefined);
+  const gen = saved('ZAPRET2_STRATEGY') || 'hardcorp74';
+  $('#z2netCur').textContent = z.cur ? z.curLabel + ' · ' + netKind(z.cur) : 'не определена';
+  $('#z2netInfo').textContent = !z.cur ? 'Нет Wi-Fi или мобильной сети, или модуль её ещё не видел. Работает общая стратегия.'
+    : saved('ZAPRET_PER_NET') !== '1' ? 'Своя стратегия сети выключена — работает общая: ' + z2Label(gen) + '.'
+    : e ? 'Своя: ' + z2Label(e.name) + (e.note ? ' · ' + e.note : '') + (e.date ? ' · ' + e.date : '')
+    : 'Своей нет, работает общая: ' + z2Label(gen) + '. Запустите подбор или выберите вручную.';
+  const all = Array.from($('[data-key=ZAPRET2_STRATEGY]').options).map((o) => o.value);
+  const hist = z.hist.filter((h) => !e || h.name !== e.name);
+  const sel = $('#z2netSel');
+  sel.innerHTML = '<option value="">Общая — ' + esc(z2Label(gen)) + '</option>' +
+    (hist.length ? '<optgroup label="Прежние рабочие для этой сети">' + hist.map((h) => '<option value="' + esc(h.name) + '">' +
+      esc(z2Label(h.name) + ' · ' + h.date.slice(5, 10).split('-').reverse().join('.')) + '</option>').join('') + '</optgroup>' : '') +
+    '<optgroup label="Все стратегии">' + all.map((n) => '<option value="' + esc(n) + '">' + esc(z2Label(n)) + '</option>').join('') + '</optgroup>';
+  sel.value = e ? e.name : '';
+  sel.disabled = !z.cur || saved('ZAPRET_PER_NET') !== '1';
+}
+$('#z2netSel').addEventListener('change', async (ev) => {
+  const v = ev.target.value, e = Z2N.list.find((x) => x.key === Z2N.cur) || (Z2N.curLabel ? Z2N.list.filter((x) => x.label === Z2N.curLabel).pop() : undefined);
+  ev.target.disabled = true;
+  const r = v ? await ctlBg('znet2-set ' + q(v) + ' ' + q('выбрана вручную')) : await ctlBg('znet2-del ' + q((e || { key: Z2N.cur }).key));
+  if (!isOk(r)) toast(errText(r, 'Не получилось'));
+  else toast(v ? 'Для этой сети: ' + z2Label(v) : 'Для этой сети — общая');
+  await loadZ2net();
+});
 async function loadZnet() {
+  if (saved('ZAPRET_ENGINE') !== 'nfqws1') loadZ2net();
   znetLoading = true;
   try {
     const r = await ctl('znet');
@@ -2910,6 +2983,8 @@ function mockExec(cmd) {
   if (a === 'zquick') return { errno: 0, out: '--dpi-desync=multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1\n--dpi-desync=fake,multisplit --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=1000 --dpi-desync-repeats=6 --dpi-desync-fake-tls=@G\n' };
   if (/^zscan-start /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'zscan-stop') return { errno: 0, out: 'OK' };
+  if (a === 'znet2') return { errno: 0, out: 'C mobile:25011|YOTA\nN mobile:25011|MartinBacker|YOTA|подбор: открыла 9 из 9|2026-11-13 18:00\nH mobile:25011|hardcorp74|2026-11-12 10:00|подбор\nH mobile:25011|MartinBacker|2026-11-13 18:00|подбор' };
+  if (/^znet2-(set|del) /.test(a)) return { errno: 0, out: 'OK YOTA' };
   if (/^sitetest /.test(a)) return { errno: 0, out: 'ip 142.251.155.4\ndirect 000 8.001 28 0\nprobe 1 1\nzapret 200 1.02 0 18342\n' };
   if (a === 'ytspeed') return { errno: 0, out: 'ip 64.233.161.190\ndirect 000 0 28\nzapret 200 6912000 0\n' };
   if (/^log/.test(a)) return { errno: 0, out: '[20:15:01] Toggle signal received\n[20:15:02] VPN setup complete\n' };
