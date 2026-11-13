@@ -1568,6 +1568,7 @@ function renderDeps() {
   $('#zArgsBox').style.display = CUR.ZAPRET_STRATEGY === 'custom' ? '' : 'none';
   const pn = CUR.ZAPRET_PER_NET === '1';
   $('#znetBox').style.display = pn && CUR.ZAPRET_ENGINE !== 'nfqws2' ? '' : 'none';   // у nfqws2 — свой блок (z2netBox)
+  $('#z2netBox').style.display = pn && CUR.ZAPRET_ENGINE === 'nfqws2' ? '' : 'none';
   $('#znetBox').classList.toggle('off', CUR.ZAPRET_ENABLE !== '1');
   $('#zStratTitle').textContent = pn ? 'Стратегия по умолчанию' : 'Стратегия';
   $('#zwdMin').textContent = fmtMin(CUR.ZAPRET_WATCHDOG_MIN, 15);

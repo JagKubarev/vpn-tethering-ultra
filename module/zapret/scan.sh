@@ -85,7 +85,8 @@ nq_up() { # nq_up "<аргументы с @G/@Q>" | "z2:<стратегия nfqw
             # ниже кончалось сразу, и проверка шла, пока очередь ещё ничья (13.11: все, кроме первой, «не открыли»)
             rm -f "$TMP/nq.log"
             set -f
-            "$NQ2" $(z2_args "${1#z2:}") > "$TMP/nq.log" 2>&1 &
+            # сборка — та же функция, что у демона (lib/zapret.sh): стратегия ко всем сайтам набора
+            "$NQ2" $(zapret2_scan_args "${1#z2:}" "$Q") > "$TMP/nq.log" 2>&1 &
             NQPID=$!
             set +f
             # nfqws2 грузит Lua и подделки: до привязки к очереди пакеты шли бы мимо (--queue-bypass)
@@ -203,19 +204,10 @@ case "$(uname -m)" in aarch64|arm64) NQ2="$MODDIR/bin/nfqws2-arm64" ;; *) NQ2="$
 HIST2=/data/adb/vpn_tether_zapret2_hist
 if [ "$ENG" = nfqws2 ]; then
     ZAPRET2_DIR="$MODDIR/zapret2"
-    # zapret2_strat_var, zapret2_fool — та же сборка стратегии, что у демона (в файле только
+    # zapret2_scan_args (zapret2_strat_load, zapret2_fool) — та же сборка стратегии, что у демона (в файле только
     # функции и переменные; имена с функциями сканера не совпадают)
     . "$MODDIR/lib/zapret.sh"
 fi
-# Аргументы nfqws2 сканера для стратегии: её основа и свои профили (YouTube и т.п. — по её
-# спискам), её приёмы TCP — ко всем сайтам набора; fool_nots — как у демона
-z2_args() { # имя
-    local f="$ZAPRET2_DIR/strategies/$1.conf" base custom tcp
-    base="$(zapret2_strat_var "$f" NFQWS_BASE_ARGS) --lua-init=@$ZAPRET2_DIR/lua/vpn-tether.lua"
-    custom=$(zapret2_strat_var "$f" NFQWS_ARGS_CUSTOM)
-    tcp=$(zapret2_strat_var "$f" NFQWS_ARGS)
-    echo "--qnum=$Q --uid=0:3998 --bind-fix4 $base ${custom:+$custom --new }$tcp" | zapret2_fool
-}
 # все стратегии nfqws2: первой — $1 (текущая сети), дальше по имени
 z2_list() {
     { [ -n "$1" ] && echo "$1"; ls "$ZAPRET2_DIR/strategies" 2>/dev/null | sed -n 's/\.conf$//p'; } | awk '!s[$0]++'
@@ -1255,7 +1247,7 @@ NB=$(echo $BLOCKED | wc -w)
 # себе: только их сайты и их время, другие сайты эти стратегии не трогают.
 # Строка: "открыла|открыла_YouTube|открыла_Discord|аргументы".
 pick() { # pick gen|yt|dc
-    awk -F'|' -v nb="$NB" -v nby="$NBY" -v nbd="$NBD" -v re="$YT_RE" -v rd="$DC_RE" -v want="$1" '
+    awk -F'|' -v nb="$NB" -v nby="$NBY" -v nbd="$NBD" -v re="$YT_RE" -v rd="$DC_RE" -v want="$1" -v eng="$ENG" '
     $5 ~ /--new/ { next }
     # nfqws не запустился: в $7 текст ошибки, а не сайты — иначе такая
     # стратегия считалась открывшей почти всё (и YouTube целиком)
@@ -1272,8 +1264,9 @@ pick() { # pick gen|yt|dc
     END {
       for (a in runs) {
         if (mb[a] > 0 && want == "gen") continue
-        o = (want == "yt") ? my[a] : (want == "dc") ? md[a] : mg[a]
-        o2 = (want == "gen") ? my[a] + md[a] : 0
+        # у nfqws2 YouTube и Discord — часть общей стратегии: считаем все закрытые сайты вместе
+        o = (want == "yt") ? my[a] : (want == "dc") ? md[a] : (eng == "nfqws2") ? mg[a] + my[a] + md[a] : mg[a]
+        o2 = (want == "gen" && eng != "nfqws2") ? my[a] + md[a] : 0
         if (o <= 0 && !(want == "gen" && nb == nby + nbd && o2 > 0)) continue
         t = ms[a] / runs[a]
         if (b == "" || o > bo || (o == bo && o2 > bo2) || (o == bo && o2 == bo2 && runs[a] > br) || (o == bo && o2 == bo2 && runs[a] == br && t < bt)) { b = a; bo = o; bo2 = o2; br = runs[a]; bt = t; byt = my[a]; bdc = md[a] }
@@ -1321,6 +1314,8 @@ if [ "$PERNET" = "1" ] && [ -n "$BEST" ]; then
     else
         if [ -n "$BEST_YT$BEST_DC" ]; then
             how="остальные ${BEST%%"|"*} из $((NB - NBY - NBD))${BEST_YT:+, YouTube — своя}${BEST_DC:+, Discord — своя}"
+        elif [ "$ENG" = nfqws2 ]; then
+            how="открыла ${BEST%%"|"*} из $NB"   # у nfqws2 в первом поле уже все закрытые сайты
         else
             how="открыла $((${BEST%%"|"*} + gy + gd)) из $NB"
         fi

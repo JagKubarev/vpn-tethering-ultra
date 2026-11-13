@@ -501,14 +501,35 @@ zapret2_strat_file() {
     [ -f "$f" ] || f="$ZAPRET2_DIR/strategies/hardcorp74.conf"
     echo "$f"
 }
-# Одна переменная из файла стратегии — одной строкой. Файл — модуля (формат nfqws2-android:
-# присваивания с $LUA_DIR/$BLOBS_DIR/$LISTS_DIR), читается в подоболочке
-zapret2_strat_var() {   # файл ПЕРЕМЕННАЯ
-    (
+# Приёмы стратегии одним чтением файла -> Z2_BASE, Z2_CUSTOM, Z2_UDP, Z2_QUIC, Z2_TCP (каждый одной
+# строкой). Файл — модуля (формат nfqws2-android: присваивания с $LUA_DIR/$BLOBS_DIR/$LISTS_DIR),
+# читается в подоболочке
+zapret2_strat_load() {   # файл
+    local _o
+    _o=$(
         LUA_DIR="$ZAPRET2_DIR/lua"; BLOBS_DIR="$ZAPRET2_DIR/blobs"; LISTS_DIR="$ZAPRET2_DIR/lists"; LOG_DIR=/dev/null
         . "$1" >/dev/null 2>&1
-        eval "printf '%s' \"\$$2\""
-    ) | tr '\n\t' '  ' | tr -s ' '
+        for _v in NFQWS_BASE_ARGS NFQWS_ARGS_CUSTOM NFQWS_ARGS_UDP NFQWS_ARGS_QUIC NFQWS_ARGS; do
+            eval "printf '%s' \"\$$_v\"" | tr '\n\t' '  ' | tr -s ' '
+            echo
+        done
+    )
+    { read -r Z2_BASE; read -r Z2_CUSTOM; read -r Z2_UDP; read -r Z2_QUIC; read -r Z2_TCP; } <<EOF
+$_o
+EOF
+}
+# Наше (исключения, списки, адреса) — к каждому профилю стратегии: у z2r_rocket в TCP их три через
+# --new, и дописанное в конец строки досталось бы только последнему — первые два шли бы на все
+# сайты, банки из «мимо обхода» тоже (ревью 13.11)
+zapret2_add() {   # ПРОФИЛИ ДОБАВКА
+    [ -n "$1" ] || return 0
+    echo "$1" | sed "s# --new # $2 --new #g; s#\$# $2#"
+}
+# Для подбора (scan.sh): стратегия ко всем сайтам набора — её основа, свои профили и TCP, без
+# наших списков; fool_nots — как у демона
+zapret2_scan_args() {   # имя очередь
+    zapret2_strat_load "$ZAPRET2_DIR/strategies/$1.conf"
+    echo "--qnum=$2 --uid=0:3998 --bind-fix4 $Z2_BASE --lua-init=@$ZAPRET2_DIR/lua/vpn-tether.lua ${Z2_CUSTOM:+$Z2_CUSTOM --new }$Z2_TCP" | zapret2_fool
 }
 # Подделкам, которые держатся на метке времени TCP (tcp_ts, tcp_ts_up), — свои обманки из
 # vpn-tether.lua: у соединения без метки (Windows-клиенты раздачи) tcp_ts ничего не делает и
@@ -534,25 +555,23 @@ zapret2_args() {
     grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
     grep -q '[a-z0-9]' "$ZAPRET_LIST_USER" 2>/dev/null && us="--hostlist=$ZAPRET_LIST_USER"
     f=$(zapret2_strat_file)
+    zapret2_strat_load "$f"
     # основа стратегии + свои: vpn-tether.lua (fool_nots) и подделка vt_tls для профилей DoH (своё
     # имя: у чужой стратегии tls_clienthello может не быть или быть другим файлом)
-    base="$(zapret2_strat_var "$f" NFQWS_BASE_ARGS) --lua-init=@$L/vpn-tether.lua --blob=vt_tls:@$B/tls_clienthello.bin"
-    custom=$(zapret2_strat_var "$f" NFQWS_ARGS_CUSTOM)
-    udp=$(zapret2_strat_var "$f" NFQWS_ARGS_UDP)
-    quic=$(zapret2_strat_var "$f" NFQWS_ARGS_QUIC)
-    tcp=$(zapret2_strat_var "$f" NFQWS_ARGS)
+    base="$Z2_BASE --lua-init=@$L/vpn-tether.lua --blob=vt_tls:@$B/tls_clienthello.bin"
+    custom="$Z2_CUSTOM"; udp="$Z2_UDP"; quic="$Z2_QUIC"; tcp="$Z2_TCP"
     # свои приёмы TCP (ZAPRET2_ARGS) — вместо приёмов стратегии; её подделки и Lua остаются
     [ -n "$ZAPRET2_ARGS" ] && tcp="--filter-tcp=443,80,1984,5222 --filter-l7=http,tls $ZAPRET2_ARGS"
-    # «мимо обхода» — в каждый профиль по именам (в своих профилях стратегии — в каждый)
-    [ -n "$custom" ] && custom="$(echo "$custom" | sed "s# --new # $ex --new #g") $ex"
-    [ -n "$quic" ] && quic="$quic $ex"
-    tcp="$tcp $ex"
+    # «мимо обхода» — в каждый профиль по именам
+    custom=$(zapret2_add "$custom" "$ex")
+    quic=$(zapret2_add "$quic" "$ex")
+    tcp=$(zapret2_add "$tcp" "$ex")
     # только TLS — для адресов (ipset) и «всех сайтов»: те же приёмы, без порта 80 и HTTP;
     # HTTP-обход — только сайтам из списков, как у nfqws1 (тот порт 80 не трогал вовсе). Сняли 12.11,
     # пока у Windows-клиентов раздачи HTTP к адресам ipset (Akamai, Cloudflare, Google) приходил
     # испорченным — «нет интернета» (msftconnecttest — 400), падала проверка отзыва сертификата
     # (OCSP по HTTP). Причину с тех пор лечит fool_nots; вернуть — только после замера
-    tcpt=$(echo "$tcp" | sed 's/--filter-tcp=[^ ]*/--filter-tcp=443,1984,5222/; s/--filter-l7=[^ ]*/--filter-l7=tls/')
+    tcpt=$(echo "$tcp" | sed 's/--filter-tcp=[^ ]*/--filter-tcp=443,1984,5222/g; s/--filter-l7=[^ ]*/--filter-l7=tls/g')
     # .ru/.su/.рф и Google (list-noauto) — как у nfqws1: профиль по именам их не трогает и в автосписок
     # не берёт; такие сайты из списков (user.list nfqws2 и свой) — своим профилем перед ним. Google
     # (Play, YouTube) это не задевает: его адреса — в ipset.list, а профиль по адресам идёт раньше
@@ -592,14 +611,14 @@ zapret2_args() {
     _z2p "$custom"
     _z2p "$udp"
     if [ -n "$quic" ]; then
-        _z2p "$quic $ipset"
-        [ -n "$ruh" ] && _z2p "$quic $ruh"
-        _z2p "$quic $extra"
+        _z2p "$(zapret2_add "$quic" "$ipset")"
+        [ -n "$ruh" ] && _z2p "$(zapret2_add "$quic" "$ruh")"
+        _z2p "$(zapret2_add "$quic" "$extra")"
     fi
-    _z2p "$tcpt $ipset"
-    [ -n "$ruh" ] && _z2p "$tcp $ruh"
-    _z2p "$tcp $extra"
-    [ "$ZAPRET_MODE" = "all" ] && _z2p "$tcpt --hostlist-exclude=$S/exclude.list $rux"
+    _z2p "$(zapret2_add "$tcpt" "$ipset")"
+    [ -n "$ruh" ] && _z2p "$(zapret2_add "$tcp" "$ruh")"
+    _z2p "$(zapret2_add "$tcp" "$extra")"
+    [ "$ZAPRET_MODE" = "all" ] && _z2p "$(zapret2_add "$tcpt" "--hostlist-exclude=$S/exclude.list $rux")"
     echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $base $P" | tr '\n' ' ' | tr -s ' ' | zapret2_fool
 }
 # Название стратегии и автор (meta.tsv) — для журнала и WebUI
