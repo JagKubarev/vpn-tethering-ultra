@@ -260,15 +260,62 @@ yt_ramp_sync() {   # now
     phone_status_refresh
 }
 # nfqws2 запущен заново: настоящий масштаб окна каждого соединения к стойкам (vt_wssize_ramp) остался в
-# прежнем — без него сервер видит окно в ~128 раз меньше, и видео ползёт. Соединения телефона рвём,
-# приложение откроет новые; раздачу ss не порвёт (транзит) — её переоткроет клиент
+# прежнем — без него сервер видит окно в ~128 раз меньше, и видео ползёт. Соединения телефона рвём (ss -K),
+# раздаче — RST на следующий пакет клиента; приложение откроет новые
 yt_ramp_kill() {
-    local n c=0
+    local n c=0 t=0 l src sp dip now wip="$LAST_WAN_IP"
+    # список стоек — текущей сети: при смене сети nfqws2 перезапускается раньше, чем yt_dead_scan его обновит,
+    # и рвались бы соединения к стойкам прежней сети (ревью 15.11)
+    [ "$YT_RAMP_KEY" = "${NET_KEY:--}" ] || yt_ramp_sync "$(date +%s)"
     for n in $(grep -v '^0\.0\.0\.0/32$' "$YT_RAMP_RUN" 2>/dev/null); do
         case "$n" in *[!0-9./]*|'') continue ;; esac
         c=$((c + $(ss -K -tn state established dst "$n" dport = :443 2>/dev/null | awk 'NR > 1' | wc -l)))
     done
-    [ "$c" -gt 0 ] && log "YouTube: nfqws2 перезапущен — порвано $c соединений к стойкам малого окна (их окно он больше не пересчитывает)"
+    # Раздача: её соединения ss не видит (транзит) — из conntrack (клиент раздачи наружу через WAN: ответ идёт
+    # на адрес телефона) к стойкам списка; каждому — RST на следующий пакет клиента (CHAIN_YT_RST, 5 мин,
+    # снимает yt_retry_hits — как у застрявших). Клиент сразу откроет новое, и его SYN пройдёт малое окно.
+    # Цепочку создаём здесь же: при запуске демона nfqws2 стартует раньше yt_dead_on, а соединения в
+    # conntrack — от прежнего
+    # адрес WAN — как в yt_dead_scan: при запуске демона LAST_WAN_IP бывает ещё пуст, а в сети с CLAT IPv4 у v4-<WAN>
+    [ -n "$wip" ] || wip=$($ip -4 addr show "$LAST_WAN_IFACE" 2>/dev/null | awk '/inet / {sub(/\/.*/, "", $2); print $2; exit}')
+    [ -n "$wip" ] || wip=$($ip -4 addr show "v4-$LAST_WAN_IFACE" 2>/dev/null | awk '/inet / {sub(/\/.*/, "", $2); print $2; exit}')
+    if [ -n "$wip" ] && [ -n "$CONNTRACK_BIN" ]; then
+        now=$(date +%s)
+        $iptables -N "$CHAIN_YT_RST" 2>/dev/null
+        for l in $($CONNTRACK_BIN -L -p tcp --dport 443 2>/dev/null | awk -v wip="$wip" -v rf="$YT_RAMP_RUN" '
+            FILENAME == rf {
+                if ($1 ~ /^[0-9.]+\/[0-9]+$/ && $1 != "0.0.0.0/32") {
+                    split($1, a, "/"); split(a[1], o, "."); b = ((o[1] * 256 + o[2]) * 256 + o[3]) * 256 + o[4]
+                    nb[++nn] = b; ne[nn] = b + 2 ^ (32 - a[2]) - 1
+                }
+                next
+            }
+            / ESTABLISHED / {
+                src = ""; dst = ""; rdst = ""; sp = ""
+                for (i = 1; i <= NF; i++) {
+                    split($i, kv, "=")
+                    if (kv[1] == "src" && src == "") src = kv[2]
+                    else if (kv[1] == "dst") { if (dst == "") dst = kv[2]; else if (rdst == "") rdst = kv[2] }
+                    else if (kv[1] == "sport" && sp == "") sp = kv[2]
+                }
+                if (src == wip || rdst != wip) next
+                split(dst, o, "."); x = ((o[1] * 256 + o[2]) * 256 + o[3]) * 256 + o[4]
+                for (j = 1; j <= nn; j++) if (x >= nb[j] && x <= ne[j]) { print src "_" sp "_" dst; break }
+            }' "$YT_RAMP_RUN" -); do
+            src=${l%%_*}; l=${l#*_}; sp=${l%%_*}; dip=${l#*_}
+            case "$src" in *[!0-9.]*|'') continue ;; esac
+            case "$sp" in *[!0-9]*|'') continue ;; esac
+            case "$dip" in *[!0-9.]*|'') continue ;; esac
+            # 5 мин, а не 20 с, как у застрявших: соединение в пуле простаивает минутами, и без пакета клиента
+            # правило снялось бы, не сработав (порт клиента в правиле — чужое не заденет)
+            $iptables -I "$CHAIN_YT_RST" -s "$src" -d "$dip" -p tcp --sport "$sp" --dport 443 -j REJECT --reject-with tcp-reset 2>/dev/null && {
+                YT_RETRY_RJ="$YT_RETRY_RJ
+$((now + 300)) $src $sp $dip"
+                t=$((t + 1))
+            }
+        done
+    fi
+    [ $((c + t)) -gt 0 ] && log "YouTube: nfqws2 перезапущен — порвано соединений к стойкам малого окна: телефона $c, раздачи $t (RST на следующий пакет клиента; их окно он больше не пересчитывает)"
     return 0
 }
 # Сервер напрямую принял ClientHello и молчит («dead», yt_retry_hits; только соединения с пометкой
