@@ -77,19 +77,37 @@ QYT="www.youtube.com i.ytimg.com youtubei.googleapis.com"
 QH=rr1---sn-gvnuxaxjvh-n8vz.googlevideo.com
 ZQUIC=/data/adb/vpn_tether_zapret_quic      # ключ|название|1 подделка проходит, 0 нет|epoch
 QBY=0
-nq_up() { # nq_up "<аргументы с @G/@Q>" | "z2:<стратегия nfqws2>" -> nfqws на очереди сканера, $NQPID
-    local real _i
+nq_up() { # nq_up "<аргументы с @G/@Q>" | "z2:<стратегия nfqws2>" | "z2q:<её QUIC>" -> nfqws на очереди сканера, $NQPID
+    local real _i _a
     case "$1" in
         z2:*)
             # лог прошлого прогона — вон до запуска: иначе в нём уже есть «copy_packet», ожидание
             # ниже кончалось сразу, и проверка шла, пока очередь ещё ничья (13.11: все, кроме первой, «не открыли»)
             rm -f "$TMP/nq.log"
+            # сборка — те же функции, что у демона (lib/zapret.sh): стратегия ко всем сайтам набора, а
+            # кандидат подбора сайтов (Z2_SITE_RUN) — тем профилем, что демон даст сайтам
+            if [ "$Z2_SITE_RUN" = 1 ]; then
+                _a=$(zapret2_scan_site_args "${1#z2:}" "$Q") || { echo "стратегия ${1#z2:} сайтам не годится" > "$TMP/nq.log"; NQPID=""; return 1; }
+            else
+                _a=$(zapret2_scan_args "${1#z2:}" "$Q")
+            fi
             set -f
-            # сборка — та же функция, что у демона (lib/zapret.sh): стратегия ко всем сайтам набора
-            "$NQ2" $(zapret2_scan_args "${1#z2:}" "$Q") > "$TMP/nq.log" 2>&1 &
+            "$NQ2" $_a > "$TMP/nq.log" 2>&1 &
             NQPID=$!
             set +f
             # nfqws2 грузит Lua и подделки: до привязки к очереди пакеты шли бы мимо (--queue-bypass)
+            _i=0
+            while [ $_i -lt 30 ] && kill -0 "$NQPID" 2>/dev/null && ! grep -q 'copy_packet' "$TMP/nq.log" 2>/dev/null; do sleep 0.1; _i=$((_i + 1)); done
+            return 0 ;;
+        z2q:*)
+            # QUIC стратегии nfqws2 (quic_check): её основа и профиль QUIC
+            rm -f "$TMP/nq.log"
+            # нет файла стратегии или её QUIC — без обхода мерить нечего (итог был бы «не помогает»)
+            _a=$(zapret2_scan_quic_args "${1#z2q:}" "$Q") || { echo "у стратегии ${1#z2q:} нет приёмов для QUIC" > "$TMP/nq.log"; NQPID=""; return 1; }
+            set -f
+            "$NQ2" $_a > "$TMP/nq.log" 2>&1 &
+            NQPID=$!
+            set +f
             _i=0
             while [ $_i -lt 30 ] && kill -0 "$NQPID" 2>/dev/null && ! grep -q 'copy_packet' "$TMP/nq.log" 2>/dev/null; do sleep 0.1; _i=$((_i + 1)); done
             return 0 ;;
@@ -138,7 +156,7 @@ quic_save() { # quic_save 1|0
     } > "$ZQUIC.tmp" && chmod 600 "$ZQUIC.tmp" && mv -f "$ZQUIC.tmp" "$ZQUIC"
 }
 quic_check() { # итог — в $QMSG; не понятно или нет связи — ничего не запоминаем
-    local h ip b c g s1 s2 v=0
+    local h ip b c g s1 s2 v=0 _qs
     QMSG=""
     # в волну Google YouTube молчит при любом обходе: вышло бы «подделка не помогает»
     if [ -n "$(find "$OUTB.wave" -maxdepth 0 -mmin -15 2>/dev/null)" ]; then
@@ -162,7 +180,18 @@ quic_check() { # итог — в $QMSG; не понятно или нет свя
         event "$QMSG"
         return 1
     fi
-    nq_up "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=@Q"
+    # nfqws2 — приёмы QUIC стратегии сети (у nfqws1 — подделка Initial Google, как у демона)
+    if [ "$ENG" = nfqws2 ]; then
+        _qs=$(sh "$MODDIR/service.sh" --zapret2-strategy "${NETID%%"|"*}" "${NETID#*"|"}" 2>/dev/null)
+        if [ -z "$_qs" ] || ! zapret2_scan_quic_args "$_qs" "$Q" >/dev/null; then
+            quic_rules -D; QBY=0
+            QMSG="QUIC: у стратегии ${_qs:-сети} нет приёмов для QUIC — итог не меняю"
+            return 1
+        fi
+        nq_up "z2q:$_qs"
+    else
+        nq_up "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=@Q"
+    fi
     if ! kill -0 "$NQPID" 2>/dev/null; then
         NQPID=""; quic_rules -D; QBY=0
         QMSG="QUIC: nfqws не запустился ($(tail -n 1 "$TMP/nq.log" | cut -c1-80)) — итог не меняю"
@@ -344,7 +373,6 @@ if [ -n "$GRP" ]; then
     [ "$ENG" = nfqws2 ] && { st state=error msg="у nfqws2 YouTube и Discord — часть стратегии: подберите общую"; exit 1; }
     [ "$PERNET" = 1 ] && [ -n "${NETID%%"|"*}" ] || { st state=error msg="своя стратегия YouTube и Discord — только при «своей стратегии для каждой сети» и понятной сети"; exit 1; }
 fi
-[ "$MODE" = sites ] && [ "$ENG" = nfqws2 ] && { st state=error msg="сайты со своей стратегией — пока только у nfqws1"; exit 1; }
 if [ "$MODE" = sites ]; then
     [ "$PERNET" = 1 ] && [ -n "${NETID%%"|"*}" ] || { st state=error msg="своя стратегия сайтов — только при «своей стратегии для каждой сети» и понятной сети"; exit 1; }
     if [ -z "$SITES_ARG" ]; then
@@ -708,8 +736,15 @@ fi
 # nfqws). Не открылся ничем — в ZSKIP на сутки (часто блок по IP).
 if [ "$MODE" = "sites" ]; then
     KEY="${NETID%%"|"*}"
-    CUR=$(strat_of full)
-    GEN=$(strat_of)
+    if [ "$ENG" = nfqws2 ]; then
+        # nfqws2: основная — стратегия сети (z2:<имя>), кандидаты — другие стратегии (ниже)
+        CUR="z2:$(sh "$MODDIR/service.sh" --zapret2-strategy "$KEY" "${NETID#*"|"}" 2>/dev/null)"
+        [ "$CUR" = z2: ] && CUR=""
+        GEN=""
+    else
+        CUR=$(strat_of full)
+        GEN=$(strat_of)
+    fi
     [ -n "$CUR" ] || { st state=error msg="не узнал стратегию сети"; exit 1; }
     # У YouTube своя стратегия — основная для его доменов тоже кандидат (22.10:
     # yt3.ggpht.com, логотипы каналов, открывался только основной); иначе
@@ -747,10 +782,36 @@ if [ "$MODE" = "sites" ]; then
     fi
     : > "$TMP/assign"
     if [ -n "$F" ]; then
+      if [ "$ENG" = nfqws2 ]; then
+        # nfqws2: уже закреплённые за сайтами этой сети (и сетей с тем же названием — демон берёт
+        # их записи, если своих нет), прежние стратегии этих сетей (история сторожа), затем
+        # проверенные на YOTA первыми и остальные; без основной, из истории до 4, всего 8. Только те,
+        # что демон сайтам даст (zapret2_site_tcp: без своих списков и нескольких профилей в TCP,
+        # как z2r_rocket; подделки — не под тем же именем, что в основной, но другие)
+        zapret2_strat_load "$ZAPRET2_DIR/strategies/${CUR#z2:}.conf"; MB="$Z2_BASE"
+        KEYS=$(L="${NETID#*"|"}" K="$KEY" awk -F'|' 'ENVIRON["L"] != "" && $3 == ENVIRON["L"] && $1 != ENVIRON["K"] { printf "%s ", $1 } END { print ENVIRON["K"] }' /data/adb/vpn_tether_zapret2_nets 2>/dev/null)
+        [ -n "$KEYS" ] || KEYS="$KEY"
+        {
+            [ -f "$ZALT" ] && L="${NETID#*"|"}" K="$KEY" awk -F'|' '$4 ~ /^z2:/ && ($1 == ENVIRON["K"] || (ENVIRON["L"] != "" && $2 == ENVIRON["L"])) { print $4 }' "$ZALT"
+            KS=" $KEYS " awk -F'|' 'index(ENVIRON["KS"], " " $1 " ") && $2 != "" { l[++n] = $2 } END { for (i = n; i >= 1; i--) print "z2:" l[i] }' "$HIST2" 2>/dev/null
+            echo @@
+            for _s in hardcorp74 universal_v12_gv universal_v12 anti_throttle_gv anti_throttle MartinBacker fake_tls_auto_alt3 $(z2_list ""); do echo "z2:$_s"; done
+        } | C="$CUR" awk '$0 == "@@" || (NF && $0 != ENVIRON["C"] && !s[$0]++)' | {
+            n=0; b=0
+            while IFS= read -r _c; do
+                [ "$_c" = @@ ] && { b=1; continue; }
+                [ "$b" = 1 ] || [ "$n" -lt 4 ] || continue
+                zapret2_site_tcp "${_c#z2:}" || continue
+                [ -z "$(zapret2_blob_clash "$MB" "$Z2_BASE" "$Z2_SITE")" ] || continue
+                echo "$_c"; n=$((n + 1)); [ "$n" -lt 8 ] || break
+            done
+        } > "$TMP/cands"
+        Z2_SITE_RUN=1; UB=""
+      else
         # кандидаты: уже закреплённые за сайтами этой сети, история сети (и
         # сетей с тем же названием), проверенный набор; без основной
         {
-            [ -f "$ZALT" ] && K="$KEY" awk -F'|' '$1 == ENVIRON["K"] { print $4 }' "$ZALT"
+            [ -f "$ZALT" ] && K="$KEY" awk -F'|' '$1 == ENVIRON["K"] && $4 !~ /^z2:/ { print $4 }' "$ZALT"
             L="${NETID#*"|"}" K="$KEY" awk -F'|' '$1 == ENVIRON["K"] || ($4 == ENVIRON["L"] && ENVIRON["L"] != "") { print $1 }' "$ZNETS" 2>/dev/null > "$TMP/keys"
             KS=" $(tr '\n' ' ' < "$TMP/keys") " awk -F'|' 'index(ENVIRON["KS"], " " $1 " ") && $2 == "custom" { l[++n] = $3; if ($6 != "") l[++n] = $6; if ($7 != "") l[++n] = $7 } END { for (i = n; i >= 1; i--) print l[i] }' "$HIST" 2>/dev/null
             echo @@   # дальше встроенный набор
@@ -766,20 +827,30 @@ EOF
         # всего 5: до 3 из истории сети, остальные из встроенного набора
         } | G="$GEN_X" awk '$0 == "@@" { b = 1; next } NF && $0 != ENVIRON["G"] && !/--wssize|syndata/ && !s[$0]++ {
             if (b) { if (n < 5) { print; n++ } } else if (n < 3) { print; n++ } }' > "$TMP/cands"
+      fi
         S_total=$((S_done + $(wc -l < "$TMP/cands") * 2))
         NUSED=0
         while IFS= read -r a <&3; do
             [ -n "$F" ] || break
             [ "$NUSED" -lt 3 ] || break
+            # nfqws2: подделка под тем же именем, что у уже закреплённой здесь стратегии, но другая —
+            # демон эту стратегию пропустил бы (zapret2_alt_profiles)
+            if [ "$ENG" = nfqws2 ]; then
+                zapret2_site_tcp "${a#z2:}" || continue
+                [ -z "$(zapret2_blob_clash "$MB$UB" "$Z2_BASE" "$Z2_SITE")" ] || continue
+                _ub="$Z2_BASE"
+            fi
             st stage="сайты: подбираю для $(echo $F | wc -w)"
             use_ips "$F"; run_strat "$a" "сайты"; O=$(opened)
             [ -n "$O" ] || continue
             use_ips "$O"; run_strat "$a" "сайты"; O=$(opened)
             [ -n "$O" ] || continue
             for h in $O; do printf '%s|%s\n' "$h" "$a" >> "$TMP/assign"; done
+            [ "$ENG" = nfqws2 ] && UB="$UB $_ub"
             NUSED=$((NUSED + 1))
             F=$(minus "$F" "$O")
         done 3< "$TMP/cands"
+        Z2_SITE_RUN=""
     fi
     if [ "$(sh "$ZDIR/netid.sh" "$WAN" 2>/dev/null | head -1)" != "$NETID" ]; then
         st state=stopped stage="готово" msg="сеть сменилась во время проверки — не запоминаю"

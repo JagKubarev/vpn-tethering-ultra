@@ -565,7 +565,7 @@ details > summary::after { border-color: currentColor; }
     <button class="btn" id="scFull">Полный · ~7 мин</button>
     <button class="btn" id="scStop" style="display:none">Остановить</button>
   </div>
-  <div class="s muted" style="font-size:13px;margin-top:10px" data-nfqws2>У nfqws2 подбор пробует все его стратегии (35), быстрый и полный одинаковы. YouTube и Discord — часть стратегии, отдельно не подбираются.</div>
+  <div class="s muted" style="font-size:13px;margin-top:10px" data-nfqws2>У nfqws2 подбор пробует все его стратегии, быстрый и полный одинаковы. YouTube и Discord — часть стратегии, отдельно не подбираются.</div>
   <div data-nfqws1>
   <div class="s muted" style="font-size:13px;margin-top:10px">YouTube и Discord часто работают лучше со своей стратегией: запустите подбор, дождитесь конца и примените лучшую в таблице. Общая не меняется, замер скачивает до 110 МБ.</div>
   <div class="btn-row eq mt8">
@@ -2371,13 +2371,16 @@ $('#zauto').addEventListener('click', async (e) => {
 });
 // сайты со своей стратегией (scan.sh sites): "сайт|аргументы|дата"
 async function loadZalt() {
-  const r = await ctl('zalt');
+  // записи nfqws2 — «z2:<стратегия>»; показываем записи движка, который работает (nfqws2 не
+  // поднялся — демон на nfqws1), а обход выключен — того, что в настройках
+  const z2 = (ST.zapret_engine || CUR.ZAPRET_ENGINE) === 'nfqws2';
+  const r = await ctl('zalt ' + (z2 ? 'z2' : 'n1'));
   const rows = (r.out || '').split('\n').filter((l) => l.indexOf('|') > 0).map((l) => l.split('|'));
   $('#zaltN').textContent = rows.length;
   const by = {};
   rows.forEach((f) => { (by[f[1]] = by[f[1]] || []).push(f[0]); });
   $('#zalt').innerHTML = rows.length ? Object.keys(by).map((a) =>
-    '<div style="padding:6px 0"><div class="txt"><div class="t" style="font-size:14px">' + esc(stratLabel(a)) + '</div>' +
+    '<div style="padding:6px 0"><div class="txt"><div class="t" style="font-size:14px">' + esc(a.indexOf('z2:') === 0 ? z2Label(a.slice(3)) : stratLabel(a)) + '</div>' +
     '<div class="s">' + esc(by[a].join(', ')) + '</div></div></div>').join('')
     : '<div class="s muted" style="font-size:13px">Пока нет: основная стратегия открывает всё, что проверено (или проверки ещё не было).</div>';
 }
@@ -2959,7 +2962,7 @@ function mockExec(cmd) {
   if (/^zauto-del /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'logs-send') return { errno: 0, out: 'OK /storage/emulated/0/Download/vpn_tether_logs_20261023_1900.txt' };
   if (a === 'zauto-clear') return { errno: 0, out: 'OK' };
-  if (a === 'zalt') return { errno: 0, out: 'rutracker.org|--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld|2026-10-22 18:00\nnnmclub.to|--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld|2026-10-22 18:00\n' };
+  if (/^zalt( |$)/.test(a)) return { errno: 0, out: 'rutracker.org|--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld|2026-10-22 18:00\nnnmclub.to|--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld|2026-10-22 18:00\n' };
   if (a === 'zalt-clear') return { errno: 0, out: 'OK' };
   if (a === 'diag') return { errno: 0, out: 'R dns|warn|Подмена DNS|оператор подменяет ответы обычного DNS (2 из 3: rutracker.org:195.208.4.1) — без DoH заблокированные сайты получат заглушку\nR tcp16|ok|Обрыв на 16–64 КБ|нет: 128 КБ скачались (4 из 4)\nR wl|ok|Белые списки|нет: зарубежные сайты открываются (4 из 4)\nR tg|bad|Telegram|закрыт по IP: серверы (0 из 5) и веб-версия недоступны — только через VPN\n' };
   if (/^zevents/.test(a)) return { errno: 0, out: '2026-10-21 12:40|YOTA|сторож: стратегия работает\n2026-10-21 13:44|YOTA|сторож: стратегия не открывает заблокированные (www.youtube.com discord.com) — ищу замену\n2026-10-21 13:45|YOTA|сторож: вернул прежнюю стратегию: --dpi-desync=multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1\n' };

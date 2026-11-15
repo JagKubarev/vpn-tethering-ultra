@@ -327,7 +327,9 @@ zapret_alt_profiles() {
     local ex="$1" i=0 a f out="" nre
     nre=$(zapret_zone_re "$ZAPRET_LIST_NOAUTO")
     if [ "$ZAPRET_ALT" = "1" ] && [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] && [ -f "$ZALT_FILE" ]; then
+        # записи nfqws2 (z2:) — мимо: иначе сеть только с ними не брала бы записи nfqws1 сети с тем же названием
         K="$NET_KEY" L="$NET_LABEL" awk -F'|' '
+            $4 ~ /^z2:/ { next }
             $1 == ENVIRON["K"] { k[++nk] = $4 "|" $3 }
             ENVIRON["L"] != "" && $2 == ENVIRON["L"] { l[++nl] = $4 "|" $3 }
             END { if (nk) { for (i = 1; i <= nk; i++) print k[i] } else for (i = 1; i <= nl; i++) print l[i] }' \
@@ -534,6 +536,39 @@ zapret2_scan_args() {   # имя очередь
     zapret2_strat_load "$ZAPRET2_DIR/strategies/$1.conf"
     echo "--qnum=$2 --uid=0:3998 --bind-fix4 $Z2_BASE --lua-init=@$ZAPRET2_DIR/lua/vpn-tether.lua ${Z2_CUSTOM:+$Z2_CUSTOM --new }$Z2_TCP" | zapret2_fool
 }
+# Для «Проверить QUIC» (scan.sh quic) у nfqws2: основа стратегии и её профиль QUIC
+zapret2_scan_quic_args() {   # имя очередь
+    zapret2_strat_load "$ZAPRET2_DIR/strategies/$1.conf"
+    [ -n "$Z2_QUIC" ] || return 1
+    echo "--qnum=$2 --uid=0:3998 --bind-fix4 $Z2_BASE --lua-init=@$ZAPRET2_DIR/lua/vpn-tether.lua $Z2_QUIC"
+}
+# Стратегия сайтам со своей стратегией (ZAPRET_ALT) — одна у демона (zapret2_alt_profiles) и у подбора
+# (zapret2_scan_site_args): TLS-приёмы её TCP на порт 443, без её своих профилей (googlevideo у _gv) и UDP.
+# Со своими списками или несколькими профилями в TCP (z2r_rocket) — нет: список сайтов дописался бы к
+# их спискам. -> Z2_SITE (и Z2_BASE от zapret2_strat_load); 1 — сайтам не годится
+zapret2_site_tcp() {   # имя
+    case "$1" in ''|*[!A-Za-z0-9_]*) return 1 ;; esac
+    [ -f "$ZAPRET2_DIR/strategies/$1.conf" ] || return 1
+    zapret2_strat_load "$ZAPRET2_DIR/strategies/$1.conf"
+    case "$Z2_TCP" in *[!\ ]*) ;; *) return 1 ;; esac
+    case " $Z2_TCP " in *" --new "*|*--hostlist*|*--ipset*) return 1 ;; esac
+    Z2_SITE=$(echo "$Z2_TCP" | sed 's/--filter-tcp=[^ ]*/--filter-tcp=443/g; s/--filter-l7=[^ ]*/--filter-l7=tls/g')
+}
+# Для подбора сайтов (scan.sh sites): кандидат — ровно тем профилем, что демон потом даст сайтам
+# (ревью 15.11: мерили со всеми профилями стратегии — сайт мог открыться тем, чего демон ему не даёт)
+zapret2_scan_site_args() {   # имя очередь
+    zapret2_site_tcp "$1" || return 1
+    echo "--qnum=$2 --uid=0:3998 --bind-fix4 $Z2_BASE --lua-init=@$ZAPRET2_DIR/lua/vpn-tether.lua $Z2_SITE" | zapret2_fool
+}
+# Подделка, которую берут приёмы сайтов, а в основе nfqws2 она под тем же именем, но другая
+# (--blob=имя:… первым объявлением выигрывает) -> её имя; нет — пусто
+zapret2_blob_clash() {   # основа основа_стратегии приёмы
+    printf '%s\n%s\n%s\n' "$1" "$2" "$3" | awk '
+        function nm(t) { t = substr(t, 8); sub(/:.*/, "", t); return t }
+        NR == 1 { for (i = 1; i <= NF; i++) if ($i ~ /^--blob=/ && !(nm($i) in v)) v[nm($i)] = $i; next }
+        NR == 2 { for (i = 1; i <= NF; i++) if ($i ~ /^--blob=/ && (nm($i) in v) && v[nm($i)] != $i) c[nm($i)] = 1; next }
+        { for (b in c) if (match($0, "=" b "([: ]|$)")) { print b; exit } }'
+}
 # Подделкам, которые держатся на метке времени TCP (tcp_ts, tcp_ts_up), — свои обманки из
 # vpn-tether.lua: у соединения без метки (Windows-клиенты раздачи) tcp_ts ничего не делает и
 # подделка доходит до сервера как настоящая; тогда badseq+badack (с badsum — только badack).
@@ -567,6 +602,68 @@ zapret2_ttlcap() {
             printf "%s%s", (i > 1 ? " " : ""), t
         }
         print ""
+    }'
+}
+# Сайты со своей стратегией у nfqws2 (ZAPRET_ALT; записи «z2:<стратегия>» в ZALT_FILE пишет scan.sh
+# sites) — как zapret_alt_profiles у nfqws1: до 3 стратегий, по профилю на каждую со своим списком
+# сайтов (файлы ZALT_RUN.1..3; nfqws2 сам перечитывает их при изменении). Профиль — zapret2_site_tcp;
+# основа стратегии (Lua, подделки) — к основе nfqws2, кроме уже объявленных подделок с тем же именем.
+# Разные файлы под одним именем бывали только у UDP (discord_udp, stun_fake — приёмам TCP не нужны);
+# если такая подделка нужна приёмам сайтов — стратегию пропускаем с записью в лог (её приёмы взяли бы
+# чужую подделку). -> Z2_ALT_P (профили через --new), Z2_ALT_BASE; без подоболочки —
+# zapret2_strat_load меняет Z2_*, их zapret2_args к этому времени уже разобрал
+zapret2_alt_profiles() {   # «мимо обхода» основа
+    local ex="$1" i=0 s n f c w="" nre
+    Z2_ALT_P=""; Z2_ALT_BASE=""
+    if [ "$ZAPRET_ALT" = "1" ] && [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] && [ -f "$ZALT_FILE" ]; then
+        nre=$(zapret_zone_re "$ZAPRET_LIST_NOAUTO")
+        K="$NET_KEY" L="$NET_LABEL" awk -F'|' '
+            $4 !~ /^z2:/ { next }
+            $1 == ENVIRON["K"] { k[++nk] = $4 "|" $3 }
+            ENVIRON["L"] != "" && $2 == ENVIRON["L"] { l[++nl] = $4 "|" $3 }
+            END { if (nk) { for (i = 1; i <= nk; i++) print k[i] } else for (i = 1; i <= nl; i++) print l[i] }' \
+            "$ZALT_FILE" 2>/dev/null > "$ZALT_RUN.lst"
+        for s in $(cut -d'|' -f1 "$ZALT_RUN.lst" | awk '!x[$0]++'); do
+            [ "$i" -lt 3 ] || break
+            n=${s#z2:}
+            zapret2_site_tcp "$n" || continue
+            c=$(zapret2_blob_clash "$2$Z2_ALT_BASE" "$Z2_BASE" "$Z2_SITE")
+            [ -n "$c" ] && { w="$w $n ($c)"; continue; }
+            f="$ZALT_RUN.$((i + 1))"
+            # Google (list-noauto) — только сайты из списков (ZAPRET_RU_RUN), как у nfqws1
+            A="$s" R="$nre" KS=" $(tr '\n' ' ' < "$ZAPRET_RU_RUN" 2>/dev/null) " awk -F'|' '
+                $1 == ENVIRON["A"] && $2 ~ /^[a-z0-9.-]+$/ &&
+                (ENVIRON["R"] == "" || $2 !~ ENVIRON["R"] || index(ENVIRON["KS"], " " $2 " ")) { print $2 }' \
+                "$ZALT_RUN.lst" | sort -u > "$f.new"
+            [ -s "$f.new" ] || { rm -f "$f.new"; continue; }
+            if cmp -s "$f.new" "$f"; then rm -f "$f.new"; else mv -f "$f.new" "$f"; fi
+            i=$((i + 1))
+            Z2_ALT_P="${Z2_ALT_P:+$Z2_ALT_P --new }$(zapret2_add "$Z2_SITE" "$ex --hostlist=$f")"
+            Z2_ALT_BASE="$Z2_ALT_BASE $Z2_BASE"
+        done
+    fi
+    while [ $((i + 1)) -le 3 ]; do i=$((i + 1)); rm -f "$ZALT_RUN.$i"; done
+    # zapret2_args зовут в подоболочке раз в такт пересчёта — в лог только при перемене
+    if [ "$w" != "$(cat "$ZALT_RUN.warn" 2>/dev/null)" ]; then
+        if [ -n "$w" ]; then
+            log "WARNING: zapret: nfqws2 — стратегия сайтов пропущена:$w — под этим именем в основе другая подделка"
+            echo "$w" > "$ZALT_RUN.warn"
+        else
+            rm -f "$ZALT_RUN.warn"
+        fi
+    fi
+}
+# основа + основа стратегий сайтов: повторы — мимо, подделка с уже объявленным именем — мимо
+zapret2_base_merge() {   # основа добавка
+    printf '%s %s\n' "$1" "$2" | awk '{
+        for (i = 1; i <= NF; i++) {
+            t = $i
+            if (t in seen) continue
+            if (t ~ /^--blob=/) { b = substr(t, 8); sub(/:.*/, "", b); if (b in blob) continue; blob[b] = 1 }
+            if (t ~ /^--lua-gc/) { if (gc) continue; gc = 1 }
+            seen[t] = 1; o = o (o == "" ? "" : " ") t
+        }
+        print o
     }'
 }
 zapret2_args() {
@@ -641,6 +738,10 @@ zapret2_args() {
         esac ;;
     esac
     _z2p "$ggc"
+    # сайты со своей стратегией (ZAPRET_ALT) — раньше общих профилей: их стратегия не открывает
+    zapret2_alt_profiles "$ex" "$base"
+    _z2p "$Z2_ALT_P"
+    [ -n "$Z2_ALT_BASE" ] && base=$(zapret2_base_merge "$base" "$Z2_ALT_BASE")
     # порядок — как _startup_args: свои профили, UDP, QUIC (адреса, имена), TCP (адреса, имена);
     # .ru и Google из списков — между адресами и именами
     _z2p "$custom"
@@ -860,8 +961,8 @@ zapret_start() {
         echo "$pid" > "$ZAPRET_PID_FILE"
         ZAPRET_ENGINE_RUN="$ZAPRET_ENGINE_EFF"
         if [ "$ZAPRET_ENGINE_EFF" = nfqws2 ]; then
-            ZAPRET_ALT_N=0
-            log "zapret: nfqws2 запущен (pid $pid, стратегия $(zapret2_strat_label), $([ "$ZAPRET_MODE" = all ] && echo "TLS всех сайтов, кроме .ru и Google не из списков; QUIC и HTTP — по спискам" || echo "свои списки и автосписок"))"
+            ZAPRET_ALT_N=$(zapret_alt_count "$1")
+            log "zapret: nfqws2 запущен (pid $pid, стратегия $(zapret2_strat_label)$([ "$ZAPRET_ALT_N" -gt 0 ] && echo ", своя стратегия у $ZAPRET_ALT_N сайтов"), $([ "$ZAPRET_MODE" = all ] && echo "TLS всех сайтов, кроме .ru и Google не из списков; QUIC и HTTP — по спискам" || echo "свои списки и автосписок"))"
             return 0
         fi
         ZAPRET_ALT_N=$(zapret_alt_count "$1")
@@ -1033,7 +1134,6 @@ zapret_watchdog() {
 zapret_sites_check() {
     local now pid
     [ "$ZAPRET_ALT" = "1" ] && [ "$ZAPRET_STATE" = "on" ] && [ "$ZAPRET_PER_NET" = "1" ] && [ -n "$NET_KEY" ] || return 0
-    [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && return 0   # сайты со своей стратегией — пока только у nfqws1
     now=$(date +%s)
     # прошлая сорвалась (scan.sh оставил метку) — повтор через ~час: сорвалась
     # часто как раз потому, что ТСПУ резал всё (31.10 14:23), через 15 мин — снова залп
