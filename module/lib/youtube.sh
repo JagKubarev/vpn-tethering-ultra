@@ -160,7 +160,87 @@ yt_dead_off() {
         /data/local/tmp/vpn_tether_ytdead /data/local/tmp/vpn_tether_ytdead.tmp "$YT_SEEN_FILE.udp" "$YT_SEEN_FILE.udp.new" \
         /data/local/tmp/vpn_tether_ytrecheck.* /data/local/tmp/vpn_tether_ytsprobe.*
     YT_DEAD_STATE=""; YT_STUCK=""
-    YT_DEAD_MODE=""; YT_RETRY_CNT=""; YT_RETRY_KILLS=0; YT_RETRY_RJ=""; YT_RETRY_RSTS=0
+    YT_DEAD_MODE=""; YT_RETRY_CNT=""; YT_RETRY_KILLS=0; YT_RETRY_RJ=""; YT_RETRY_RSTS=0; YT_RAMP_DEAD=""; YT_RAMP_BAD=""
+}
+
+# --- YT_WSSIZE_RAMP: малое окно для молчащих стоек (см. service.sh) -------------------
+yt_ramp_on() { [ "$YT_WSSIZE_RAMP" = 1 ] && [ "$YT_DEAD_FAILFAST" = 1 ] && [ "$ZAPRET_ENGINE_RUN" = nfqws2 ]; }
+# цепочка CHAIN_YT_RAMP по списку текущей сети: все исходящие пакеты к стойкам — в nfqws2 (без
+# connbytes: vt_wssize_ramp правит окно в каждом пакете соединения); 0.0.0.0/32 — заглушка файла
+yt_ramp_chain() {
+    local n
+    $iptables -t mangle -N "$CHAIN_YT_RAMP" 2>/dev/null
+    $iptables -t mangle -F "$CHAIN_YT_RAMP" 2>/dev/null
+    yt_ramp_on || return 0
+    for n in $(grep -v '^0\.0\.0\.0/32$' "$YT_RAMP_RUN" 2>/dev/null); do
+        case "$n" in *[!0-9./]*|'') continue ;; esac
+        $iptables -t mangle -A "$CHAIN_YT_RAMP" -d "$n" -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
+    done
+}
+# список текущей сети (YT_RAMP_RUN) из YT_RAMP_FILE, записи старше 12 ч — вон; поменялся — цепочка
+# заново, а файл nfqws2 перечитывает сам
+yt_ramp_sync() {   # now
+    local k="${NET_KEY:--}"
+    YT_RAMP_KEY="$k"; YT_RAMP_TS=$1
+    if [ -f "$YT_RAMP_FILE" ]; then
+        awk -F'|' -v now="$1" 'NF == 3 && now - $3 < 43200' "$YT_RAMP_FILE" > "$YT_RAMP_FILE.new" 2>/dev/null
+        if cmp -s "$YT_RAMP_FILE.new" "$YT_RAMP_FILE"; then rm -f "$YT_RAMP_FILE.new"; else chmod 600 "$YT_RAMP_FILE.new"; mv -f "$YT_RAMP_FILE.new" "$YT_RAMP_FILE"; fi
+    fi
+    { echo 0.0.0.0/32; K="$k" awk -F'|' '$1 == ENVIRON["K"] { print $2 }' "$YT_RAMP_FILE" 2>/dev/null | sort -u; } > "$YT_RAMP_RUN.new"
+    YT_RAMP_N=$(( $(wc -l < "$YT_RAMP_RUN.new") - 1 ))
+    if cmp -s "$YT_RAMP_RUN.new" "$YT_RAMP_RUN"; then rm -f "$YT_RAMP_RUN.new"; return 0; fi
+    mv -f "$YT_RAMP_RUN.new" "$YT_RAMP_RUN"
+    yt_ramp_chain
+    # «не помогает» (yt_ramp_hit) — только для стоек, что ещё в списке
+    local n b=""
+    for n in $YT_RAMP_BAD; do grep -qx "$n" "$YT_RAMP_RUN" && b="$b $n"; done
+    YT_RAMP_BAD="$b"
+    # число стоек в статусе (WebUI): сам он пишется только по событиям
+    phone_status_refresh
+}
+# nfqws2 запущен заново: настоящий масштаб окна каждого соединения к стойкам (vt_wssize_ramp) остался в
+# прежнем — без него сервер видит окно в ~128 раз меньше, и видео ползёт. Соединения телефона рвём,
+# приложение откроет новые; раздачу ss не порвёт (транзит) — её переоткроет клиент
+yt_ramp_kill() {
+    local n c=0
+    for n in $(grep -v '^0\.0\.0\.0/32$' "$YT_RAMP_RUN" 2>/dev/null); do
+        case "$n" in *[!0-9./]*|'') continue ;; esac
+        c=$((c + $(ss -K -tn state established dst "$n" dport = :443 2>/dev/null | awk 'NR > 1' | wc -l)))
+    done
+    [ "$c" -gt 0 ] && log "YouTube: nfqws2 перезапущен — порвано $c соединений к стойкам малого окна (их окно он больше не пересчитывает)"
+    return 0
+}
+# Сервер напрямую принял ClientHello и молчит («dead», yt_retry_hits; только соединения с пометкой
+# googlevideo.com — без неё у раздачи в счёт шли бы любые сети Google, вплоть до DoH 8.8.8.8). Второй раз
+# за YT_RETRY_WIN у того же адреса — его стойку (/28: YOTA режет стойками, 29–30.10) в список сети на 12 ч,
+# не больше 128 на сеть (32 на YOTA набиралось за час — вытеснялись ещё закрытые). Стойка уже в списке
+# (дольше YT_RETRY_WIN) и снова дважды молчит — малое окно ей не помогает: запись не продлеваем, в журнал
+yt_ramp_hit() {   # адрес now
+    local p net e k="${NET_KEY:--}"
+    yt_ramp_on || return 0
+    p=$(printf '%s\n' "$YT_RAMP_DEAD" | awk -v d="$1" -v now="$2" -v w="$YT_RETRY_WIN" '$1 == d && now - $2 <= w { print $2; exit }')
+    YT_RAMP_DEAD=$(printf '%s\n' "$YT_RAMP_DEAD" | awk -v d="$1" -v now="$2" -v w="$YT_RETRY_WIN" 'NF == 2 && $1 != d && now - $2 <= w')
+    if [ -z "$p" ]; then
+        YT_RAMP_DEAD="$YT_RAMP_DEAD
+$1 $2"
+        return 0
+    fi
+    net=$(echo "$1" | awk -F. '{ printf "%d.%d.%d.%d/28", $1, $2, $3, $4 - $4 % 16 }')
+    if grep -qx "$net" "$YT_RAMP_RUN" 2>/dev/null; then
+        e=$(K="$k" N="$net" awk -F'|' '$1 == ENVIRON["K"] && $2 == ENVIRON["N"] { print $3 }' "$YT_RAMP_FILE" 2>/dev/null)
+        # только что в списке: молчали соединения, открытые до него
+        [ $(($2 - ${e:-0})) -le "$YT_RETRY_WIN" ] && return 0
+        case " $YT_RAMP_BAD " in *" $net "*) ;; *)
+            YT_RAMP_BAD="$YT_RAMP_BAD $net"
+            log "YouTube: $1 — стойка $net молчит и с малым окном — запись не продлеваю (снимется через 12 ч после добавления)" ;;
+        esac
+        return 0
+    fi
+    { K="$k" N="$net" awk -F'|' '!($1 == ENVIRON["K"] && $2 == ENVIRON["N"])' "$YT_RAMP_FILE" 2>/dev/null; echo "$k|$net|$2"; } | \
+        K="$k" awk -F'|' '$1 != ENVIRON["K"] { print; next } { l[++n] = $0 } END { for (i = (n > 128 ? n - 127 : 1); i <= n; i++) print l[i] }' > "$YT_RAMP_FILE.new" && \
+        chmod 600 "$YT_RAMP_FILE.new" && mv -f "$YT_RAMP_FILE.new" "$YT_RAMP_FILE"
+    log "YouTube: $1 — сервер дважды принял ClientHello и молчит: стойке $net малое окно на 12 ч (wssize_ramp)"
+    yt_ramp_sync "$2"
 }
 
 # Застрявшее видеосоединение YouTube (см. YT_RETRY_MAX в service.sh) — рвём только его, приложение
@@ -169,7 +249,7 @@ yt_dead_off() {
 # всё подряд — это сломанная стратегия, а не сервер
 #   yt_retry_hits ВЫВОД_AWK NOW АДРЕС_ТЕЛЕФОНА
 yt_retry_hits() {
-    local hit dip src sp c l kd
+    local hit dip src sp c l kd via gv
     # правила RST раздачи — на 20 с: клиент повторяет ClientHello через 1–4 с, дольше не нужно
     if [ -n "$YT_RETRY_RJ" ]; then
         for l in $(printf '%s\n' "$YT_RETRY_RJ" | awk -v now="$2" 'NF == 4 && $1 <= now { print $2 "_" $3 "_" $4 }'); do
@@ -178,11 +258,13 @@ yt_retry_hits() {
         done
         YT_RETRY_RJ=$(printf '%s\n' "$YT_RETRY_RJ" | awk -v now="$2" 'NF == 4 && $1 > now')
     fi
-    for hit in $(printf '%s\n' "$1" | awk '$1 == "HIT" { print $3 "_" $4 "_" $5 "_" $2 }'); do
-        dip=${hit%%_*}; l=${hit#*_}; src=${l%%_*}; l=${l#*_}; sp=${l%%_*}; kd=${l#*_}
+    for hit in $(printf '%s\n' "$1" | awk '$1 == "HIT" { print $3 "_" $4 "_" $5 "_" $2 "_" $6 "_" $7 }'); do
+        dip=${hit%%_*}; l=${hit#*_}; src=${l%%_*}; l=${l#*_}; sp=${l%%_*}; l=${l#*_}; kd=${l%%_*}; l=${l#*_}; via=${l%%_*}; gv=${l#*_}
         case "$dip" in *[!0-9.]*|'') continue ;; esac
         case "$sp" in *[!0-9]*|'') continue ;; esac
         case "$src" in *[!0-9.]*|'') continue ;; esac
+        # принял и молчит напрямую, видеосервер (пометка) — кандидат в малое окно (YT_WSSIZE_RAMP)
+        [ "$kd" = dead ] && [ "$via" = direct ] && [ "$gv" = gv ] && yt_ramp_hit "$dip" "$2"
         if [ -n "$3" ] && [ "$src" = "$3" ]; then
             ss -K -tn dst "$dip" dport = :443 sport = :"$sp" >/dev/null 2>&1; YT_RETRY_KILLS=$((YT_RETRY_KILLS + 1))
         elif [ "$kd" = stuck ]; then
@@ -220,6 +302,10 @@ yt_dead_scan() {
     local now out k sa da ds rqh rqd rqa rqp rqb rqv rqw rqs rqc rqe n t keep=""
     # не ip: локальная ip затирала бы $ip (/system/bin/ip) — адрес WAN ниже не узнавался
     now=$(date +%s)
+    # малое окно: другая сеть — её список стоек; раз в 5 мин — старые записи вон
+    if [ "$YT_RAMP_KEY" != "${NET_KEY:--}" ] || [ $((now - YT_RAMP_TS)) -ge 300 ]; then
+        yt_ramp_on && yt_ramp_sync "$now"
+    fi
     # Пороги от RTT канала. 08.11, «медленный Wi-Fi» (netem: RTT ~380 мс, потери 4%): около половины
     # «мёртвых» были живыми — ответ не успевал за 2–3 с после одной потери. RTT — медиана активных
     # HTTPS-сокетов телефона (ss, раз в 30 с; данные за последние 30 с; меньше 5 мс — AdGuard)
@@ -338,7 +424,7 @@ yt_dead_scan() {
             # а отсчёт идёт от появления соединения, ClientHello клиента сам может опоздать
             lim = (kind == "stuck") ? sa : after
             if (src != wip) lim += 2
-            if (now - t0 >= lim && d == 0) { print "HIT", kind, dst, src, sp; d = 1 }
+            if (now - t0 >= lim && d == 0) { print "HIT", kind, dst, src, sp, (int(mk / 536870912) % 2 == 1) ? "warp" : "direct", yt ? "gv" : "net"; d = 1 }
             ns[k] = t0 " " kind " " d
         }
         END { for (k in ns) print k, ns[k] > (sf ".new"); for (k in nr) print k, nr[k] > (rf ".new"); printf "DATA %.0f\n", dsum }

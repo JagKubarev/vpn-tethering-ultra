@@ -666,6 +666,23 @@ zapret2_base_merge() {   # основа добавка
         print o
     }'
 }
+# Приёмы стратегии для видео — к профилю малого окна (YT_WSSIZE_RAMP): её профиль googlevideo из своих
+# (у _gv), иначе первый профиль TLS; без фильтров выбора (порт, протокол, списки): профиль выбирается по
+# адресу стойки ещё на SYN. Без --payload в начале — tls_client_hello: после vt_wssize_ramp стоит
+# --payload=all, и приёмы легли бы на каждый пакет
+zapret2_ramp_techs() {   # свои_профили профиль_TLS
+    printf '%s\n%s\n' "$1" "$2" | awk '
+        { n = split($0, seg, / --new /); for (i = 1; i <= n; i++) s[++m] = seg[i]; if (NR == 1) nc = m }
+        END {
+            p = ""
+            for (i = 1; i <= nc; i++) if (s[i] ~ /googlevideo/) { p = s[i]; break }
+            if (p == "") p = s[nc + 1]
+            k = split(p, t, " "); o = ""
+            for (j = 1; j <= k; j++) if (t[j] !~ /^--(filter-|hostlist|ipset|name=)/) o = o (o == "" ? "" : " ") t[j]
+            if (o !~ /^--payload=/) o = "--payload=tls_client_hello " o
+            print o
+        }'
+}
 zapret2_args() {
     local L="$ZAPRET2_DIR/lua" B="$ZAPRET2_DIR/blobs" S="$ZAPRET2_DIR/lists" ex="" us="" f base custom udp quic tcp tcpt extra ipset P=""
     grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
@@ -713,6 +730,13 @@ zapret2_args() {
     ipset="--ipset=$S/ipset.list --ipset-exclude=$S/ipset_exclude.list --ipset-ip=0.0.0.0"
     # профили — через --new; пустой (у стратегии нет UDP или QUIC) пропускаем
     _z2p() { [ -n "$1" ] && P="${P:+$P --new }$1"; }
+    # Малое окно молчащим стойкам (YT_WSSIZE_RAMP, yt_ramp_hit) — первым: профиль по адресу выбирается на
+    # SYN, а без фильтров протокола и имени он же остаётся за соединением при пересмотре (протокол, имя).
+    # В файле всегда есть 0.0.0.0/32: пустой список у nfqws2 — «любой адрес»
+    if [ "$YT_WSSIZE_RAMP" = "1" ] && [ "$YT_DEAD_FAILFAST" = "1" ]; then
+        grep -q '^0\.0\.0\.0/32$' "$YT_RAMP_RUN" 2>/dev/null || echo 0.0.0.0/32 >> "$YT_RAMP_RUN"
+        _z2p "--filter-tcp=443 --ipset=$YT_RAMP_RUN --out-range=a --payload=all --lua-desync=vt_wssize_ramp:wsize=1:scale=1 $(zapret2_ramp_techs "$custom" "$tcpt")"
+    fi
     # DoH через обход (DNS_VIA_ZAPRET): как у nfqws1 — свои профили первыми, подделка с md5 и разрез
     # по середине имени; «как есть» (ZAPRET_DOH_ASIS) — пустой профиль
     local dt dn di dpp dx dd
@@ -755,7 +779,13 @@ zapret2_args() {
     [ -n "$ruh" ] && _z2p "$(zapret2_add "$tcp" "$ruh")"
     _z2p "$(zapret2_add "$tcp" "$extra")"
     [ "$ZAPRET_MODE" = "all" ] && _z2p "$(zapret2_add "$tcpt" "--hostlist-exclude=$S/exclude.list $rux")"
-    echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $base $P" | tr '\n' ' ' | tr -s ' ' | zapret2_fool
+    # малое окно: настоящий масштаб окна соединения vt_wssize_ramp держит в conntrack nfqws2, а тот по
+    # умолчанию забывает соединение через 300 с без пакетов (60:300:60:60) — пул YouTube простаивает
+    # дольше, и после простоя сервер видел бы окно в ~128 раз меньше. Закрытые уходят по FIN/RST (их
+    # пакеты в очереди всегда), так что час держат только живые
+    local ct=""
+    [ "$YT_WSSIZE_RAMP" = "1" ] && [ "$YT_DEAD_FAILFAST" = "1" ] && ct="--ctrack-timeouts=60:3600:60:60"
+    echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $ct $base $P" | tr '\n' ' ' | tr -s ' ' | zapret2_fool
 }
 # Название стратегии и автор (meta.tsv) — для журнала и WebUI
 zapret2_strat_label() {
@@ -780,6 +810,12 @@ zapret2_rules() {   # таблица: правила очереди nfqws2 в у
     local t="$1" q="-j NFQUEUE --queue-num $ZAPRET_QNUM --queue-bypass"
     local co="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:$ZAPRET2_PKT"
     local ci="-m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:$ZAPRET2_PKT"
+    # молчащие стойки (YT_WSSIZE_RAMP) — все исходящие пакеты, раньше правил с connbytes; только IPv4
+    if [ "$t" = "$iptables" ]; then
+        yt_ramp_on && yt_ramp_sync "$(date +%s)"
+        yt_ramp_chain
+        yt_ramp_on && $t -t mangle -A "$CHAIN_ZAPRET" -p tcp --dport 443 -j "$CHAIN_YT_RAMP" 2>/dev/null
+    fi
     # shellcheck disable=SC2086
     zapret2_rule "$t" "$CHAIN_ZAPRET" udp dports "$ZAPRET2_UP" "" $co $q
     # shellcheck disable=SC2086
@@ -962,6 +998,7 @@ zapret_start() {
         ZAPRET_ENGINE_RUN="$ZAPRET_ENGINE_EFF"
         if [ "$ZAPRET_ENGINE_EFF" = nfqws2 ]; then
             ZAPRET_ALT_N=$(zapret_alt_count "$1")
+            yt_ramp_on && yt_ramp_kill
             log "zapret: nfqws2 запущен (pid $pid, стратегия $(zapret2_strat_label)$([ "$ZAPRET_ALT_N" -gt 0 ] && echo ", своя стратегия у $ZAPRET_ALT_N сайтов"), $([ "$ZAPRET_MODE" = all ] && echo "TLS всех сайтов, кроме .ru и Google не из списков; QUIC и HTTP — по спискам" || echo "свои списки и автосписок"))"
             return 0
         fi
@@ -1164,6 +1201,7 @@ zapret_rules_off() {
         $t -t mangle -F "$CHAIN_ZAPRET" 2>/dev/null;    $t -t mangle -X "$CHAIN_ZAPRET" 2>/dev/null
         $t -t mangle -F "$CHAIN_ZAPRET_IN" 2>/dev/null; $t -t mangle -X "$CHAIN_ZAPRET_IN" 2>/dev/null
         $t -F "$CHAIN_ZAPRET_QUIC" 2>/dev/null;         $t -X "$CHAIN_ZAPRET_QUIC" 2>/dev/null
+        $t -t mangle -F "$CHAIN_YT_RAMP" 2>/dev/null;   $t -t mangle -X "$CHAIN_YT_RAMP" 2>/dev/null
         zapret_qf_off "$t"
     done
     ZAPRET_QF_ON=0

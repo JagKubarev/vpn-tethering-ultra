@@ -104,6 +104,7 @@ update_status() {
         echo "yt_dead=$([ "$YT_DEAD_STATE" = on ] && echo on || echo off)"
         # сколько застрявших видеосоединений порвано (yt_retry_hits) и запросов без ответа
         [ "$YT_DEAD_STATE" = on ] && echo "yt_retry_kills=$YT_RETRY_KILLS" && echo "yt_retry_rsts=$YT_RETRY_RSTS" && echo "yt_req_kills=$YT_REQ_KILLS"
+        yt_ramp_on && echo "yt_ramp=$YT_RAMP_N"
         echo "zwd=$ZAPRET_WATCHDOG"
         echo "stealth=$([ "$STEALTH_STATE" = on ] && echo on || echo off)"
         echo "stealth_strict=$TETHER_TTL_STRICT"

@@ -899,6 +899,13 @@ YT_RETRY_WIN=60
 # запрос клиент повторит через RTO, и живой сервер подтвердит позже. 1 с пробовали 15.11 — вернули 2
 YT_REQ_AFTER=2
 YT_REQ_KILLS=0          # порвано таких (status: yt_req_kills)
+# Малое окно для молчащих стоек (только nfqws2, нужен YT_DEAD_FAILFAST). ТСПУ режет TLS с части адресов
+# Google по началу ответа сервера, но читает его лишь в пределах окна клиента (вики zapret, 10.2026).
+# Видеосервер (googlevideo.com), дважды за YT_RETRY_WIN принявший ClientHello и замолчавший, — его стойка (/28) на 12 ч в
+# список сети (YT_RAMP_FILE): её соединениям nfqws2 занижает окно до первых байт ответа (vt_wssize_ramp
+# в zapret2/lua/vpn-tether.lua), дальше окно обычное, но не больше 128 КБ. Стенд 15.11 (YOTA, 17 молчащих
+# стоек × 2): 34 из 34 против 19–28, TLS 0,84 с против 0,37, скорость до ~5 Мбит/с на соединение
+YT_WSSIZE_RAMP=1
 # Порог «ClientHello без ответа» — 1 с (у отбоя было 2): ложный разрыв стоит одного соединения;
 # сервер отвечает за 0,3–0,5 с. С RTT — 6×RTT, если больше.
 # Круг демона — 2–3 с (замер 14.11), поэтому при повторе соединения смотрятся и посередине паузы
@@ -1042,7 +1049,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         DNS_VIA_ZAPRET|ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_QUIC_FAKE|QUIC_BLOCK_YT|QUIC_YT_FAKE|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|ZAPRET_AUTOPICK|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
+        OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|YT_WSSIZE_RAMP|ZAPRET_WATCHDOG|ZAPRET_AUTOPICK|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
@@ -1121,7 +1128,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS DNS_VIA_ZAPRET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_RETRY_MAX ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS DNS_VIA_ZAPRET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_WSSIZE_RAMP YT_RETRY_MAX ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 # Убранные ключи: в старом конфиге — молча мимо, без «неизвестный ключ» (15.11)
 CONF_RETIRED="YT_DEAD_WARP YT_SLOW_RETRY"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
@@ -1534,6 +1541,12 @@ YT_DEAD_STATE=""        # "" | on | fail
 YT_DEAD_MODE=""         # retry, пока повтор включён (yt_dead_on)
 YT_RETRY_CNT=""         # "адрес провалов время" по строке — счёт повторов (yt_retry_hits)
 YT_RETRY_KILLS=0        # порвано застрявших соединений телефона (status: yt_retry_kills)
+CHAIN_YT_RAMP="VPN_YT_RAMP"     # mangle: все исходящие пакеты к стойкам малого окна — в nfqws2 (YT_WSSIZE_RAMP)
+YT_RAMP_FILE="/data/adb/vpn_tether_ytramp"         # "сеть|стойка/28|epoch" — молчащие стойки по сетям, 12 ч, до 128 на сеть
+YT_RAMP_RUN="/data/local/tmp/vpn_tether_ytramp.list"   # стойки текущей сети для --ipset nfqws2 (всегда есть 0.0.0.0/32)
+YT_RAMP_DEAD=""         # "адрес время" — первое молчание адреса (yt_ramp_hit)
+YT_RAMP_BAD=""          # стойки списка, которым малое окно не помогает (уже в журнале)
+YT_RAMP_KEY="-"; YT_RAMP_TS=0; YT_RAMP_N=0
 YT_RETRY_ESC=0          # за круг: адресов, которым не помогли повторы (сигнал сторожу)
 YT_RETRY_RJ=""          # раздача: "до_когда клиент порт сервер" — правила RST в CHAIN_YT_RST
 YT_RETRY_RSTS=0         # поставлено таких правил (status: yt_retry_rsts)
