@@ -101,16 +101,9 @@ update_status() {
         echo "dns_degraded=$DNS_DEGRADED"
         echo "dns_alt=$([ -n "$DNS_ALT_UPS" ] && echo 1 || echo 0)"
         echo "ggc=$([ -n "$GGC_STATE" ] && echo on || echo off)"
-        echo "yt_dead=$([ "$YT_DEAD_STATE" = on ] && cat "$YT_DEAD_FILE" 2>/dev/null | awk 'END {print NR}' || echo off)"
-        echo "yt_dead_hits=$(yt_dead_hits)"
-        if [ -n "$YT_SLOW_PID" ]; then
-            echo "yt_slow=$(sed -n 's/^state=//p' "$YT_SLOW_STAT" 2>/dev/null || echo on)"
-            echo "yt_slow_kills=$(sed -n 's/^kills=//p' "$YT_SLOW_STAT" 2>/dev/null)"
-            echo "yt_slow_fast=$(sed -n 's/^fast=//p' "$YT_SLOW_STAT" 2>/dev/null)"
-            echo "yt_slow_degr=$(sed -n 's/^degr=//p' "$YT_SLOW_STAT" 2>/dev/null)"
-        else
-            echo "yt_slow=off"
-        fi
+        echo "yt_dead=$([ "$YT_DEAD_STATE" = on ] && echo on || echo off)"
+        # сколько застрявших видеосоединений порвано (yt_retry_hits) и запросов без ответа
+        [ "$YT_DEAD_STATE" = on ] && echo "yt_retry_kills=$YT_RETRY_KILLS" && echo "yt_retry_rsts=$YT_RETRY_RSTS" && echo "yt_req_kills=$YT_REQ_KILLS"
         echo "zwd=$ZAPRET_WATCHDOG"
         echo "stealth=$([ "$STEALTH_STATE" = on ] && echo on || echo off)"
         echo "stealth_strict=$TETHER_TTL_STRICT"

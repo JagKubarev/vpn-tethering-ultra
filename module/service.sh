@@ -809,7 +809,7 @@ DNS_PROBE_TIMEOUT=4    # сек: столько ждём ответ вообще
 QUIC_BLOCK_APPS=""   # пример: "com.avito.android"
 # Клиенты YouTube (системный, Music, ReVanced, Morphe, NewPipe… — список в
 # lib/zapret.sh) — без QUIC, если установлены, вдобавок к QUIC_BLOCK_APPS.
-# Отбой мёртвых серверов и обрыв медленных видеосоединений видят только TCP
+# Повтор застрявших видеосоединений видит только TCP
 # (и только при ZAPRET_PHONE=1 мимо VPN; через VPN — просто TCP в туннеле);
 # 28.10 с закрытым QUIC YouTube на YOTA грузил бодрее (на глаз, замер не
 # показал: у AdGuard свой REJECT UDP 443 для фильтруемых приложений)
@@ -872,38 +872,44 @@ ZAPRET_QUIC_FAKE=1
 # и на сервер Google не уходил — 20.10 дома за час 384 отказа, часть роликов
 # не открывалась вовсе. Включать, только если у плеера есть серверы Google.
 YT_GGC_BLOCK=0
-# Мёртвые видеосерверы YouTube (3.0). 21.10, YOTA: часть серверов Google
-# (sn-4g5…) не отвечает вовсе — сервер подтверждает ClientHello, но не шлёт
-# ни байта; плеер ждёт ~27с. Демон видит такие соединения с googlevideo.com
-# (conntrack) и на YT_DEAD_TTL сек отбивает их (RST: адрес /32, второй в той же
-# /28 — её целиком) — плеер сразу идёт на другой сервер. Только мимо VPN и пока zapret включён, только IPv4.
-# 3.17: то же для серверов загрузок Play Маркета (gvt1.com, те же кластеры
-# sn-4g5…: Play ждёт молчащий сервер бесконечно, после RST берёт другой) и
-# «молчит после запроса»: рукопожатие было, а на запрос ни байта — такой
-# адрес сначала проверяется (как при снятии отбоя) и отбивается, только если
-# проверка не прошла.
+# Застрявшие видеосоединения YouTube (3.0; с 15.11 — только повтор). 21.10, YOTA: часть серверов
+# Google не отвечает вовсе — подтверждает ClientHello, но не шлёт ни байта; плеер ждёт ~27 с.
+# Демон видит такие соединения с googlevideo.com (conntrack) и рвёт их — приложение сразу
+# открывает новое. Отбой (RST адресу на 30 мин, перепроверка, проверка молчащих, QUIC, Play
+# Маркет) убран 15.11 вместе с WARP для видео: в фоне он оставлял плеер на закрытом сервере.
+# Только мимо VPN и пока zapret включён, только IPv4.
 YT_DEAD_FAILFAST=1
-# Адрес из отбоя вести через WARP, если туннель поднят и адрес там отвечает: плеер остаётся
-# на своём сервере и не ищет запасной. Нет WARP или адрес молчит и там — обычный отказ
-YT_DEAD_WARP=1
+# Видеосерверы в WARP (YT_DEAD_WARP) и обрыв медленных (YT_SLOW_RETRY, zapret/ytslow.sh) убраны 15.11:
+# с хорошей стратегией и разрывом молчащих без них лучше (YOTA: шортсы за 3–5 с), а отлаживать проще.
+# Ключи в старом конфиге демон молча пропускает (CONF_RETIRED)
+# Повтор (оба движка). Застрявшее видеосоединение (ClientHello без ответа или сервер
+# принял его и молчит) рвём, приложение сразу открывает новое: DPI на пути пропускает обход не
+# каждый раз, а внутри старого соединения повтор не поможет — ядро шлёт тот же ClientHello в поток,
+# который DPI уже закрыл. 14.11 YOTA, hardcorp74, по 10–12 проб: с 1-й попытки 28/40, за 2 — 35/40;
+# худший сервер за 1…5 попыток — 6, 9, 10, 11, 12 из 12. YT_RETRY_MAX провалов адреса за
+# YT_RETRY_WIN с, пока видео нигде не идёт, — сигнал сторожу (сломалась стратегия)
+YT_RETRY_MAX=4          # 1–7
+YT_RETRY_WIN=60
+# Видеосоединение YouTube, где клиент отправил запрос после последних данных сервера, а за
+# YT_REQ_AFTER с от сервера ни пакета, даже ACK: у телефона напрямую — рвём (ss -K), плеер откроет
+# новое, как при «перелистнул и вернулся». 15.11: 16 таких за 7 мин шортсов, повторов ClientHello — 0;
+# зависание в 12:49:45 — запрос ~12 КБ к фронту 173.194.165.4. Раздаче — RST на повтор запроса
+# (CHAIN_YT_RST), порог на 1 с меньше (не ниже 1); WARP — только журнал (0 — выключено). Было 3:
+# живой сервер подтверждает за RTT (0,1–0,2 с). Порог не меньше 8×RTT (yt_dead_scan): потерянный
+# запрос клиент повторит через RTO, и живой сервер подтвердит позже. 1 с пробовали 15.11 — вернули 2
+YT_REQ_AFTER=2
+YT_REQ_KILLS=0          # порвано таких (status: yt_req_kills)
+# Порог «ClientHello без ответа» — 1 с (у отбоя было 2): ложный разрыв стоит одного соединения;
+# сервер отвечает за 0,3–0,5 с. С RTT — 6×RTT, если больше.
+# Круг демона — 2–3 с (замер 14.11), поэтому при повторе соединения смотрятся и посередине паузы
+# (monitor_loop): иначе застрявшее замечалось бы только через круг, и порог 1 с ничего не менял.
+# «Принял ClientHello и молчит» при повторе — прежние YT_DEAD_AFTER (3 с): с 2 с A/B 14.11 —
+# не начались 16 из 80 шортсов против 12, рвётся на треть больше
+YT_RETRY_AFTER=1
 YT_DEAD_AFTER=3         # сек без ответа сервера после ClientHello = мёртв (было 6; ответ на CH — 0,3–0,5 с)
-YT_STUCK_AFTER=2        # сек без подтверждения ClientHello (от сервера только SYN-ACK) = отбой сразу
-YT_RECHECK_EVERY=300    # сек между кругами перепроверки отбитых (было ~60: прямой TLS в закрытые узлы)
-YT_RECHECK_TS=0
-YT_RTT_TS=0; YT_RTT_MS=""; YT_SA_LAST=""; YT_RTT_LOG_TS=0   # RTT канала для порогов отбоя (yt_dead_scan)
-YT_DATA_TS=0            # когда в последний раз видеосервер слал данные (отбой застрявших — только при живом видео)
+YT_RTT_TS=0; YT_RTT_MS=""; YT_SA_LAST=""; YT_RTT_LOG_TS=0   # RTT канала для порогов повтора (yt_dead_scan)
+YT_DATA_TS=0            # когда в последний раз видеосервер слал данные (сигнал сторожу — только без живого видео)
 YT_DATA_SUM=0           # байт от видеосерверов на прошлом круге (данные = прирост)
-YT_QUIC_AFTER=2         # сек без единого ответа на QUIC Initial (обычно 0.1–0.5 с, 06.11)
-YT_SILENT_AFTER=10      # сек без новых байт после рукопожатия = молчит (-> проверка)
-YT_DEAD_TTL=1800        # сек держать сервер/подсеть в отбое (ожил раньше — снимаем перепроверкой)
-YT_DEAD_MAX=64          # больше записей не держим
-# 03.11 18:49 (YOTA, шортсы): за 2,5 мин 18 разных молчащих видеосерверов, список
-# в 16 был полон — новые не отбивались, и плеер висел на них. Было 600 с и 16
-# Обрыв медленных видеосоединений (3.7): ТСПУ режет большую часть
-# соединений с Google до ~1 Мбит/с, но не все. Медленное молодое соединение
-# с видеосервером рвём — плеер переподключается и иногда попадает на быстрое.
-# Работает вместе с отбоем мёртвых серверов (их пометка соединений).
-YT_SLOW_RETRY=1
 # Сторож обхода (3.0): раз в ZAPRET_WATCHDOG_MIN минут (и сразу, если
 # видео-соединения стали застревать на ClientHello) zapret/scan.sh check
 # проверяет стратегию сети; сломалась — прежние рабочие, затем быстрый
@@ -1036,7 +1042,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         DNS_VIA_ZAPRET|ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_QUIC_FAKE|QUIC_BLOCK_YT|QUIC_YT_FAKE|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|YT_DEAD_WARP|ZAPRET_WATCHDOG|ZAPRET_AUTOPICK|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|YT_SLOW_RETRY|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
+        OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|ZAPRET_WATCHDOG|ZAPRET_AUTOPICK|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
@@ -1044,6 +1050,8 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 30 ] && [ "$val" -le 1440 ] || ok=0 ;; esac ;;
         ZAPRET_AUTO_FAIL)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 2 ] && [ "$val" -le 10 ] || ok=0 ;; esac ;;
+        YT_RETRY_MAX)
+            case "$val" in [1-7]) ;; *) ok=0 ;; esac ;;
         ZAPRET_MODE)     case "$val" in list|all) ;; *) ok=0 ;; esac ;;
         ZAPRET_ENGINE)   case "$val" in nfqws1|nfqws2) ;; *) ok=0 ;; esac ;;
         ZAPRET2_STRATEGY) case "$val" in ''|*[!A-Za-z0-9_]*) ok=0 ;; esac
@@ -1107,13 +1115,15 @@ load_user_conf() {
         [ -n "$key" ] || continue
         case " $CONF_KEYS " in
             *" $key "*) _conf_set "$key" "$val" ;;
-            *) USER_CONF_NOTE="$USER_CONF_NOTE ?$key(неизвестный ключ)" ;;
+            *) case " $CONF_RETIRED " in *" $key "*) ;; *) USER_CONF_NOTE="$USER_CONF_NOTE ?$key(неизвестный ключ)" ;; esac ;;
         esac
     done < "$USER_CONF"
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS DNS_VIA_ZAPRET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_DEAD_WARP ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN YT_SLOW_RETRY ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS DNS_VIA_ZAPRET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_RETRY_MAX ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
+# Убранные ключи: в старом конфиге — молча мимо, без «неизвестный ключ» (15.11)
+CONF_RETIRED="YT_DEAD_WARP YT_SLOW_RETRY"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
 # ключ, убранный из файла, должен вернуться к умолчанию, а не к старому.
 for _k in $CONF_KEYS; do eval "DEF_$_k=\"\$$_k\""; done
@@ -1139,6 +1149,7 @@ case "$1" in
         # процессом вместо --check на каждый ключ -> «OK|BAD|UNK КЛЮЧ»
         while IFS= read -r _l || [ -n "$_l" ]; do
             _k=${_l%%=*}
+            case " $CONF_RETIRED " in *" $_k "*) echo "OK $_k"; continue ;; esac   # убранные — молча
             case " $CONF_KEYS " in *" $_k "*) ;; *) echo "UNK $_k"; continue ;; esac
             USER_CONF_NOTE=""
             _conf_set "$_k" "${_l#*=}"
@@ -1508,39 +1519,24 @@ CHAIN_ZAPRET_GGC="VPN_ZAPRET_GGC"   # filter OUTPUT/FORWARD: YouTube мимо к
 # ClientHello; у постквантового ClientHello из двух сегментов имя может
 # оказаться во втором — поэтому 1:6, а не 1:1)
 GGC_MATCH="-p tcp --dport 443 -m connbytes --connbytes-dir original --connbytes-mode packets --connbytes 1:6 -m string --string googlevideo.com --algo bm"
-# то же для серверов загрузок Play Маркета (rr…---sn-….gvt1.com)
+# серверы загрузок Play Маркета (rr…---sn-….gvt1.com): только чтобы снять хуки отбоя прежних версий
 GVT_MATCH="-p tcp --dport 443 -m connbytes --connbytes-dir original --connbytes-mode packets --connbytes 1:6 -m string --string gvt1.com --algo bm"
 GGC_STATE=""            # что стоит: "" | v4 | v4+v6 (для лога)
-# Мёртвые видеосерверы (YT_DEAD_FAILFAST). Соединения с googlevideo.com
+# Застрявшие видеосоединения (YT_DEAD_FAILFAST). Соединения с googlevideo.com
 # помечаются битом connmark (у netd — младшие 0xfffff, этот бит не трогает),
-# демон ищет их в conntrack и отбивает мёртвые серверы (/32, второй — /28).
-CHAIN_YT_MARK="VPN_YT_MARK"     # mangle OUTPUT/FORWARD: пометить googlevideo.com
-CHAIN_YT_DEAD="VPN_YT_DEAD"     # filter OUTPUT/FORWARD: мёртвые подсети -> RST
+# демон ищет их в conntrack и рвёт застрявшие (повтор).
+CHAIN_YT_RST="VPN_YT_RST"       # filter FORWARD: RST одному застрявшему соединению раздачи
 YT_CTMARK=0x10000000
-YT_GCTMARK=0x04000000   # gvt1.com (Play): отбой мёртвых да, обрыв медленных (ytslow.sh) — нет
-YT_SILENT_MAX=16384     # молчит после запроса: от сервера не больше (рукопожатие ~5 КБ)
-YT_WARP_FILE="/data/local/tmp/vpn_tether_ytwarp"   # адреса из отбоя, ответившие через WARP
-YT_WARP_NEW=""          # адреса, чьи соединения закрыть, когда встанет маршрут в WARP
-YT_WARP_PEND=""         # очередь на пробу через WARP: адрес|кто|что|kill
-YT_WARP_SIG=""          # сети в цепочке VPN_WARP_YT
-YT_WARP_CH=0
-YT_WPROBE_PID=""
-YT_DEAD_FILE="/data/local/tmp/vpn_tether_ytdead"   # "адрес/32|сеть/28 до_когда(epoch) ip[,ip…]"
-YT_SEEN_FILE="/data/local/tmp/vpn_tether_ytseen"   # кандидаты: "кортеж впервые вид учтён байт_ответа когда_менялись"
-YT_SPROBE_FILE="/data/local/tmp/vpn_tether_ytsprobe"  # проверка молчащих: .in .done .ok
-YT_SPROBE_PID=""
-YT_PLAY_PEND=""         # Play «молчит на ClientHello»: «адрес playch» строками — ждут проверки адреса
+YT_HS_MAX=16384         # больше этого от сервера — уже видео, а не рукопожатие (~5 КБ): «видео идёт»
+YT_SEEN_FILE="/data/local/tmp/vpn_tether_ytseen"   # кандидаты: "кортеж впервые_вид вид учтён"; .req — «запрос без ответа»
 YT_GRANGES="/data/local/tmp/vpn_tether_ytgr"       # сети Google числами: "начало конец"
-YT_RECHECK_FILE="/data/local/tmp/vpn_tether_ytrecheck"  # фоновая перепроверка отбитых
-YT_RECHECK_PID=""
-YT_SLOW_PID=""          # zapret/ytslow.sh — обрыв медленных видеосоединений
-YT_SLOW_STAT="/data/local/tmp/vpn_tether_ytslow.stat"
-YT_DEAD_STATE=""        # "" | on
-YT_DEAD_SIG=""          # содержимое цепочки отбоя (чтобы не пересобирать зря)
-YT_DEAD_TICK=0
-YT_DEAD_ADDS=""         # время последних добавлений (защита от лавины)
-YT_DEAD_PAUSE=0         # до какого времени не добавлять (лавина = сломан обход/связь)
-YT_DEAD_FULL_LOG=0      # когда последний раз писали «список отбоя полон»
+YT_DEAD_STATE=""        # "" | on | fail
+YT_DEAD_MODE=""         # retry, пока повтор включён (yt_dead_on)
+YT_RETRY_CNT=""         # "адрес провалов время" по строке — счёт повторов (yt_retry_hits)
+YT_RETRY_KILLS=0        # порвано застрявших соединений телефона (status: yt_retry_kills)
+YT_RETRY_ESC=0          # за круг: адресов, которым не помогли повторы (сигнал сторожу)
+YT_RETRY_RJ=""          # раздача: "до_когда клиент порт сервер" — правила RST в CHAIN_YT_RST
+YT_RETRY_RSTS=0         # поставлено таких правил (status: yt_retry_rsts)
 YT_STUCK=""             # время соединений, застрявших на ClientHello (для сторожа)
 ZWD_LAST=0              # когда последний раз запускали сторож
 ZWD_EVENTS="/data/adb/vpn_tether_zapret_events"
@@ -1708,7 +1704,7 @@ fi
 # post-fs-data.sh написал «запускается»; без статуса в описании — вернуть обычное
 [ "$STATUS_IN_DESCRIPTION" = "1" ] || set_description "$MODULE_DESC_DEFAULT"
 [ -f "$USER_CONF" ] && log "Настройки из $USER_CONF:${USER_CONF_NOTE:- (ничего не задано)}"
-log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}]/yt=$QUIC_BLOCK_YT/fake=$QUIC_YT_FAKE ZAPRET=$ZAPRET_ENABLE/$ZAPRET_ENGINE/$ZAPRET_MODE/$([ "$ZAPRET_ENGINE" = nfqws2 ] && echo "$ZAPRET2_STRATEGY" || echo "$ZAPRET_STRATEGY")/per_net=$ZAPRET_PER_NET YT_DEAD=$YT_DEAD_FAILFAST YT_SLOW=$YT_SLOW_RETRY WATCHDOG=$ZAPRET_WATCHDOG/${ZAPRET_WATCHDOG_MIN}m META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
+log "Config: DNSPROXY=$DNSPROXY_ENABLE HW_OFFLOAD_OFF=$DISABLE_HW_OFFLOAD CT_FLUSH=$TARGETED_CT_FLUSH KILL_SWITCH=$KILL_SWITCH STRICT=$KILL_SWITCH_STRICT WATCHDOG=$RULE_WATCHDOG DNS_DIRECT=$DNS_DIRECT DNS_VPN=$DNS_VPN DNS_PHONE=$DNS_PHONE QUIC_BLOCK=[${QUIC_BLOCK_APPS}]/yt=$QUIC_BLOCK_YT/fake=$QUIC_YT_FAKE ZAPRET=$ZAPRET_ENABLE/$ZAPRET_ENGINE/$ZAPRET_MODE/$([ "$ZAPRET_ENGINE" = nfqws2 ] && echo "$ZAPRET2_STRATEGY" || echo "$ZAPRET_STRATEGY")/per_net=$ZAPRET_PER_NET YT_DEAD=$YT_DEAD_FAILFAST/retry=$YT_RETRY_MAX WATCHDOG=$ZAPRET_WATCHDOG/${ZAPRET_WATCHDOG_MIN}m META_EU=$DNS_META_EU/$DNS_META_ECS HEALTH=${DNS_HEALTH_INTERVAL}/${DNS_HEALTH_RECOVER}s ct_bin=${CONNTRACK_BIN:-none} dnsproxy=${DNSPROXY_BIN:-none}"
 
 disable_hw_offload
 stealth_apply

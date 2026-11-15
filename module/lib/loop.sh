@@ -208,7 +208,7 @@ CONF_GRP_STEALTH="TETHER_STEALTH TETHER_TTL_STRICT"
 CONF_GRP_WARP="WARP_ENABLE WARP_CONF"
 CONF_GRP_OPERA="OPERA_ENABLE OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 CONF_GRP_WARPR="WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER"
-CONF_GRP_ZAPRET="DNS_VIA_ZAPRET ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET_MODE ZAPRET_PHONE ZAPRET_EXCL_APPS ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_PER_NET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_DEAD_WARP"
+CONF_GRP_ZAPRET="DNS_VIA_ZAPRET ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET_MODE ZAPRET_PHONE ZAPRET_EXCL_APPS ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_PER_NET YT_GGC_BLOCK YT_DEAD_FAILFAST"
 _conf_grp_sig() {   # $1 = имя переменной-результата, дальше ключи
     local _v="$1" _k _o=""; shift
     for _k in "$@"; do eval "_o=\"\$_o|\$$_k\""; done
@@ -364,8 +364,20 @@ monitor_loop() {
         # sleep в фоне + wait: wait прерывается сигналом, и тоггл
         # обрабатывается сразу, а не после окончания sleep
         if [ "$USR1_PENDING" -eq 0 ]; then
-            sleep 2 &
-            wait $! 2>/dev/null
+            if [ "$YT_DEAD_MODE" = retry ]; then
+                # nfqws2 (повтор, YT_RETRY_AFTER): посередине паузы — ещё один просмотр
+                # видеосоединений: круг 2–3 с, и застрявшее иначе ждало бы его целиком
+                sleep 1 &
+                wait $! 2>/dev/null
+                [ "$USR1_PENDING" -eq 0 ] && yt_dead_scan
+                if [ "$USR1_PENDING" -eq 0 ]; then
+                    sleep 1 &
+                    wait $! 2>/dev/null
+                fi
+            else
+                sleep 2 &
+                wait $! 2>/dev/null
+            fi
         fi
         handle_change || log "ERROR: handle_change failed, continuing anyway"
         # отдельно от handle_change: тот рано выходит, когда хотспот выключен
@@ -394,8 +406,6 @@ monitor_loop() {
         # каждый круг (~2 с): раз в 2 круга к порогу YT_DEAD_AFTER добавлялось
         # до ~4 с ожидания плеера на каждом мёртвом узле
         yt_dead_scan
-        [ $((_loop_count % 30)) -eq 17 ] && yt_dead_recheck
-        [ $((_loop_count % 5)) -eq 4 ] && yt_slow_reconcile
         zapret_watchdog
         zapret_sites_check
         warp_reconcile

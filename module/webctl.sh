@@ -148,10 +148,6 @@ case "$1" in
         sed -n 's/^version=/module_version=/p' "$MODDIR/module.prop"
         # строки 1-2 — старый формат, страница читает только КЛЮЧ=значение
         sed '1,2d' "$STATUS_FILE" 2>/dev/null
-        # счётчики обрыва медленных видео — свежие (статус демон пишет только при событиях)
-        if ! grep -q '^yt_slow=off' "$STATUS_FILE" 2>/dev/null && [ -f /data/local/tmp/vpn_tether_ytslow.stat ]; then
-            sed -n 's/^state=/yt_slow=/p; s/^kills=/yt_slow_kills=/p; s/^fast=/yt_slow_fast=/p; s/^degr=/yt_slow_degr=/p' /data/local/tmp/vpn_tether_ytslow.stat
-        fi
         # итог последней проверки сторожа (пишет zapret/scan.sh check)
         w=$(head -n 1 "$ZSCAN.wd" 2>/dev/null | tr -d '\r')
         [ -n "$w" ] && echo "zwd_last=$w"
@@ -682,15 +678,24 @@ case "$1" in
         wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
         [ -n "$wan" ] || { echo "ERR не знаю интерфейс оператора — модуль ещё не видел сеть"; exit 1; }
         ip -4 addr show "$wan" 2>/dev/null | grep -q "inet " || { echo "ERR у $wan нет адреса — сеть только что сменилась? Повторите через полминуты"; exit 1; }
-        case "$(uname -m)" in aarch64|arm64) nq="$MODDIR/bin/nfqws-arm64" ;; *) nq="$MODDIR/bin/nfqws-arm" ;; esac
-        [ -x "$nq" ] || { echo "ERR нет nfqws"; exit 1; }
+        # движок — тот, что работает (статус демона): у nfqws2 своя стратегия сети, а мерить nfqws1
+        # с его стратегией значило показывать скорость того, что сейчас не используется (15.11)
+        eng=$(sed -n 's/^zapret_engine=//p' "$STATUS_FILE" 2>/dev/null)
+        if [ "$eng" = nfqws2 ]; then
+            case "$(uname -m)" in aarch64|arm64) nq="$MODDIR/bin/nfqws2-arm64" ;; *) nq="$MODDIR/bin/nfqws2-arm" ;; esac
+        else
+            case "$(uname -m)" in aarch64|arm64) nq="$MODDIR/bin/nfqws-arm64" ;; *) nq="$MODDIR/bin/nfqws-arm" ;; esac
+        fi
+        [ -x "$nq" ] || { echo "ERR нет $([ "$eng" = nfqws2 ] && echo nfqws2 || echo nfqws)"; exit 1; }
         CA=/apex/com.android.conscrypt/cacerts
         [ -d "$CA" ] || CA=/system/etc/security/cacerts
         Q=202
         RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
+        RULE_IN=""
         yt_cleanup() {
             [ -n "$nqpid" ] && kill "$nqpid" 2>/dev/null
             iptables -w 2 -t mangle -D POSTROUTING $RULE_NFQ 2>/dev/null
+            [ -n "$RULE_IN" ] && iptables -w 2 -t mangle -D PREROUTING $RULE_IN 2>/dev/null
             iptables -w 2 -t mangle -D VPN_ZAPRET -m owner --uid-owner 0 -j RETURN 2>/dev/null
             iptables -w 2 -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
         }
@@ -712,9 +717,28 @@ case "$1" in
         echo "direct $(yt_one)"
         iptables -w 2 -t mangle -I POSTROUTING 1 $RULE_NFQ
         nk=$(cur_net); nl=${nk#*"|"}; nk=${nk%%"|"*}
-        "$nq" --qnum=$Q --uid=0:3998 --bind-fix4 $(sh "$MODDIR/service.sh" --zapret-strategy "$nk" "$nl" yt) >/dev/null 2>&1 &
-        nqpid=$!
-        sleep 0.7
+        if [ "$eng" = nfqws2 ]; then
+            # стратегия сети и сборка — как у подбора (zapret2_scan_args: её основа, свои профили — у _gv
+            # профиль googlevideo — и TCP); ответы — в ту же очередь: по SYN-ACK nfqws2 считает autottl
+            s2=$(sh "$MODDIR/service.sh" --zapret2-strategy "$nk" "$nl" 2>/dev/null)
+            [ -n "$s2" ] && [ -f "$MODDIR/zapret2/strategies/$s2.conf" ] || { echo "ERR не знаю стратегию nfqws2 этой сети"; exit 1; }
+            echo "strat $s2"
+            a2=$(ZAPRET2_DIR="$MODDIR/zapret2"; . "$MODDIR/lib/zapret.sh"; zapret2_scan_args "$s2" "$Q")
+            RULE_IN="-i $wan -s $ip -p tcp --sport 443 -m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3 -j NFQUEUE --queue-num $Q --queue-bypass"
+            [ -n "$CB_OUT" ] || RULE_IN="-i $wan -s $ip -p tcp --sport 443 --tcp-flags SYN,ACK SYN,ACK -j NFQUEUE --queue-num $Q --queue-bypass"
+            iptables -w 2 -t mangle -I PREROUTING 1 $RULE_IN
+            set -f
+            "$nq" $a2 > /data/local/tmp/vpn_tether_ytspeed.log 2>&1 &
+            nqpid=$!
+            set +f
+            # Lua и подделки грузятся дольше nfqws1: до привязки к очереди пакеты шли бы мимо (--queue-bypass)
+            i=0
+            while [ $i -lt 30 ] && kill -0 "$nqpid" 2>/dev/null && ! grep -q 'copy_packet' /data/local/tmp/vpn_tether_ytspeed.log 2>/dev/null; do sleep 0.1; i=$((i + 1)); done
+        else
+            "$nq" --qnum=$Q --uid=0:3998 --bind-fix4 $(sh "$MODDIR/service.sh" --zapret-strategy "$nk" "$nl" yt) >/dev/null 2>&1 &
+            nqpid=$!
+            sleep 0.7
+        fi
         if kill -0 "$nqpid" 2>/dev/null; then echo "zapret $(yt_one)"; else echo "zapret 000 0 nfqws"; fi
         ;;
 

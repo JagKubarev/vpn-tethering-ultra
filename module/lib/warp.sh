@@ -660,7 +660,6 @@ CHAIN_WARP_OUT="VPN_WARP_OUT"     # mangle OUTPUT
 CHAIN_WARP_PRE="VPN_WARP_PRE"     # mangle PREROUTING
 CHAIN_WARP_DST="VPN_WARP_DST"     # адреса групп -> VPN_WARP_SET
 CHAIN_WARP_SET="VPN_WARP_SET"     # connmark + fwmark
-CHAIN_WARP_YT="VPN_WARP_YT"       # видеосерверы из отбоя (yt_warp_sync) -> VPN_WARP_SET
 CHAIN_WARP_NAT="VPN_WARP_NAT"     # nat POSTROUTING
 CHAIN_WARP_FWD="VPN_WARP_FWD"     # filter FORWARD
 CHAIN_WARP_V6="VPN_WARP_V6"       # filter OUTPUT (v6): отбить
@@ -803,8 +802,8 @@ warp_kill_sockets() {   # причина [сети — по умолчанию �
 }
 
 # Через туннель идёт видео YouTube: в conntrack есть установленные соединения с обеими
-# метками — видео (YT_CTMARK, googlevideo в ClientHello) и WARP. И адреса из отбоя
-# (YT_WARP_SIG), и группа Google (WARP_GOOGLE), и телефон, и раздача
+# метками — видео (YT_CTMARK, googlevideo в ClientHello) и WARP: группа Google (WARP_GOOGLE),
+# и телефон, и раздача
 warp_yt_busy() {
     local m
     [ -n "$CONNTRACK_BIN" ] || return 1
@@ -819,7 +818,8 @@ warp_routes_off() {   # [force] — снять, даже если по флаг�
     for t in "$iptables" "$ip6tables"; do
         _n=0; while [ $_n -lt 8 ] && $t -t mangle -D OUTPUT -j "$CHAIN_WARP_OUT" 2>/dev/null; do _n=$((_n + 1)); done
         _n=0; while [ $_n -lt 8 ] && $t -t mangle -D PREROUTING -j "$CHAIN_WARP_PRE" 2>/dev/null; do _n=$((_n + 1)); done
-        for c in "$CHAIN_WARP_OUT" "$CHAIN_WARP_PRE" "$CHAIN_WARP_DST" "$CHAIN_WARP_YT" "$CHAIN_WARP_SET"; do
+        # VPN_WARP_YT — видеосерверы в WARP до 15.11: после обновления без перезагрузки осталась бы сиротой
+        for c in "$CHAIN_WARP_OUT" "$CHAIN_WARP_PRE" "$CHAIN_WARP_DST" "$CHAIN_WARP_SET" VPN_WARP_YT; do
             $t -t mangle -F "$c" 2>/dev/null; $t -t mangle -X "$c" 2>/dev/null
         done
         $t -t mangle -D POSTROUTING -o $WARP_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $WARP_MSS 2>/dev/null
@@ -835,10 +835,9 @@ warp_routes_off() {   # [force] — снять, даже если по флаг�
     $ip6tables -F "$CHAIN_WARP_V6F" 2>/dev/null; $ip6tables -X "$CHAIN_WARP_V6F" 2>/dev/null
     if [ "$WARP_RT_ON" = "1" ]; then
         log "WARP: маршруты в туннель сняты"
-        # и видеосерверы, которые отбой YouTube сам вёл в WARP (YT_WARP_SIG): их
         # соединения после сноса туннеля идут мимо со старым NAT и молча висят до
-        # тайм-аута плеера. 08.11: переподключения из-за Telegram DC2/DC4 — 5 раз за 2 мин
-        warp_kill_sockets "туннель снят" "$(warp_dst4) $YT_WARP_SIG"
+        # тайм-аута приложения. 08.11: переподключения из-за Telegram DC2/DC4 — 5 раз за 2 мин
+        warp_kill_sockets "туннель снят" "$(warp_dst4)"
     fi
     WARP_RT_ON=0; WARP_RT_SIG=""
 }
@@ -848,7 +847,7 @@ warp_routes_apply() {   # ифейсы раздачи
     # mangle v4: адреса групп одним iptables-restore (~150 правил за раз)
     {
         echo "*mangle"
-        for c in "$CHAIN_WARP_OUT" "$CHAIN_WARP_PRE" "$CHAIN_WARP_DST" "$CHAIN_WARP_YT" "$CHAIN_WARP_SET"; do echo ":$c - [0:0]"; done
+        for c in "$CHAIN_WARP_OUT" "$CHAIN_WARP_PRE" "$CHAIN_WARP_DST" "$CHAIN_WARP_SET"; do echo ":$c - [0:0]"; done
         echo "-A $CHAIN_WARP_SET -j CONNMARK --set-xmark $WARP_MARK/$WARP_MARK"
         echo "-A $CHAIN_WARP_SET -j MARK --set-xmark $WARP_MARK/$WARP_MARK"
         warp_dst4 | while read -r m; do echo "-A $CHAIN_WARP_DST -d $m -j $CHAIN_WARP_SET"; done
@@ -865,11 +864,9 @@ warp_routes_apply() {   # ифейсы раздачи
         echo "-A $CHAIN_WARP_OUT -m owner --uid-owner 0-9999 -j RETURN"
         echo "-A $CHAIN_WARP_OUT -m conntrack ! --ctstate NEW -j RETURN"
         for u in $uids; do echo "-A $CHAIN_WARP_OUT -m owner --uid-owner $u -j $CHAIN_WARP_SET"; done
-        [ "$WARP_PHONE" = "1" ] && echo "-A $CHAIN_WARP_OUT -j $CHAIN_WARP_YT"
         [ "$WARP_PHONE" = "1" ] && echo "-A $CHAIN_WARP_OUT -j $CHAIN_WARP_DST"
         for i in $tif; do
             echo "-A $CHAIN_WARP_PRE -i $i -m connmark --mark $WARP_MARK/$WARP_MARK -j MARK --set-xmark $WARP_MARK/$WARP_MARK"
-            echo "-A $CHAIN_WARP_PRE -i $i -m conntrack --ctstate NEW -j $CHAIN_WARP_YT"
             echo "-A $CHAIN_WARP_PRE -i $i -m conntrack --ctstate NEW -j $CHAIN_WARP_DST"
         done
         echo "COMMIT"
@@ -929,7 +926,6 @@ warp_routes_apply() {   # ифейсы раздачи
     [ -n "$WARP_APPS" ] && what="$what приложения $WARP_APPS,"
     [ -n "$m$WARP_APPS" ] && what="$what uid ${uids:-не установлены},"
     WARP_RT_ON=1
-    YT_WARP_SIG=""; yt_warp_sync   # iptables-restore выше очистил цепочку
     log "WARP: в туннель —${what:- ничего,} $n4 сетей v4, v6 отбито: $n6; для:$([ "$WARP_PHONE" = 1 ] && echo ' телефона')${tif:+ раздачи [$tif]}"
 }
 

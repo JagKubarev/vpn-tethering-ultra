@@ -124,9 +124,6 @@ quic_block_apply() {
             $t -t mangle -A "$CHAIN_QUIC_FAKE" -o tun+ -j RETURN 2>/dev/null
             $t -t mangle -A "$CHAIN_QUIC_FAKE" -o warp+ -j RETURN 2>/dev/null
             for u in $fuids; do
-                # пометка для отбоя (yt_dead_scan): имени в QUIC не видно, а это точно YouTube
-                $t -t mangle -A "$CHAIN_QUIC_FAKE" -p udp --dport 443 -m owner --uid-owner "$u" \
-                    -j CONNMARK --set-xmark "$YT_CTMARK/$YT_CTMARK" 2>/dev/null
                 # shellcheck disable=SC2086
                 $t -t mangle -A "$CHAIN_QUIC_FAKE" -p udp --dport 443 -m owner --uid-owner "$u" $ZAPRET_CB_OUT \
                     -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
@@ -254,7 +251,7 @@ zapret_caps() {
         # только вариант с connbytes
         zapret_ggc_hooks_off "$iptables"; zapret_ggc_hooks_off "$ip6tables"; yt_dead_hooks_off
     fi
-    [ "$str" = 0 ] && log "WARNING: zapret: без string — «YouTube мимо кэшей оператора» и отбой мёртвых серверов недоступны"
+    [ "$str" = 0 ] && log "WARNING: zapret: без string — «YouTube мимо кэшей оператора» и повтор застрявших видеосоединений недоступны"
     return 0
 }
 # На части старых ядер (MT6580, 3.18) -m owner в POSTROUTING совпадает с любым
@@ -556,6 +553,22 @@ zapret2_fool() {
         print ""
     }'
 }
+# ip_autottl подделок — не дальше 5 хопов (для профиля кэшей оператора в zapret2_args)
+zapret2_ttlcap() {
+    awk '{
+        for (i = 1; i <= NF; i++) {
+            t = $i
+            if (t ~ /^--lua-desync=/ && match(t, /:ip_autottl=-?[0-9]+,[0-9]+-[0-9]+/)) {
+                s = RSTART; l = RLENGTH; a = substr(t, s, l)
+                match(a, /,[0-9]+-/); lo = substr(a, RSTART + 1, RLENGTH - 2) + 0
+                match(a, /-[0-9]+$/); hi = substr(a, RSTART + 1) + 0
+                if (hi > 5 && lo <= 5) t = substr(t, 1, s - 1) substr(a, 1, RSTART) "5" substr(t, s + l)
+            }
+            printf "%s%s", (i > 1 ? " " : ""), t
+        }
+        print ""
+    }'
+}
 zapret2_args() {
     local L="$ZAPRET2_DIR/lua" B="$ZAPRET2_DIR/blobs" S="$ZAPRET2_DIR/lists" ex="" us="" f base custom udp quic tcp tcpt extra ipset P=""
     grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
@@ -614,6 +627,20 @@ zapret2_args() {
         [ -n "$dn" ] && _z2p "--filter-tcp=$dpp --filter-l7=tls $ex --hostlist-domains=$dn $dd"
         [ -n "$di" ] && _z2p "--filter-tcp=$dpp --filter-l7=tls --ipset-ip=$di $dd"
     fi
+    # Кэши оператора (googlevideo.com на адрес вне сетей Google — YOTA 188.170.166.x) — своим профилем
+    # первым: те же приёмы TLS, но ip_autottl не дальше 5 хопов. Замер 14.11 (YOTA, TTL подделки 3…64):
+    # ТСПУ — между 5-м и 6-м хопом; кэш с подделкой, дошедшей до него, — 0 из 30 (autottl ставит 8:
+    # обратно 9 хопов), с TTL 3–5 — 17 из 18. Всем такой потолок нельзя: youtubei.googleapis.com с TTL
+    # до 5 — 0 из 18, приложение YouTube молчало. Только у стратегий с autottl в TCP и без своего
+    # профиля googlevideo (у hardcorp74 он кэш открывает и так — 10 из 10)
+    local ggc=""
+    case "$tcp" in *ip_autottl=*)
+        case "$custom" in *googlevideo*) ;; *)
+            ggc=$(echo "$tcpt" | zapret2_ttlcap)
+            ggc=$(zapret2_add "$ggc" "--hostlist-domains=googlevideo.com --ipset-exclude=$ZAPRET_DIR/google-ipv4.txt --ipset-exclude=$ZAPRET_DIR/google-ipv6.txt") ;;
+        esac ;;
+    esac
+    _z2p "$ggc"
     # порядок — как _startup_args: свои профили, UDP, QUIC (адреса, имена), TCP (адреса, имена);
     # .ru и Google из списков — между адресами и именами
     _z2p "$custom"
@@ -1242,13 +1269,13 @@ zapret_reconcile() {
            { [ "$ZAPRET_QF_ON" = "1" ] && ! $iptables -t mangle -C POSTROUTING -p udp --dport 443 -j "$CHAIN_ZAPRET_QF" 2>/dev/null; } || \
            { [ "$ZAPRET_QF_ON" != "1" ] && [ "$ZAPRET_QUIC_BLOCK" = "1" ] && [ "$ZAPRET_ENGINE_RUN" != nfqws2 ] && ! $iptables -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; } || \
            { case "$GGC_STATE" in v4*) ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null ;; *) false ;; esac; } || \
-           { [ "$YT_DEAD_STATE" = "on" ] && ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_YT_DEAD" 2>/dev/null; } || \
+           { [ "$YT_DEAD_STATE" = "on" ] && ! $iptables -t mangle -C FORWARD $YT_MARK_FWD 2>/dev/null; } || \
            { [ "$YT_GGC_BLOCK" = "1" ] && [ "$GGC_FAILS" -gt 0 ] && [ "$GGC_FAILS" -lt 3 ] && zapret_cap str; } || \
            { [ "$YT_DEAD_STATE" = "fail" ] && [ "$YT_DEAD_FAILS" -lt 3 ]; }; then
             _hooks_bad=1
-            # повтор не вставших GGC/отбоя — не «правила пропали»
+            # повтор не вставших GGC/пометки видео — не «правила пропали»
             if [ "$GGC_FAILS" -gt 0 ] || [ "$YT_DEAD_STATE" = "fail" ]; then
-                log "zapret: повторяю правила «мимо кэшей оператора»/отбоя мёртвых серверов (попытка $((GGC_FAILS > YT_DEAD_FAILS ? GGC_FAILS + 1 : YT_DEAD_FAILS + 1)) из 3)"
+                log "zapret: повторяю правила «мимо кэшей оператора»/повтора видеосоединений (попытка $((GGC_FAILS > YT_DEAD_FAILS ? GGC_FAILS + 1 : YT_DEAD_FAILS + 1)) из 3)"
                 ZAPRET_RETRY_LOGGED=1
             fi
         fi

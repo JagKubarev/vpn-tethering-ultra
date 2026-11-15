@@ -1037,7 +1037,7 @@ elif [ "$MODE" = "quick" ]; then
     # hostfakesplit: там ts,md5sig, Windows-раздаче не мешает): 06.11 на YOTA 10 из 10 в
     # обоих кругах, с именем видеосервера 3–15 Мбит/с
     # + S_done: после сторожа (check) прогоны уже были — иначе «30 из 22»
-    S_total=$((S_done + 31))
+    S_total=$((S_done + 33))
     st stage="быстрый подбор${GNAME:+: $GNAME}"
     if [ -n "$GRP" ]; then
         S_total=$((S_total + 2))
@@ -1081,9 +1081,11 @@ elif [ "$MODE" = "quick" ]; then
 --dpi-desync=fake,multisplit --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 --dpi-desync-fake-tls-mod=rnd $FAKE
 --dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 --dpi-desync-fake-tls-mod=rnd $FAKE
 --dpi-desync=hostfakesplit --dpi-desync-repeats=4 --dpi-desync-fooling=ts,md5sig --dpi-desync-ts-increment=-1000 --dpi-desync-hostfakesplit-mod=host=ozon.ru
+--dpi-desync=fake,multisplit --dpi-desync-fake-tls=0x00000000 --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=0 --dpi-desync-split-pos=midsld --dpi-desync-repeats=2
+--dpi-desync=fakedsplit --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=0 --dpi-desync-split-pos=midsld
 EOF
 else
-    S_total=$(( 14 + 7 + 32 + 4 + 5 + 12 + 6 ))
+    S_total=$(( 14 + 7 + 32 + 4 + 5 + 2 + 12 + 6 ))
     # A: только разрез, без подделок
     st stage="1/4 разрез без подделок"
     for m in multisplit multidisorder; do
@@ -1125,6 +1127,13 @@ else
     for p in 1,midsld 1,host+1,midsld 2,midsld host+1,midsld; do
         run_strat "--dpi-desync=multisplit --dpi-desync-split-pos=$p --dpi-desync-split-seqovl=1" "3"
     done
+    # C3: подделка из 4 нулевых байт (seq настоящий, испорчен только ack) + разрез по середине имени —
+    # профиль googlevideo у hardcorp74 (nfqws2). 13.11 YOTA, 4 видеосервера × 3 круга: 6/12 и 7/12 с
+    # большим ClientHello против 2/8 и 1/8 у нашей своей YouTube; подделка или разрез по отдельности — 0/12.
+    # И fakedsplit с настоящим seq (сдвиг 0, плохой только ack): подделки ложатся ровно на место кусков;
+    # там же 4/12 и 10/12 — с большим ClientHello лучше (со сдвигом по умолчанию −10000 — мимо)
+    run_strat "--dpi-desync=fake,multisplit --dpi-desync-fake-tls=0x00000000 --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=0 --dpi-desync-split-pos=midsld --dpi-desync-repeats=2" "3"
+    run_strat "--dpi-desync=fakedsplit --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=0 --dpi-desync-split-pos=midsld" "3"
     # D: лучшие 3 — с другими вариантами поддельного ClientHello и повторами
     st stage="4/4 варианты подделки"
     best 3 > "$TMP/top3"

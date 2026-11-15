@@ -27,7 +27,7 @@ KernelSU/Magisk-модуль (id `vpn-to-hotspot-usb`, автор Kubarev, те�
   области; ранний код до lock (`--check`, `--get` …) не может звать функции из `lib/`.
 - `module/action.sh` — кнопка Action (тоггл VPN ↔ напрямую, ждёт ack от демона).
 - `module/webctl.sh` + `module/webroot/index.html` — WebUI, только фиксированные команды.
-- `module/zapret/` — `scan.sh` (подбор / сторож / сайты), `ytslow.sh`, `netid.sh`, списки.
+- `module/zapret/` — `scan.sh` (подбор / сторож / сайты), `netid.sh`, списки.
 - `module/warp/` — `warp.sh` (хранилище конфигов WARP: создать, импорт, экспорт), списки
   сетей групп (Telegram, Google без GCP, общие CDN), `endpoints.txt` — пул адресов Cloudflare.
 - `module/bin/` — `nfqws`, `dnsproxy`, `conntrack`, `amneziawg-go`, `awg`, `opera-proxy`, `hev-socks5-tproxy`, `curl` (arm64 + armv7; `curl` — запасной, если нет системного: `customize.sh` оставляет `bin/curl`, демон и скрипты ищут его по `PATH`).
