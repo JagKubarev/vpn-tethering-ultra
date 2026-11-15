@@ -94,6 +94,8 @@ yt_dead_hooks_off() {
     _n=0; while [ $_n -lt 8 ] && $iptables -t mangle -D OUTPUT $YT_MARK_OUT 2>/dev/null; do _n=$((_n + 1)); done
     _n=0; while [ $_n -lt 8 ] && $iptables -t mangle -D FORWARD $YT_MARK_FWD 2>/dev/null; do _n=$((_n + 1)); done
     _n=0; while [ $_n -lt 8 ] && $iptables -D FORWARD -p tcp --dport 443 -j "$CHAIN_YT_RST" 2>/dev/null; do _n=$((_n + 1)); done
+    _n=0; while [ $_n -lt 8 ] && $iptables -D OUTPUT -p tcp --dport 443 --syn -j "$CHAIN_YT_FRONT" 2>/dev/null; do _n=$((_n + 1)); done
+    _n=0; while [ $_n -lt 8 ] && $iptables -D FORWARD -p tcp --dport 443 --syn -j "$CHAIN_YT_FRONT" 2>/dev/null; do _n=$((_n + 1)); done
     # от прежних версий (отбой до 15.11): пометка Play и хуки цепочки VPN_YT_DEAD — иначе после
     # обновления без перезагрузки остались бы, и RST мёртвым адресам шёл бы дальше
     _n=0; while [ $_n -lt 8 ] && $iptables -t mangle -D OUTPUT ! -o tun+ -m owner ! --uid-owner 0 $GVT_MATCH -j CONNMARK --set-xmark 0x04000000/0x04000000 2>/dev/null; do _n=$((_n + 1)); done
@@ -124,6 +126,11 @@ yt_dead_on() {
     # следующий повтор (yt_retry_hits, «запрос без ответа»). Цепочка пуста, пока ничего не застряло
     $iptables -N "$CHAIN_YT_RST" 2>/dev/null
     $iptables -I FORWARD 1 -p tcp --dport 443 -j "$CHAIN_YT_RST" 2>/dev/null
+    # мёртвые фронты (yt_front_hit): RST на SYN — и телефону, и раздаче; цепочку заполнит yt_front_sync
+    $iptables -N "$CHAIN_YT_FRONT" 2>/dev/null
+    $iptables -I OUTPUT 1 -p tcp --dport 443 --syn -j "$CHAIN_YT_FRONT" 2>/dev/null
+    $iptables -I FORWARD 1 -p tcp --dport 443 --syn -j "$CHAIN_YT_FRONT" 2>/dev/null
+    YT_DEAD_ON_TS=$(date +%s); YT_FRONT_KEY=""
     [ "$ZAPRET_PHONE" = "1" ] && $iptables -t mangle -I OUTPUT 1 $YT_MARK_OUT 2>/dev/null
     # пометка не встала — не «on»: иначе сторож zapret ставил бы правила по кругу
     if ! $iptables -t mangle -C FORWARD $YT_MARK_FWD 2>/dev/null; then
@@ -155,12 +162,66 @@ yt_bg_alive() {
 yt_dead_off() {
     yt_dead_hooks_off
     $iptables -F "$CHAIN_YT_RST" 2>/dev/null; $iptables -X "$CHAIN_YT_RST" 2>/dev/null
+    $iptables -F "$CHAIN_YT_FRONT" 2>/dev/null; $iptables -X "$CHAIN_YT_FRONT" 2>/dev/null
+    YT_FRONT_LIST=""; YT_FRONT_DEAD=""; YT_FRONT_N=0; YT_FRONT_KEY=""
     # и файлы прежнего отбоя (до 15.11)
     rm -f "$YT_SEEN_FILE" "$YT_SEEN_FILE.new" "$YT_SEEN_FILE.req" "$YT_SEEN_FILE.req.new" "$YT_GRANGES" \
         /data/local/tmp/vpn_tether_ytdead /data/local/tmp/vpn_tether_ytdead.tmp "$YT_SEEN_FILE.udp" "$YT_SEEN_FILE.udp.new" \
         /data/local/tmp/vpn_tether_ytrecheck.* /data/local/tmp/vpn_tether_ytsprobe.*
     YT_DEAD_STATE=""; YT_STUCK=""
     YT_DEAD_MODE=""; YT_RETRY_CNT=""; YT_RETRY_KILLS=0; YT_RETRY_RJ=""; YT_RETRY_RSTS=0; YT_RAMP_DEAD=""; YT_RAMP_BAD=""
+}
+
+# --- Мёртвые фронты (YT_DEAD_FAILFAST): быстрый отказ, по сети, на YT_FRONT_TTL ------------------
+# Адрес Google (не видео), где у телефона дважды за YT_RETRY_WIN сервер после рукопожатия не прислал ни байта
+# данных (ClientHello не подтверждён или подтверждён и тишина, 1 с или 6×RTT; и закрывающиеся), — новым
+# соединениям к нему RST на SYN (CHAIN_YT_FRONT: OUTPUT и FORWARD), висящие — ss -K: приложение сразу берёт
+# другой адрес из ответа DNS. 15.11 YOTA: у youtubei.googleapis.com 8 адресов, мёртв 172.217.114.4 (через
+# WARP жив — блок по адресу на пути, малое окно не лечит); с отказом за 9 мин шортсов одна попытка к нему и
+# 0 зависаний API против 4 соединений, висевших до 8 мин. Свой список у каждой сети и короткий срок: ТСПУ
+# разные, адрес, мёртвый здесь, в другой сети или через час может быть жив. Не больше 16 на сеть; первые
+# 30 с после включения — мимо (прежний отброс ловил там живые адреса)
+yt_front_hit() {   # адрес now
+    local p k="${NET_KEY:--}"
+    case "$1" in *[!0-9.]*|'') return 0 ;; esac
+    [ $(($2 - YT_DEAD_ON_TS)) -ge 30 ] || return 0
+    printf '%s\n' "$YT_FRONT_LIST" | awk -v k="$k" -v d="$1" '$1 == k && $2 == d { f = 1 } END { exit !f }' && return 0
+    p=$(printf '%s\n' "$YT_FRONT_DEAD" | awk -v d="$1" -v now="$2" -v w="$YT_RETRY_WIN" '$1 == d && now - $2 <= w { print $2; exit }')
+    YT_FRONT_DEAD=$(printf '%s\n' "$YT_FRONT_DEAD" | awk -v d="$1" -v now="$2" -v w="$YT_RETRY_WIN" 'NF == 2 && $1 != d && now - $2 <= w')
+    if [ -z "$p" ]; then
+        YT_FRONT_DEAD="$YT_FRONT_DEAD
+$1 $2"
+        return 0
+    fi
+    [ "$(printf '%s\n' "$YT_FRONT_LIST" | awk -v k="$k" '$1 == k' | wc -l)" -lt 16 ] || return 0
+    YT_FRONT_LIST="$YT_FRONT_LIST
+$k $1 $(($2 + YT_FRONT_TTL))"
+    ss -K -tn dst "$1" dport = :443 >/dev/null 2>&1
+    log "YouTube: $1 — сервер Google дважды молчит после рукопожатия — отказ новым соединениям к нему на $((YT_FRONT_TTL / 60)) мин (приложение возьмёт другой адрес)"
+    YT_FRONT_KEY=""   # собрать цепочку заново
+    yt_front_sync "$2"
+}
+# цепочка CHAIN_YT_FRONT — по списку текущей сети без истёкших; другая сеть — её адреса. Не ip: local
+# в этих шеллах видна и в вызываемых функциях — update_status (phone_status_refresh) взял бы $ip за /system/bin/ip.
+# REJECT tcp-reset — только с -p tcp, иначе «Invalid argument» (и 2>/dev/null его прятал)
+yt_front_sync() {   # now
+    local k="${NET_KEY:--}" fa
+    YT_FRONT_TS=$1
+    # та же сеть и ничего не истекло — цепочка уже верна
+    [ "$k" = "$YT_FRONT_KEY" ] && ! printf '%s\n' "$YT_FRONT_LIST" | awk -v now="$1" 'NF == 3 && $3 <= now { f = 1 } END { exit !f }' && return 0
+    printf '%s\n' "$YT_FRONT_LIST" | awk -v now="$1" -v k="$k" 'NF == 3 && $3 <= now && $1 == k { print $2 }' | \
+        while read -r fa; do log "YouTube: $fa — срок отказа истёк, снова пускаю (если по-прежнему молчит — вернётся)"; done
+    YT_FRONT_LIST=$(printf '%s\n' "$YT_FRONT_LIST" | awk -v now="$1" 'NF == 3 && $3 > now')
+    YT_FRONT_KEY="$k"
+    $iptables -F "$CHAIN_YT_FRONT" 2>/dev/null
+    # мёртв он на прямом пути (замер — по соединениям через WAN): через VPN и WARP — не трогаем
+    $iptables -A "$CHAIN_YT_FRONT" -o tun+ -j RETURN 2>/dev/null
+    $iptables -A "$CHAIN_YT_FRONT" -o warp+ -j RETURN 2>/dev/null
+    YT_FRONT_N=0
+    for fa in $(printf '%s\n' "$YT_FRONT_LIST" | awk -v k="$k" '$1 == k { print $2 }'); do
+        $iptables -A "$CHAIN_YT_FRONT" -d "$fa" -p tcp -j REJECT --reject-with tcp-reset 2>/dev/null && YT_FRONT_N=$((YT_FRONT_N + 1))
+    done
+    phone_status_refresh
 }
 
 # --- YT_WSSIZE_RAMP: малое окно для молчащих стоек (см. service.sh) -------------------
@@ -347,11 +408,12 @@ yt_dead_scan() {
     [ -n "$wip" ] || wip=$($ip -4 addr show "$LAST_WAN_IFACE" 2>/dev/null | awk '/inet / {sub(/\/.*/, "", $2); print $2; exit}')
     # IPv6-only сеть с CLAT: IPv4 у v4-<WAN>, иначе запасной поиск выключен
     [ -n "$wip" ] || wip=$($ip -4 addr show "v4-$LAST_WAN_IFACE" 2>/dev/null | awk '/inet / {sub(/\/.*/, "", $2); print $2; exit}')
-    out=$($CONNTRACK_BIN -L -p tcp --dport 443 2>/dev/null | awk -v now="$now" -v after="$da" -v sa="$sa" -v hs="$YT_HS_MAX" -v sf="$YT_SEEN_FILE" -v rf="$YT_SEEN_FILE.req" -v rq="$rqe" -v gr="$YT_GRANGES" -v wip="$wip" '
+    out=$($CONNTRACK_BIN -L -p tcp --dport 443 2>/dev/null | awk -v now="$now" -v after="$da" -v sa="$sa" -v hs="$YT_HS_MAX" -v sf="$YT_SEEN_FILE" -v rf="$YT_SEEN_FILE.req" -v rq="$rqe" -v gr="$YT_GRANGES" -v wip="$wip" -v zp="$ZAPRET_PHONE" '
         FILENAME == gr { gs[++ng] = $1; ge[ng] = $2; next }
         FILENAME == sf { seen[$1] = $2; rep[$1] = $4; next }
         FILENAME == rf { rbr[$1] = $2; rob0[$1] = $3; rop0[$1] = $4; rtq0[$1] = $5; rlg0[$1] = $6; next }
-        / ESTABLISHED / {
+        / (ESTABLISHED|FIN_WAIT|CLOSE_WAIT|LAST_ACK|TIME_WAIT|CLOSE) / {
+            est = ($0 ~ / ESTABLISHED /)
             src = ""; dst = ""; rsrc = ""; rdst = ""; sp = ""; po = -1; bo = -1; pr = -1; br = -1; mk = 0
             for (i = 1; i <= NF; i++) {
                 split($i, kv, "=")
@@ -366,12 +428,17 @@ yt_dead_scan() {
             if (rsrc != dst) next
             # googlevideo.com (метка); без метки — только если сервер в сетях Google
             yt = (int(mk / 268435456) % 2 == 1)
+            # закрывающиеся — только в мёртвые фронты (ниже): приложение (AdGuard) бросало попытки к мёртвому
+            # фронту через ~4 с, и второе зависание до счёта не доживало (стенд 15.11, 22:01)
+            if (!est && (yt || src != wip)) next
             if (!yt) {
-                # без метки — только раздача, ушедшая наружу через WAN (ответ
-                # идёт на адрес телефона). Через VPN метки нет никогда: и
-                # раздача (ответ на адрес tun), и сам телефон (src — адрес
-                # tun) попадали сюда — ss -K по общим адресам Google (ревью 25.10)
-                if (wip == "" || rdst != wip || src == wip) next
+                # без метки — только наружу через WAN (ответ идёт на адрес телефона). Через VPN метки
+                # нет никогда: и раздача (ответ на адрес tun), и сам телефон (src — адрес tun) попадали
+                # сюда — ss -K по общим адресам Google (ревью 25.10). Телефон без метки — не видео
+                # (фронты, API; у YouTube через AdGuard это соединения AdGuard) — только в мёртвые фронты
+                if (wip == "" || rdst != wip) next
+                # DoH Google (dnsproxy) — не фронт: у него свои запасные серверы
+                if (dst ~ /^8\.8\.[48]\./) next
                 # без метки — только «застрял/молчит» — остальное не перебираем
                 if (bo < 600 || pr < 1 || br > 80 * pr || pr > 32 || bo > 65536) next
                 split(dst, o, "."); n = ((o[1] * 256 + o[2]) * 256 + o[3]) * 256 + o[4]; g = 0
@@ -416,6 +483,22 @@ yt_dead_scan() {
             # (до ~27 КБ) и пара десятков пакетов от сервера, у выгрузки за 3 с — больше
             if (bo < 600 || pr < 1 || br > 80 * pr || pr > 32 || bo > 65536) next
             kind = (pr <= 1) ? "stuck" : "dead"
+            # Телефон, без метки: ClientHello к сети Google ушёл, а от сервера после рукопожатия ни байта
+            # (застрял — sa, принял и молчит — after) — кандидат в мёртвые фронты (yt_front_hit). 15.11:
+            # фронт API 172.217.114.4 так держал соединения AdGuard до 8 мин, а 7 соседних адресов из
+            # ответа DNS были живы
+            if (!yt && src == wip) {
+                # пометку видео телефону ставит правило только при ZAPRET_PHONE=1 — иначе «без пометки» и видео
+                if (zp != "1" || int(mk / 536870912) % 2 == 1) next
+                # от сервера ни байта данных: не больше 4 пакетов, все пустые (ответ на SYN, подтверждения;
+                # у пустого до 60 байт). У выгрузки, долгого запроса, возобновлённой сессии сервер успел
+                # прислать хоть что-то (ServerHello) — их не берём (ревью 15.11: бэкап Фото на слабой сети
+                # иначе мог попасть под отказ). При таком признаке живой фронт отвечает за RTT — порог sa
+                if (pr > 4 || br > 60 * pr) next
+                if (now - t0 >= sa && d == 0) { print "FRONT", dst, sp; d = 1 }
+                ns[k] = t0 " " kind " " d
+                next
+            }
             # застрявшие — только точно googlevideo.com
             if (kind == "stuck" && !yt) next
             # и не в WARP (connmark WARP_MARK 0x20000000): там застревает туннель, а не стойка
@@ -455,6 +538,9 @@ $(($now + 20)) $rqc $rqs $rqd"
             log "YouTube: наблюдение: $rqd — запрос без ответа ${rqa}с (~${rqp} Б после последних данных сервера, от сервера $rqb Б, $rqv, $rqw)"
         fi
     done
+    # мёртвые фронты: кандидаты из conntrack, истёкшие и другая сеть — раз в 30 с
+    for rqh in $(printf '%s\n' "$out" | awk '$1 == "FRONT" { print $2 }'); do yt_front_hit "$rqh" "$now"; done
+    { [ -n "$YT_FRONT_LIST" ] && [ $((now - YT_FRONT_TS)) -ge 30 ]; } || [ "${NET_KEY:--}" != "$YT_FRONT_KEY" ] && yt_front_sync "$now"
     ds=$(printf '%s\n' "$out" | sed -n 's/^DATA //p')
     [ "${ds:-0}" -gt "$YT_DATA_SUM" ] && YT_DATA_TS=$now
     YT_DATA_SUM=${ds:-0}

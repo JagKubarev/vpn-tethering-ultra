@@ -1541,6 +1541,11 @@ YT_DEAD_STATE=""        # "" | on | fail
 YT_DEAD_MODE=""         # retry, пока повтор включён (yt_dead_on)
 YT_RETRY_CNT=""         # "адрес провалов время" по строке — счёт повторов (yt_retry_hits)
 YT_RETRY_KILLS=0        # порвано застрявших соединений телефона (status: yt_retry_kills)
+CHAIN_YT_FRONT="VPN_YT_FRONT"   # filter OUTPUT/FORWARD: RST на SYN к мёртвым фронтам Google (yt_front_hit)
+YT_FRONT_TTL=900        # с: срок отказа фронту (адрес мёртв здесь и сейчас — потом проверяется заново)
+YT_FRONT_LIST=""        # "сеть адрес до_когда" по строке
+YT_FRONT_DEAD=""        # "адрес время" — первое молчание фронта (yt_front_hit)
+YT_FRONT_N=0; YT_FRONT_KEY=""; YT_FRONT_TS=0; YT_DEAD_ON_TS=0
 CHAIN_YT_RAMP="VPN_YT_RAMP"     # mangle: все исходящие пакеты к стойкам малого окна — в nfqws2 (YT_WSSIZE_RAMP)
 YT_RAMP_FILE="/data/adb/vpn_tether_ytramp"         # "сеть|стойка/28|epoch" — молчащие стойки по сетям, 12 ч, до 128 на сеть
 YT_RAMP_RUN="/data/local/tmp/vpn_tether_ytramp.list"   # стойки текущей сети для --ipset nfqws2 (всегда есть 0.0.0.0/32)

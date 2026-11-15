@@ -1316,7 +1316,8 @@ function renderStatus(s) {
     if (s.yt_dead === 'on') {
       const k = (+s.yt_retry_kills || 0) + (+s.yt_retry_rsts || 0), q = +s.yt_req_kills || 0;
       h += kvRow('Зависшие видеосоединения', 'порвано: ' + k + ' · запросов без ответа: ' + q +
-        (+s.yt_ramp > 0 ? ' · малое окно: ' + esc(s.yt_ramp) + ' групп адресов' : ''), 'green');
+        (+s.yt_ramp > 0 ? ' · малое окно: ' + esc(s.yt_ramp) + ' групп адресов' : '') +
+        (+s.yt_front > 0 ? ' · отказ мёртвым серверам: ' + esc(s.yt_front) : ''), 'green');
     }
     if (s.zwd === '1') {
       const w = (s.zwd_last || '').split('|'), t = w[1] || '';
