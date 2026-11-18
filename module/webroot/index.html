@@ -261,6 +261,9 @@ details.more { margin-top: 18px; }
 details.kvbox { margin: 14px -16px -16px; border-top: 1px solid var(--line); }
 details.kvbox > summary { padding: 12px 16px; min-height: 46px; font-size: 14px; color: var(--muted); }
 details.kvbox .kv { border-top: 0; margin: 0; padding: 0 16px 16px; }
+details.res { margin-top: 12px; border-top: 1px solid var(--line); }
+details.res > summary { padding: 12px 0 0; min-height: 36px; font-size: 14px; color: var(--muted); }
+details.res .kv { border-top: 0; margin-top: 10px; padding-top: 0; }
 details.more > summary, .card > details > summary { color: var(--accent); }
 details > summary::after { border-color: currentColor; }
 .hint { color: var(--muted); font-size: 13px; margin: 8px 4px 0; }
@@ -815,6 +818,11 @@ details > summary::after { border-color: currentColor; }
     <div class="inline" style="margin-top:-10px"><input type="text" id="upIn" list="dnsKnownUp" placeholder="https://сервер/dns-query или Google" aria-label="Новый сервер DNS" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="upAdd">Добавить</button></div>
     <div class="err" id="upErr" style="display:none"></div>
   </div>
+  <div class="row" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">DoH через обход</div>
+      <div class="s">Если оператор режет DoH по имени: соединения с DoH-серверами идут через обход, своей постоянной стратегией. Сломает обход DoH — DNS временно уйдёт к оператору, без обхода гео-блоков.</div></div>
+    <label class="sw"><input type="checkbox" data-key="DNS_VIA_ZAPRET"><span></span></label>
+  </div>
   <div class="row wrap">
     <div class="txt"><div class="t">Проверка DNS</div><div class="s" id="dohRes">Отвечает ли зашифрованный DNS (dnsproxy).</div></div>
     <button class="btn small" id="dohBtn">Проверить</button>
@@ -843,7 +851,9 @@ details > summary::after { border-color: currentColor; }
         <div class="s">Отдаёт ли гео-DoH прокси для ChatGPT, Gemini, Claude, Spotify и других и отвечает ли прокси. Около 5 с. Пустит ли сам сервис, так не узнать.</div></div>
       <button class="btn small" id="geoChkBtn">Проверить</button>
     </div>
-    <div class="kv" id="geoChkOut" style="display:none"></div>
+    <select id="geoChkVia" aria-label="Через какой DNS проверять" style="margin-top:10px"></select>
+    <details class="res" id="geoChkBox" style="display:none" open><summary id="geoChkSum"></summary>
+      <div class="kv" id="geoChkOut"></div></details>
   </div>
   <div class="row" data-dep="DNSPROXY_ENABLE" data-gm="off" data-gm2="all">
     <div class="txt"><div class="t">Без гео-DoH — не давать адреса</div>
@@ -909,11 +919,6 @@ details > summary::after { border-color: currentColor; }
 
 <details class="card more">
   <summary>Для опытных</summary>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">DoH через обход</div>
-      <div class="s">Если оператор режет DoH по имени: соединения с DoH-серверами идут через обход, своей постоянной стратегией. Сломает обход DoH — DNS временно уйдёт к оператору, без обхода гео-блоков.</div></div>
-    <label class="sw"><input type="checkbox" data-key="DNS_VIA_ZAPRET"><span></span></label>
-  </div>
   <div class="row col">
     <div class="txt"><div class="t">Серверы DoH через VPN</div>
       <div class="s">Для режима «DoH через туннель».</div></div>
@@ -1644,11 +1649,17 @@ function setDnsList(kind, l, n) {
   renderDnsLists();
 }
 const DNS_OPEN = {};   // свёрнут/раскрыт список DNS (up, geo) — до перезагрузки страницы
+function renderGeoVia() {
+  const sel = $('#geoChkVia'), was = sel.value, gl = geoList();
+  sel.innerHTML = '<option value="">Через DNS модуля — как получит телефон</option>' +
+    gl.map((u) => '<option value="' + esc(u) + '">Через ' + esc(dnsName(u)) + '</option>').join('');
+  sel.value = gl.includes(was) ? was : '';
+}
 function renderDnsLists() {
+  renderGeoVia();
   const ul = upList(), gl = geoList(), n = upN(), alt = ST.dns_alt === '1' && ST.dns_upstream;
   const row = (kind, u, i, n, sub, amber) => '<div class="row item"><div class="txt"><div class="t">' + (amber ? '<span class="dot amber"></span>' : '') + esc(dnsName(u)) + '</div>' +
     '<div class="s">' + esc(sub) + '</div></div>' +
-    (kind === 'geo' ? '<button class="x" data-dchk="' + i + '" aria-label="Проверить ' + esc(dnsName(u)) + '" title="Проверить сервисы через него">✓</button>' : '') +
     '<button class="x" data-dmv="' + kind + '" data-i="' + i + '" data-d="-1"' + (i === 0 ? ' disabled' : '') + ' aria-label="Выше: ' + esc(dnsName(u)) + '">▲</button>' +
     '<button class="x" data-dmv="' + kind + '" data-i="' + i + '" data-d="1"' + (i === n - 1 ? ' disabled' : '') + ' aria-label="Ниже: ' + esc(dnsName(u)) + '">▼</button>' +
     '<button class="x" data-drm="' + kind + '" data-i="' + i + '"' + (kind === 'up' && n === 1 ? ' disabled' : '') + ' aria-label="Убрать ' + esc(dnsName(u)) + '">✕</button></div>';
@@ -1704,8 +1715,6 @@ $('#geoAdd').addEventListener('click', () => dnsAdd('geo'));
 ['#upList', '#geoList'].forEach((id) => $(id).addEventListener('click', (e) => {
   const f = e.target.closest('[data-dfold]');
   if (f) { DNS_OPEN[f.dataset.dfold] = f.dataset.open !== '1'; renderDnsLists(); return; }
-  const c = e.target.closest('[data-dchk]');
-  if (c) { const u = geoList()[+c.dataset.dchk]; if (u) runGeoCheck(u); return; }
   const b = e.target.closest('button.x'); if (!b || b.disabled) return;
   const kind = b.dataset.dmv || b.dataset.drm, i = +b.dataset.i, l = kind === 'up' ? upList() : geoList();
   let n = upN();
@@ -2605,14 +2614,15 @@ $('#diagBtn').addEventListener('click', async () => {
       : kvRow('Ошибка', esc((r.out || 'нет ответа').replace(/^ERR /, '')), 'red');
   } finally { b.disabled = false; b.textContent = 'Проверить ещё раз'; }
 });
-// u — адрес гео-DoH (кнопка ✓ в списке): спрашиваем прямо его; без u — DNS модуля, как получит телефон
+// u — адрес гео-DoH (выбор «Через …»): спрашиваем прямо его; без u — DNS модуля, как получит телефон
 let geoChkBusy = false;
 async function runGeoCheck(u) {
   if (geoChkBusy) { toast('Идёт проверка — подождите'); return; }
-  const b = $('#geoChkBtn'), o = $('#geoChkOut');
+  const b = $('#geoChkBtn'), o = $('#geoChkOut'), box = $('#geoChkBox'), sum = $('#geoChkSum');
+  const via = u ? 'через ' + dnsName(u) : 'через DNS модуля';
+  box.style.display = ''; box.open = true; sum.textContent = 'Проверяю 8 сервисов ' + via + '…';
   geoChkBusy = true; b.disabled = true; b.textContent = 'Проверяю…';
-  o.style.display = ''; o.innerHTML = kvRow('Идёт проверка', '8 сервисов ' + (u ? 'через ' + esc(dnsName(u)) : 'через DNS модуля'), '');
-  o.scrollIntoView({ block: 'nearest' });
+  o.innerHTML = ''; box.scrollIntoView({ block: 'nearest' });
   try {
     const r = await ctlBg('geocheck' + (u ? ' ' + q(u) : ''));
     const out = r.out || '', h = /^H (.*)$/m.exec(out);
@@ -2621,9 +2631,12 @@ async function runGeoCheck(u) {
     o.innerHTML = rows.length ? (h && h[1] ? kvRow('Гео-DoH', esc(h[1] === 'off' ? 'молчат все' : h[1]), h[1] === 'off' ? 'amber' : '') : '') +
       rows.map((f) => kvRow(esc(f[2] || f[0]), esc(f.slice(3).join('|')), col[f[1]] || '')).join('')
       : kvRow('Ошибка', esc(out.replace(/^[\s\S]*?ERR /, '') || 'нет ответа'), 'red');
+    // итог — только по сервисам (служебные строки «VPN», «Проверка» не в счёт)
+    const svc = rows.filter((f) => !['vpn', 'via'].includes(f[0])), ok = svc.filter((f) => f[1] === 'ok').length;
+    sum.textContent = svc.length ? 'Работают ' + ok + ' из ' + svc.length + ' · ' + via : 'Не получилось проверить · ' + via;
   } finally { geoChkBusy = false; b.disabled = false; b.textContent = 'Проверить ещё раз'; }
 }
-$('#geoChkBtn').addEventListener('click', () => runGeoCheck(''));
+$('#geoChkBtn').addEventListener('click', () => runGeoCheck($('#geoChkVia').value));
 $('#fakeSniSel').addEventListener('change', () => {
   const v = $('#fakeSniSel').value; $('#fakeSniErr').style.display = 'none';
   if (v === '*') { fakeOwnPick = true; renderFakeSni(); $('#fakeSniIn').focus(); return; }
@@ -3289,7 +3302,7 @@ function mockExec(cmd) {
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=предпросмотр\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
     '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=' + (M.target === 'vpn' ? 'wifi:Дом_5G' : 'mobile:25011') + '\nnet_label=' + (M.target === 'vpn' ? 'Дом_5G' : 'YOTA') + '\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nwan=rmnet_data1\nexit=' + (Math.floor(Date.now() / 1000) - 120) + '|rmnet_data1|188.162.73.24|RU|' + (M.wave ? '000|204' : '204|204') + '\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.google\ndns_geo=dns.zapret.moe\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nwarp=up\nwarp_conf=warp-2\nwarp_note=\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD ZAPRET_ENGINE=nfqws2\nD ZAPRET2_STRATEGY=vt_soft_crck\nD ZAPRET2_ARGS=\nD ZAPRET2_FAKE_SNI=\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.google/dns-query\nD DNS_FALLBACKS=https://cloudflare-dns.com/dns-query https://dns.quad9.net/dns-query https://dns.adguard-dns.com/dns-query https://doh.libredns.gr/dns-query\nD DNS_GEO_UPSTREAMS=https://doh.fuckingspeedtest.com/dns-query https://dns.semqka.xyz/dns-query https://dns.commonnet.work/dns-query https://not-a-dns.quic.best/dns-query https://w.quic.best/dns-query https://sync.bezmezhau.com/dns-query https://dns.geodema.love/dns-query https://dns.dagami.ru/dns-query https://dns.zapret.moe/dns-query https://dns.keyoneday.ru/dns-query\nD DNS_GEO_DOMAINS=\nD DNS_GEO_STRICT=1\nD DNS_GEO_MODE=split\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD DNS_VIA_ZAPRET=0\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD YT_WSSIZE_RAMP=1\nD YT_RETRY_MAX=4\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=1\nD OPERA_API_PROXY=\nD OPERA_COUNTRY=EU\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD ZAPRET_ENGINE=nfqws2\nD ZAPRET2_STRATEGY=vt_soft_crck\nD ZAPRET2_ARGS=\nD ZAPRET2_FAKE_SNI=\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.google/dns-query\nD DNS_FALLBACKS=https://cloudflare-dns.com/dns-query https://dns.quad9.net/dns-query https://dns.adguard-dns.com/dns-query https://doh.libredns.gr/dns-query\nD DNS_GEO_UPSTREAMS=https://doh.fuckingspeedtest.com/dns-query https://dns.semqka.xyz/dns-query https://dns.commonnet.work/dns-query https://not-a-dns.quic.best/dns-query https://w.quic.best/dns-query https://sync.bezmezhau.com/dns-query https://dns.geodema.love/dns-query https://dns.dagami.ru/dns-query https://dns.zapret.moe/dns-query https://dns.keyoneday.ru/dns-query\nD DNS_GEO_DOMAINS=\nD DNS_GEO_STRICT=1\nD DNS_GEO_MODE=split\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD DNS_VIA_ZAPRET=1\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD YT_WSSIZE_RAMP=1\nD YT_RETRY_MAX=4\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=1\nD OPERA_API_PROXY=\nD OPERA_COUNTRY=EU\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
     Object.keys(M.usr).map((k) => 'U ' + k + '=' + M.usr[k] + '\n').join('') };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +
