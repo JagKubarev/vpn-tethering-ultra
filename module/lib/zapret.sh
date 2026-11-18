@@ -1242,8 +1242,10 @@ zapret_rules_on() {
         $t -F "$CHAIN_ZAPRET_QUIC" 2>/dev/null
         [ "$t" = "$iptables" ] && ZAPRET_QF_ON=0
         # nfqws2 берёт QUIC раздачи сам (профили UDP) — только с connbytes: без него UDP в очередь не идёт
-        # (zapret2_rules), и QUIC ушёл бы голым — ни подделки, ни закрытия (ревью 17.11)
-        if [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && zapret_cap cb; then
+        # (zapret2_rules), и QUIC ушёл бы голым — ни подделки, ни закрытия (ревью 17.11). И только при «пробивать»
+        # (ZAPRET_QUIC_FAKE): раньше nfqws2 брал его всегда, и «закрыть» на nfqws2 не действовало (19.11) —
+        # теперь закрытие ниже, в FORWARD до очереди nfqws2 (та в mangle POSTROUTING)
+        if [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && zapret_cap cb && [ "$ZAPRET_QUIC_FAKE" = "1" ]; then
             zapret_qf_off "$t"
             while $t -D FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; do :; done
         elif zapret_qf_on "$t" "$lan"; then
@@ -1530,7 +1532,7 @@ zapret_reconcile() {
         ZAPRET_HOOK_TICK=0
         if ! $iptables -t mangle -C POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null || \
            { [ "$ZAPRET_QF_ON" = "1" ] && ! $iptables -t mangle -C POSTROUTING -p udp --dport 443 -j "$CHAIN_ZAPRET_QF" 2>/dev/null; } || \
-           { [ "$ZAPRET_QF_ON" != "1" ] && [ "$ZAPRET_QUIC_BLOCK" = "1" ] && { [ "$ZAPRET_ENGINE_RUN" != nfqws2 ] || ! zapret_cap cb; } && ! $iptables -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; } || \
+           { [ "$ZAPRET_QF_ON" != "1" ] && [ "$ZAPRET_QUIC_BLOCK" = "1" ] && { [ "$ZAPRET_ENGINE_RUN" != nfqws2 ] || ! zapret_cap cb || [ "$ZAPRET_QUIC_FAKE" != "1" ]; } && ! $iptables -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; } || \
            { case "$GGC_STATE" in v4*) ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null ;; *) false ;; esac; } || \
            { [ "$YT_DEAD_STATE" = "on" ] && ! $iptables -t mangle -C FORWARD $YT_MARK_FWD 2>/dev/null; } || \
            { [ "$YT_GGC_BLOCK" = "1" ] && [ "$GGC_FAILS" -gt 0 ] && [ "$GGC_FAILS" -lt 3 ] && zapret_cap str; } || \
@@ -1546,7 +1548,7 @@ zapret_reconcile() {
     if [ "$ZAPRET_STATE" != "on" ] || [ "$excl" != "$ZAPRET_EXCL_RUN" ] || [ "$_hooks_bad" = 1 ]; then
         zapret_rules_on "$excl"
         if [ "$ZAPRET_STATE" != "on" ]; then
-            log "zapret: включён (режим $ZAPRET_MODE, телефон: $ZAPRET_PHONE, QUIC раздачи: $(if [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && zapret_cap cb; then echo "через nfqws2"; elif [ "$ZAPRET_QF_ON" = 1 ]; then echo подделка; elif [ "$ZAPRET_QUIC_BLOCK" = 1 ]; then echo закрыт; else echo открыт; fi); в исключениях (VPN-клиенты и «мимо обхода»): ${excl:-нет}$([ "$DNS_VIA_ZAPRET" = 1 ] && echo "; DoH через обход: $(zapret_doh_targets | cut -d'|' -f1,2 | tr ',|' '\n\n' | grep -c .) серверов, порты $(zapret_doh_targets | cut -d'|' -f3)"))"
+            log "zapret: включён (режим $ZAPRET_MODE, телефон: $ZAPRET_PHONE, QUIC раздачи: $(if [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && zapret_cap cb && [ "$ZAPRET_QUIC_FAKE" = 1 ]; then echo "через nfqws2"; elif [ "$ZAPRET_QF_ON" = 1 ]; then echo подделка; elif [ "$ZAPRET_QUIC_BLOCK" = 1 ]; then echo закрыт; else echo открыт; fi); в исключениях (VPN-клиенты и «мимо обхода»): ${excl:-нет}$([ "$DNS_VIA_ZAPRET" = 1 ] && echo "; DoH через обход: $(zapret_doh_targets | cut -d'|' -f1,2 | tr ',|' '\n\n' | grep -c .) серверов, порты $(zapret_doh_targets | cut -d'|' -f3)"))"
         elif [ "$excl" != "$ZAPRET_EXCL_RUN" ]; then
             log "zapret: исключения (VPN-клиенты и «мимо обхода»): ${excl:-нет}"
         else

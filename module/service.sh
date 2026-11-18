@@ -894,8 +894,10 @@ ZAPRET_QUIC_BLOCK=1     # закрыть QUIC раздаче, пока zapret в
 # в magisk-zapret2) — главнее ZAPRET_QUIC_BLOCK. 29.10: смартфон на раздаче
 # (YouTube, Android 15) с закрытым QUIC — 16 МБ по TCP, с подделкой — 18 МБ
 # по QUIC; браузеру на ноуте всё равно (сам быстро уходит на TCP). Только при
-# работающем nfqws и connbytes, иначе — ZAPRET_QUIC_BLOCK, как раньше
-ZAPRET_QUIC_FAKE=1
+# работающем nfqws и connbytes, иначе — ZAPRET_QUIC_BLOCK, как раньше.
+# С 19.11 по умолчанию 0 — QUIC раздачи закрыт: клиент сразу идёт по TCP через обход, без надежды на
+# подделку QUIC (Kubarev: «можно закрыть по умолчанию»)
+ZAPRET_QUIC_FAKE=0
 # YouTube мимо кэшей Google у оператора (GGC). Плеер получает видеосервер
 # rr*---sn-*.googlevideo.com, и это бывает кэш внутри сети оператора
 # (20.10, YOTA/МегаФон: 188.170.166.x). Рукопожатие с обходом проходит, а
