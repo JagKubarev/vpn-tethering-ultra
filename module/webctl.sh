@@ -31,6 +31,7 @@
 #   webctl.sh zevents [N]             журнал сторожа обхода (последние N)
 #   webctl.sh zhist                   прежние стратегии текущей сети (для сторожа)
 #   webctl.sh metatest                какие адреса Meta отдаёт DNS "как из Европы"
+#   webctl.sh geocheck                8 сервисов гео-списка: есть ли прокси гео-DoH и отвечает ли он
 #   webctl.sh zalt [z2|n1]            сайты со своей стратегией в текущей сети (записи движка): сайт|аргументы|дата
 #   webctl.sh zalt-clear              забыть их (и «не открылись ничем»)
 #   webctl.sh zscan-start sites ['сайты']  подобрать своё сайтам (без списка — из списков zapret)
@@ -118,7 +119,7 @@ zscan_busy() {
 warpgen_busy() { [ -n "$(find /data/local/tmp/vpn_tether_warpgen.lock -maxdepth 0 -mmin -3 2>/dev/null)" ]; }
 
 # ядро без connbytes (демон проверил, zapret_caps) — правило проверки без него
-CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:20"   # как у демона (ZAPRET_CB_OUT)
+CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:40"   # как у демона (ZAPRET_CB_OUT)
 grep -q '^cb=0' /data/local/tmp/vpn_tether_zcaps 2>/dev/null && CB_OUT=""
 
 # Текущая сеть: "<ключ>|<название>" (zapret/netid.sh по WAN из status)
@@ -316,7 +317,8 @@ case "$1" in
         ;;
     links)      # ссылки автора: links.txt из main на GitHub раз в 12 ч, иначе прежние; без них WebUI берёт вшитые
         L=/data/local/tmp/vpn_tether_links
-        if [ ! -s "$L" ] || [ -n "$(find "$L" -maxdepth 0 -mmin +720 2>/dev/null)" ]; then
+        # идёт подбор или создание WARP — их правила ловят curl от root: берём прежний ответ, спросим в другой раз
+        if ! zscan_busy && ! warpgen_busy && { [ ! -s "$L" ] || [ -n "$(find "$L" -maxdepth 0 -mmin +720 2>/dev/null)" ]; }; then
             CA=/apex/com.android.conscrypt/cacerts
             [ -d "$CA" ] || CA=/system/etc/security/cacerts
             # только known-ключи и адреса t.me / 4pda.to / github.com, без кавычек и пробелов
@@ -325,6 +327,51 @@ case "$1" in
             if [ -n "$t" ]; then printf '%s\n' "$t" > "$L"; else touch "$L"; fi
         fi
         cat "$L" 2>/dev/null
+        ;;
+    restart)    # перезапуск демона (кнопка в «Сервисе»): TERM — он снимает правила и выходит (до 40 с), запуск — как у менеджера
+        zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
+        warpgen_busy && { echo "ERR идёт создание конфига WARP — повторите через минуту"; exit 1; }
+        [ -x "$BB" ] || { echo "ERR нет busybox"; exit 1; }
+        # только полный путь: по нему демон узнаёт себя (is_our_daemon), относительный — второй демон
+        case "$MODDIR" in /*) ;; *) MODDIR=$(cd "$MODDIR" 2>/dev/null && pwd) ;; esac
+        [ -f "$MODDIR/service.sh" ] || { echo "ERR не нашёл service.sh"; exit 1; }
+        pid=$(daemon_pid)
+        if [ -n "$pid" ]; then
+            kill -TERM "$pid"; w=0
+            while kill -0 "$pid" 2>/dev/null && [ $w -lt 40 ]; do sleep 1; w=$((w + 1)); done
+            kill -0 "$pid" 2>/dev/null && { echo "ERR демон не завершился за 40 с"; exit 1; }
+        fi
+        # busybox в standalone, как у менеджера модулей; своя сессия — не завершится вместе с WebUI
+        ASH_STANDALONE=1 setsid "$BB" sh "$MODDIR/service.sh" </dev/null >/dev/null 2>&1 &
+        n=0
+        while [ $n -lt 30 ]; do sleep 1; n=$((n + 1)); [ -n "$(daemon_pid)" ] && { echo "OK"; exit 0; }; done
+        echo "ERR демон не запустился — смотрите журнал"; exit 1
+        ;;
+    update)     # есть ли версия новее: update.json из main (тот же, что у менеджера модулей) раз в 6 ч, иначе прежний ответ.
+                # Строка: «new vX.Y.Z <страница релиза>» или «none». Ничего не скачивает — только сообщает.
+                # update force (кнопка «Проверить» в «Сервисе») — спросить сейчас; не спросили — «fail» или «busy»
+        U=/data/local/tmp/vpn_tether_update
+        F=0; [ "$2" = force ] && F=1
+        # идёт подбор или создание WARP — их правила ловят curl от root: берём прежний ответ, спросим в другой раз
+        if zscan_busy || warpgen_busy; then
+            [ "$F" = 1 ] && { echo busy; exit 0; }
+        elif [ "$F" = 1 ] || [ ! -s "$U" ] || [ -n "$(find "$U" -maxdepth 0 -mmin +360 2>/dev/null)" ]; then
+            CA=/apex/com.android.conscrypt/cacerts
+            [ -d "$CA" ] || CA=/system/etc/security/cacerts
+            gj() { curl -s -m 6 --capath "$CA" https://raw.githubusercontent.com/JagKubarev/vpn-tethering-ultra/main/update.json 2>/dev/null | tr -d '\r\n\t '; }
+            j=$(gj)
+            # кнопка «Проверить»: первая попытка бывает мимо (18.11 на 13T: «не ответил», следующие — за 0,4 с) — вторая,
+            # прежде чем сказать «GitHub не ответил»
+            case "$j" in *versionCode*) ;; *) [ "$F" = 1 ] && { sleep 1; j=$(gj); } ;; esac
+            v=$(echo "$j" | grep -oE '"version":"v[0-9]+\.[0-9]+\.[0-9]+"' | grep -oE 'v[0-9.]+')
+            c=$(echo "$j" | grep -oE '"versionCode":[0-9]+' | grep -oE '[0-9]+$')
+            # не ответил GitHub — прежний ответ остаётся, новая попытка через 6 ч (touch)
+            if [ -n "$v" ] && [ -n "$c" ]; then echo "$c $v" > "$U"; else touch "$U"; [ "$F" = 1 ] && { echo fail; exit 0; }; fi
+        fi
+        cur=$(sed -n 's/^versionCode=//p' "$MODDIR/module.prop" 2>/dev/null)
+        c=""; v=""; read -r c v < "$U" 2>/dev/null
+        case "$c$cur" in ''|*[!0-9]*) echo none; exit 0 ;; esac
+        if [ "$c" -gt "$cur" ]; then echo "new $v https://github.com/JagKubarev/vpn-tethering-ultra/releases/tag/$v"; else echo none; fi
         ;;
     open)       # открыть ссылку автора в браузере: только https на t.me, 4pda.to и github.com
         case "$2" in
@@ -612,11 +659,15 @@ case "$1" in
         CA=/apex/com.android.conscrypt/cacerts
         [ -d "$CA" ] || CA=/system/etc/security/cacerts
         Q=202
-        RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
+        # свои соединения (root, кроме dnsproxy) — по биту connmark из OUTPUT, как у scan.sh: владелец в POSTROUTING
+        # на части ядер совпадает со всеми пакетами (17.11 MT6580, ядро 3.18) — забрали бы весь трафик
+        RULE_MK="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -j CONNMARK --set-xmark 0x08000000/0x08000000"
+        RULE_NFQ="-o $wan -m connmark --mark 0x08000000/0x08000000 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
         st_cleanup() {
             [ -n "$nqpid" ] && kill "$nqpid" 2>/dev/null
             iptables -w 2 -t mangle -D POSTROUTING $RULE_NFQ 2>/dev/null
-            iptables -w 2 -t mangle -D VPN_ZAPRET -m owner --uid-owner 0 -j RETURN 2>/dev/null
+            iptables -w 2 -t mangle -D VPN_ZAPRET -m connmark --mark 0x08000000/0x08000000 -j RETURN 2>/dev/null
+            iptables -w 2 -t mangle -D OUTPUT $RULE_MK 2>/dev/null
             iptables -w 2 -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
         }
         # по сигналу — выход (снимет EXIT): обработчик без exit продолжал
@@ -625,7 +676,8 @@ case "$1" in
         trap 'exit 1' INT TERM HUP
         # мимо AdGuard (его прокси подменяет сертификаты) и мимо основного zapret
         iptables -w 2 -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
-        iptables -w 2 -t mangle -I VPN_ZAPRET 1 -m owner --uid-owner 0 -j RETURN 2>/dev/null
+        iptables -w 2 -t mangle -I OUTPUT 1 $RULE_MK 2>/dev/null
+        iptables -w 2 -t mangle -I VPN_ZAPRET 1 -m connmark --mark 0x08000000/0x08000000 -j RETURN 2>/dev/null
         # адрес — через DoH (обычный DNS мимо VPN оператор может подменить)
         ip=$(doh_ip "$h" 6)
         # запасной nslookup: только IPv4 — «Address 1: 2a06:…» давал «ip 2»
@@ -690,13 +742,17 @@ case "$1" in
         CA=/apex/com.android.conscrypt/cacerts
         [ -d "$CA" ] || CA=/system/etc/security/cacerts
         Q=202
-        RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
+        # свои соединения (root, кроме dnsproxy) — по биту connmark из OUTPUT, как у scan.sh: владелец в POSTROUTING
+        # на части ядер совпадает со всеми пакетами (17.11 MT6580, ядро 3.18) — забрали бы весь трафик
+        RULE_MK="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -j CONNMARK --set-xmark 0x08000000/0x08000000"
+        RULE_NFQ="-o $wan -m connmark --mark 0x08000000/0x08000000 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
         RULE_IN=""
         yt_cleanup() {
             [ -n "$nqpid" ] && kill "$nqpid" 2>/dev/null
             iptables -w 2 -t mangle -D POSTROUTING $RULE_NFQ 2>/dev/null
             [ -n "$RULE_IN" ] && iptables -w 2 -t mangle -D PREROUTING $RULE_IN 2>/dev/null
-            iptables -w 2 -t mangle -D VPN_ZAPRET -m owner --uid-owner 0 -j RETURN 2>/dev/null
+            iptables -w 2 -t mangle -D VPN_ZAPRET -m connmark --mark 0x08000000/0x08000000 -j RETURN 2>/dev/null
+            iptables -w 2 -t mangle -D OUTPUT $RULE_MK 2>/dev/null
             iptables -w 2 -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
         }
         # по сигналу — выход (снимет EXIT): обработчик без exit продолжал
@@ -704,7 +760,8 @@ case "$1" in
         trap yt_cleanup EXIT
         trap 'exit 1' INT TERM HUP
         iptables -w 2 -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
-        iptables -w 2 -t mangle -I VPN_ZAPRET 1 -m owner --uid-owner 0 -j RETURN 2>/dev/null
+        iptables -w 2 -t mangle -I OUTPUT 1 $RULE_MK 2>/dev/null
+        iptables -w 2 -t mangle -I VPN_ZAPRET 1 -m connmark --mark 0x08000000/0x08000000 -j RETURN 2>/dev/null
         ip=$(doh_ip dl.google.com 6)
         [ -n "$ip" ] || { echo "ERR не удалось узнать адрес сервера Google"; exit 1; }
         H="rr1---sn-gvnuxaxjvh-n8vz.googlevideo.com"
@@ -718,12 +775,12 @@ case "$1" in
         iptables -w 2 -t mangle -I POSTROUTING 1 $RULE_NFQ
         nk=$(cur_net); nl=${nk#*"|"}; nk=${nk%%"|"*}
         if [ "$eng" = nfqws2 ]; then
-            # стратегия сети и сборка — как у подбора (zapret2_scan_args: её основа, свои профили — у _gv
+            # стратегия сети и сборка — как у подбора (zapret2_scan_args: её основа, свои профили — у vt_soft_crck
             # профиль googlevideo — и TCP); ответы — в ту же очередь: по SYN-ACK nfqws2 считает autottl
             s2=$(sh "$MODDIR/service.sh" --zapret2-strategy "$nk" "$nl" 2>/dev/null)
             [ -n "$s2" ] && [ -f "$MODDIR/zapret2/strategies/$s2.conf" ] || { echo "ERR не знаю стратегию nfqws2 этой сети"; exit 1; }
             echo "strat $s2"
-            a2=$(ZAPRET2_DIR="$MODDIR/zapret2"; . "$MODDIR/lib/zapret.sh"; zapret2_scan_args "$s2" "$Q")
+            a2=$(ZAPRET2_DIR="$MODDIR/zapret2"; ZAPRET2_FAKE_SNI=$(sh "$MODDIR/service.sh" --get ZAPRET2_FAKE_SNI 2>/dev/null); . "$MODDIR/lib/zapret.sh"; zapret2_scan_args "$s2" "$Q")
             RULE_IN="-i $wan -s $ip -p tcp --sport 443 -m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3 -j NFQUEUE --queue-num $Q --queue-bypass"
             [ -n "$CB_OUT" ] || RULE_IN="-i $wan -s $ip -p tcp --sport 443 --tcp-flags SYN,ACK SYN,ACK -j NFQUEUE --queue-num $Q --queue-bypass"
             iptables -w 2 -t mangle -I PREROUTING 1 $RULE_IN
@@ -994,6 +1051,144 @@ case "$1" in
         if [ "$tc" = 0 ] && { [ -z "$w" ] || [ "$w" = 000 ]; }; then echo "R tg|bad|Telegram|закрыт по IP: серверы (0 из 5) и веб-версия недоступны — только через VPN"
         elif [ "$tc" -lt 5 ]; then echo "R tg|warn|Telegram|частично: серверов доступно $tc из 5, веб-версия: $([ -n "$w" ] && [ "$w" != 000 ] && echo открывается || echo нет)"
         else echo "R tg|ok|Telegram|серверы доступны (5 из 5)"; fi
+        ;;
+
+    # --- гео-DoH: открываются ли сервисы гео-списка (18.11) -----------------
+    # Адрес — у dnsproxy модуля (то, что получит телефон); к нему HTTPS с именем сервиса, /cdn-cgi/trace: у сервисов
+    # за Cloudflare в ответе страна выхода (loc=) — прокси подтверждён самим сервисом. Без loc прокси — только адрес,
+    # общий с подтверждённым (у гео-DoH прокси обычно один на все имена): сравнение с «настоящим» ненадёжно — Google
+    # и CDN разным DNS отдают разные адреса (ревью 18.11). Настоящий (dns.google + Cloudflare) или из сетей Google —
+    # прокси нет. Зелёный — прокси есть и отвечает, а не «сервис точно пустит» (Gemini о регионе — страницей 200).
+    # Все 8 сразу, ~5 с. Строки: H <гео-DoH из status> / R <id>|<ok|warn|bad>|<сервис>|<подробно>
+    # geocheck <адрес DoH> — то же, но адреса спрашиваем прямо у этого DoH (кнопка ✓ у гео-DoH в WebUI)
+    geocheck)
+        GU="$2"
+        if [ -n "$GU" ]; then
+            case "$GU" in https://?*) ;; *) echo "ERR нужен адрес https://сервер/dns-query"; exit 1 ;; esac
+            case "$GU" in *[!A-Za-z0-9_./:?=%-]*) echo "ERR такой адрес не проверяю"; exit 1 ;; esac
+        else
+            pid=$(cat "$DNSPROXY_PID_FILE" 2>/dev/null)
+            [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || { echo "ERR зашифрованный DNS модуля не запущен"; exit 1; }
+        fi
+        [ -x "$BB" ] || { echo "ERR нет busybox"; exit 1; }
+        # curl от root попал бы в очередь подбора со своей стратегией (и испортил бы его вердикт)
+        zscan_busy && { echo "ERR идёт подбор или проверка обхода — повторите, когда закончится"; exit 1; }
+        warpgen_busy && { echo "ERR идёт создание конфига WARP — повторите через минуту"; exit 1; }
+        CA=/apex/com.android.conscrypt/cacerts
+        [ -d "$CA" ] || CA=/system/etc/security/cacerts
+        # от группы dnsproxy — мимо HTTPS-фильтра AdGuard; нет su -g (старый Magisk) — bin/vtgid, как у демона
+        G=3999; VG="$MODDIR/bin/vtgid-arm"; case "$(uname -m)" in aarch64|arm64) VG="$MODDIR/bin/vtgid-arm64" ;; esac
+        if su 0 -g $G -c true 2>/dev/null; then asg() { su 0 -g $G -c "$1" 2>/dev/null; }
+        elif [ -x "$VG" ] && "$VG" $G -c true 2>/dev/null; then asg() { "$VG" $G -c "$1" 2>/dev/null; }
+        else asg() { sh -c "$1" 2>/dev/null; }; echo "R gid|warn|Проверка|без группы dnsproxy: AdGuard может исказить ответы"; fi
+        CURL=$(command -v curl) || { echo "ERR нет curl"; exit 1; }
+        T=/data/local/tmp/vpn_tether_geochk.$$
+        QP="$DNSPROXY_PORT"; QW=50
+        # свой dnsproxy проверки (geocheck <адрес>): порт 5397, «:1515» в /proc/net/udp
+        gqk() { for x in $(pgrep -f "dnsproxy.* -p 5397" 2>/dev/null); do kill "$x" 2>/dev/null; done; }
+        trap 'rm -f "$T".*; [ -n "$GU" ] && gqk' EXIT
+        trap 'exit 1' INT TERM HUP
+        if [ -n "$GU" ]; then
+            # прямо у гео-DoH — через свой dnsproxy на время проверки: часть DoH отвечает только по HTTP/2 (MALW, WLRus,
+            # WebShift; curl на телефонах HTTP/2 не умеет — было «нет адреса», 18.11), dnsproxy умеет. От группы dnsproxy,
+            # с системными сертификатами — как у демона (dnsproxy_spawn)
+            D="$MODDIR/bin/dnsproxy-arm"; case "$(uname -m)" in aarch64|arm64) D="$MODDIR/bin/dnsproxy-arm64" ;; esac
+            [ -x "$D" ] || { echo "ERR нет bin/dnsproxy"; exit 1; }
+            gqk; QP=5397; QW=70
+            b=""; for x in $(sh "$MODDIR/service.sh" --get DNS_BOOTSTRAP 2>/dev/null); do b="$b -b $x"; done
+            # в подоболочке: не задание этого шелла — иначе wait ниже (ждёт проверки сервисов) ждал бы и его, вечно
+            ( asg "SSL_CERT_DIR=/apex/com.android.conscrypt/cacerts:/system/etc/security/cacerts exec $D -l 127.0.0.1 -p $QP --timeout=6s ${b:--b 77.88.8.8:53} -u '$GU'" >/dev/null 2>&1 & )
+            i=0; while ! grep -q ':1515 ' /proc/net/udp 2>/dev/null && [ $i -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
+            grep -q ':1515 ' /proc/net/udp 2>/dev/null || { echo "ERR не запустился DNS для проверки"; exit 1; }
+        fi
+        # адреса A у dnsproxy (модуля или своего проверки); nc ждёт тишины и после ответа — файл опрашиваем, как в doh
+        dq() {
+            local q="" l f="$T.$2.dns" i=0 np
+            for l in $(echo "$1" | tr '.' ' '); do q="$q$(printf '\\%03o' ${#l})$l"; done
+            "$BB" printf "\\022\\064\\001\\000\\000\\001\\000\\000\\000\\000\\000\\000${q}\\000\\000\\001\\000\\001" > "$T.$2.q"
+            "$BB" nc -u -w 7 127.0.0.1 "$QP" < "$T.$2.q" > "$f" 2>/dev/null &
+            np=$!
+            while [ ! -s "$f" ] && [ $i -lt $QW ]; do sleep 0.1; i=$((i + 1)); done
+            kill "$np" 2>/dev/null
+            "$BB" od -An -tu1 "$f" 2>/dev/null | tr -s ' \n' '  ' | \
+                awk '{ for (k = 13; k + 13 <= NF; k++) if ($k == 0 && $(k+1) == 1 && $(k+2) == 0 && $(k+3) == 1 && $(k+8) == 0 && $(k+9) == 4) printf "%s%d.%d.%d.%d", (n++ ? " " : ""), $(k+10), $(k+11), $(k+12), $(k+13) }'
+        }
+        # настоящие адреса: два DoH (один может молчать — тогда сравнивать было бы не с чем)
+        ra() {
+            local u
+            for u in "https://dns.google/resolve?name=$1&type=A" "https://cloudflare-dns.com/dns-query?name=$1&type=A"; do
+                asg "$CURL -s -m 5 --capath $CA -H 'accept: application/dns-json' '$u'" | grep -oE '"data":"[0-9.]+"' | grep -oE '[0-9.]+'
+            done | tr '\n' ' '
+        }
+        # адрес в сетях Google (zapret/google-ipv4.txt, goog.json): ingoogle <адрес>
+        ingoogle() {
+            awk -F/ -v ip="$1" 'function n(a, p) { split(a, p, "."); return ((p[1] * 256 + p[2]) * 256 + p[3]) * 256 + p[4] }
+                BEGIN { x = n(ip) } /^[0-9]/ { s = 2 ^ (32 - $2); if (int(x / s) == int(n($1) / s)) { f = 1; exit } } END { exit f ? 0 : 1 }' \
+                "$MODDIR/zapret/google-ipv4.txt" 2>/dev/null
+        }
+        # сбор: «адрес состояние код мс loc» (состояние: noaddr closed real google probe)
+        chk() {   # имя id
+            local geo real ip a r code t loc
+            geo=$(dq "$1" "$2")
+            [ -n "$geo" ] || { echo "- noaddr"; return; }
+            ip=${geo%% *}
+            case "$ip" in 0.*|127.*) echo "$ip closed"; return ;; esac
+            real=$(ra "$1")
+            for a in $geo; do case " $real " in *" $a "*) echo "$ip real"; return ;; esac; done
+            ingoogle "$ip" && { echo "$ip google"; return; }
+            r=$(asg "$CURL -sk -m 8 --resolve $1:443:$ip -o $T.$2.body -w '%{http_code} %{time_total}' https://$1/cdn-cgi/trace")
+            code=${r%% *}; t=${r#* }
+            loc=$(sed -n 's/^loc=//p' "$T.$2.body" 2>/dev/null | head -1)
+            echo "$ip probe ${code:-000} $(awk -v t="${t:-0}" 'BEGIN { printf "%d", t * 1000 }') $loc"
+        }
+        if [ -n "$GU" ]; then
+            echo "H $(echo "$GU" | sed -E 's#^https://([^/:]+).*#\1#')"
+            # DoH через обход: профиль nfqws есть только у серверов из применённых списков (zapret_doh_targets) —
+            # нового проверяем мимо обхода, а после «Применить» он пойдёт через него (ревью 18.11)
+            if [ "$(sh "$MODDIR/service.sh" --get DNS_VIA_ZAPRET 2>/dev/null)" = 1 ]; then
+                al=""; for k in DNS_UPSTREAMS DNS_FALLBACKS DNS_GEO_UPSTREAMS DNS_META_UPSTREAMS; do al="$al $(sh "$MODDIR/service.sh" --get $k 2>/dev/null)"; done
+                case " $al " in *" $GU "*) ;; *) echo "R via|warn|Проверка|сервера нет в применённых настройках — проверен мимо обхода DoH; после «Применить» он пойдёт через обход, и ответ может быть другим" ;; esac
+            fi
+        else echo "H $(sed -n 's/^dns_geo=//p' "$STATUS_FILE" 2>/dev/null)"; fi
+        [ "$(sed -n 's/^vpn_up=//p' "$STATUS_FILE" 2>/dev/null)" = 1 ] && \
+            echo "R vpn|warn|VPN|включён: приложения ходят через него, а проверка — через DNS модуля и мимо туннеля"
+        SVC="chatgpt.com|gpt|ChatGPT gemini.google.com|gemini|Gemini claude.ai|claude|Claude grok.com|grok|Grok open.spotify.com|spotify|Spotify www.notion.so|notion|Notion www.jetbrains.com|jb|JetBrains www.deepl.com|deepl|DeepL"
+        # "|" в шаблоне — в кавычках: в mksh голый | — «или»
+        for s in $SVC; do
+            n=${s%%"|"*}; s=${s#*"|"}
+            chk "$n" "${s%%"|"*}" > "$T.${s%%"|"*}.out" &
+        done
+        wait
+        # подтверждённые прокси: сервис за Cloudflare ответил не из России
+        ref=""
+        for s in $SVC; do
+            s=${s#*"|"}; read -r ip st code ms loc < "$T.${s%%"|"*}.out" 2>/dev/null
+            [ "$st" = probe ] && [ -n "$loc" ] && [ "$loc" != RU ] && [ "$code" != 000 ] && ref="$ref $ip"
+        done
+        for s in $SVC; do
+            s=${s#*"|"}; id=${s%%"|"*}; nm=${s#*"|"}
+            ip=""; st=""; code=""; ms=""; loc=""
+            read -r ip st code ms loc < "$T.$id.out" 2>/dev/null
+            det="прокси $ip, ответ за $ms мс${loc:+, выход: $loc}"
+            case "$st" in
+                noaddr) echo "R $id|bad|$nm|нет адреса: гео-DoH молчит или не даёт адрес" ;;
+                closed) echo "R $id|bad|$nm|гео-DoH закрыл имя ($ip)" ;;
+                real)   echo "R $id|bad|$nm|прокси нет: настоящий адрес $ip, из России закрыт" ;;
+                google) echo "R $id|bad|$nm|прокси нет: адрес Google $ip, из России закрыт" ;;
+                probe)
+                    if [ "$loc" = RU ]; then echo "R $id|bad|$nm|прокси нет: сервис видит Россию (адрес $ip)"
+                    elif [ -z "$loc" ] && case " $ref " in *" $ip "*) false ;; *) true ;; esac; then
+                        # не подтверждён ни сервисом, ни общим адресом — свой адрес сервиса или другой прокси
+                        if [ "$code" = 000 ]; then echo "R $id|bad|$nm|адрес $ip не отвечает"
+                        else echo "R $id|warn|$nm|адрес $ip — не похоже на прокси гео-DoH, проверить нечем"; fi
+                    elif [ "$code" = 000 ]; then echo "R $id|bad|$nm|прокси $ip не отвечает"
+                    else
+                        case "$code" in 5*) echo "R $id|warn|$nm|$det, ошибка сервера $code"; continue ;; esac
+                        if [ "$ms" -gt 2000 ]; then echo "R $id|warn|$nm|$det — медленно"; else echo "R $id|ok|$nm|$det"; fi
+                    fi ;;
+                *) echo "R $id|bad|$nm|проверка не завершилась" ;;
+            esac
+        done
         ;;
 
     # --- DNS Meta "как из Европы" --------------------------------------------

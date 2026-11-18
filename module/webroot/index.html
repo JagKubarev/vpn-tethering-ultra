@@ -171,9 +171,10 @@ textarea { resize: vertical; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo
 /* блоком, не flex: текст без обёртки во flex не сжимается, и длинный домен/ошибка вылезали по ширине */
 .st-line { margin-top: 6px; overflow-wrap: anywhere; }
 .st-line > .dot { margin-right: 8px; vertical-align: -1px; }
-details.off { opacity: .45; pointer-events: none; }
+details.off, #upList.off, .gm-off { opacity: .45; pointer-events: none; }
+.row.fold { cursor: pointer; } .row.fold .chev { padding: 0 10px; opacity: .6; }
 /* в тёмной теме серый текст на .45 почти сливался с карточкой */
-:root[data-theme="dark"] .row.off, :root[data-theme="dark"] details.off { opacity: .55; }
+:root[data-theme="dark"] .row.off, :root[data-theme="dark"] details.off, :root[data-theme="dark"] #upList.off, :root[data-theme="dark"] .gm-off { opacity: .55; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 select:disabled { opacity: .6; }
 .inline { display: flex; flex-wrap: wrap; gap: 0 8px; align-items: flex-start; }
@@ -319,6 +320,8 @@ details > summary::after { border-color: currentColor; }
 .item .seg button { min-height: 32px; font-size: 13px; padding: 0 9px; }
 .item .x { appearance: none; border: 0; background: none; color: var(--muted); width: 36px; height: 36px; border-radius: 50%; font-size: 15px; cursor: pointer; flex: none; }
 .item .x:active { background: var(--line); }
+.item .x:disabled { opacity: .25; cursor: default; }
+.item .x:disabled:active { background: none; }
 .links .row { color: inherit; text-decoration: none; cursor: pointer; }
 .links .lic { width: 36px; height: 36px; border-radius: 50%; background: var(--input); display: grid; place-items: center; flex: none; color: var(--accent); }
 .links .lic svg, .links .go { width: 18px; height: 18px; }
@@ -427,6 +430,13 @@ details > summary::after { border-color: currentColor; }
 <h1><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.93 13.33a10 10 0 0 1 14.14 0"/><path d="M8.46 16.86a5 5 0 0 1 7.08 0"/><circle cx="12" cy="20.4" r="1.7" fill="currentColor" stroke="none"/><path d="M12 2.5v4M9.6 4.9 12 2.5l2.4 2.4"/></svg></span><span class="ttl">VPN Tether</span><small id="ver"></small></h1>
 
 <section class="tab" data-tab="home">
+<div class="card" id="updCard" hidden style="margin-bottom:12px">
+  <div class="row wrap">
+    <div class="txt"><div class="t" id="updTitle">Вышла новая версия</div>
+      <div class="s">Страница релиза — что нового и zip. Установить: менеджер модулей (KernelSU, Magisk, APatch) → «Обновить» у модуля или «Установить из файла».</div></div>
+    <button class="btn small" id="updBtn">Открыть</button>
+  </div>
+</div>
 <div class="card pad" id="statusCard">
   <div class="hero">
     <span class="dot big" id="heroDot"></span>
@@ -488,14 +498,14 @@ details > summary::after { border-color: currentColor; }
   <div id="clients"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
 </div>
 <div class="hint">Заблокированное устройство остаётся в точке доступа, но без интернета; новый «случайный» MAC блокировку обходит. «Всего» — трафик с подключения, а если телефон его не даёт — в открытых сейчас соединениях; «скорость» — между двумя последними обновлениями (раз в 3 секунды).</div>
-<div class="hint">Остальные настройки — во вкладках «Обход», «Выходы» и «DNS», проверки и журналы — в «Сервисе».</div>
+<div class="hint">Остальные настройки — во вкладках «DNS», «Обход» и «Выходы», проверки и журналы — в «Сервисе».</div>
 
 </section>
 
 <section class="tab" data-tab="bypass">
 <h2>Движок</h2>
 <div class="card">
-  <div class="row col" data-dep="ZAPRET_ENABLE">
+  <div class="row col" data-dep="ZAPRET_ENABLE" id="zEngRow">
     <div class="txt"><div class="t">Движок обхода</div>
       <div class="s" id="zEngSub">nfqws2 (zapret2) — стратегии из nfqws2-android, многие сами перебирают приёмы для каждого сайта. nfqws1 — прежний движок со своими стратегиями, подбором и сторожем.</div></div>
     <select data-key="ZAPRET_ENGINE">
@@ -507,7 +517,7 @@ details > summary::after { border-color: currentColor; }
     <div class="txt"><div class="t">Стратегия nfqws2</div>
       <div class="s">Готовые наборы приёмов из nfqws2-android, после тире — автор. Это общая: со «Стратегией для каждой сети» у сети может быть своя (ниже, в «Стратегии»). Порты, списки, исключения и DoH — модуля, для Windows-клиентов раздачи приёмы подстраиваются сами.</div></div>
     <select data-key="ZAPRET2_STRATEGY">
-      <option value="hardcorp74">hardcorp74 — по умолчанию</option>
+      <option value="hardcorp74">hardcorp74</option>
       <option value="alt">alt — Flowseal</option>
       <option value="alt10">alt10 — Flowseal</option>
       <option value="alt11">alt11 — Flowseal</option>
@@ -523,7 +533,6 @@ details > summary::after { border-color: currentColor; }
       <option value="alt8">alt8 — Flowseal</option>
       <option value="alt9">alt9 — Flowseal</option>
       <option value="anti_throttle">anti_throttle — Zephyron</option>
-      <option value="anti_throttle_gv">anti_throttle_gv — anti_throttle + видео от hardcorp74</option>
       <option value="eduncey">eduncey</option>
       <option value="exp">exp — Flowseal</option>
       <option value="fake_disorder">fake_disorder — TheFirstNoob</option>
@@ -539,13 +548,22 @@ details > summary::after { border-color: currentColor; }
       <option value="simple_fake_alt">simple_fake_alt — Flowseal</option>
       <option value="simple_fake_alt2">simple_fake_alt2 — Flowseal</option>
       <option value="universal_v12">universal_v12 — Zephyron</option>
-      <option value="universal_v12_gv">universal_v12_gv — universal_v12 + видео от hardcorp74</option>
       <option value="universal_v13">universal_v13 — RixyPow</option>
       <option value="Uvvi2">Uvvi2</option>
+      <option value="vt_soft_crck">vt_soft_crck — Kubarev, по умолчанию</option>
       <option value="z2r_rocket">z2r_rocket — IndeecFOX</option>
       <option value="z_attacker">z_attacker — GAME-OVER-op</option>
     </select>
-    <details style="margin-top:8px"><summary>Свои приёмы TCP</summary>
+    <details style="margin-top:8px"><summary>Тонкая настройка стратегии</summary>
+      <div class="s" style="margin-top:8px">Имя в подделке</div>
+      <select id="fakeSniSel" aria-label="Имя в подделке">
+        <option value="" id="fakeSniOwn">как в стратегии</option>
+        <option value="*">свой сайт…</option>
+      </select>
+      <input type="text" id="fakeSniIn" style="display:none;margin-top:6px" placeholder="сайт.рф или example.com" aria-label="Своё имя в подделке" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div class="err" id="fakeSniErr" style="display:none"></div>
+      <div class="s muted" id="fakeSniNote" style="font-size:12px;margin-top:4px"></div>
+      <div class="s" style="margin-top:12px">Свои приёмы TCP</div>
       <input type="text" data-key="ZAPRET2_ARGS" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="--payload=tls_client_hello --lua-desync=...">
       <div class="s muted" style="font-size:12px;margin-top:4px">Вместо приёмов выбранной стратегии для TCP, её подделки (по имени) и Lua остаются. Только --payload, --lua-desync, --in-range, --out-range. Пусто — приёмы стратегии.</div>
     </details>
@@ -701,6 +719,14 @@ details > summary::after { border-color: currentColor; }
       <div class="s">Зависшее соединение с видеосервером YouTube рвётся, и приложение сразу открывает новое: обход проходит не с каждой попытки. Сервер не отключается. Запрос, оставшийся без ответа, — тоже.</div></div>
     <label class="sw"><input type="checkbox" data-key="YT_DEAD_FAILFAST"><span></span></label>
   </div>
+  <div class="row" data-dep="YT_DEAD_FAILFAST" data-dep2="ZAPRET_WATCHDOG">
+    <div class="txt"><div class="t">Когда звать сторожа</div>
+      <div class="s">Один видеосервер не открылся столько раз за минуту, а видео нигде не идёт, — похоже на сломанную стратегию, и автопроверка её проверяет. Меньше — проверяет раньше, но чаще зря.</div></div>
+    <select data-key="YT_RETRY_MAX" style="width:auto" aria-label="Провалов сервера за минуту">
+      <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+      <option value="5">5</option><option value="6">6</option><option value="7">7</option>
+    </select>
+  </div>
   <div class="row" data-dep="YT_DEAD_FAILFAST">
     <div class="txt"><div class="t">Малое окно для молчащих серверов</div>
       <div class="s">Если видеосервер дважды принял соединение и замолчал, его группе адресов на 12 часов занижается окно приёма до первых байт ответа: фильтр не узнаёт шифрование и пропускает ответ. Соединение открывается на полсекунды дольше, скорость — до ~5 Мбит/с на соединение. Только движок nfqws2.</div></div>
@@ -757,6 +783,13 @@ details > summary::after { border-color: currentColor; }
 </div>
 
 
+<div class="card" style="margin-top:16px">
+  <div class="row wrap">
+    <div class="txt"><div class="t">Сбросить настройки вкладки</div>
+      <div class="s">Вернёт умолчания «Обход» после «Применить». Свой список сайтов, конфиги WARP и стратегии сетей не трогаются.</div></div>
+    <button class="btn small" data-tabreset="bypass">Сбросить</button>
+  </div>
+</div>
 </section>
 
 <section class="tab" data-tab="net">
@@ -764,35 +797,23 @@ details > summary::after { border-color: currentColor; }
 <div class="card">
   <div class="offnote" data-offnote="DNSPROXY_ENABLE" role="button">Зашифрованный DNS выключен — включается на Главной.</div>
   <div class="row col" data-dep="DNSPROXY_ENABLE">
-    <div class="txt"><div class="t">Сервер DNS (DoH)</div>
-      <div class="s">Серверы из первой группы открывают ChatGPT, Gemini и Claude без VPN. Обычные дают настоящие адреса, это для приватности. Не отвечает — по порядку запасные из «Тонкой настройки».</div></div>
-    <select id="upSelect">
-      <optgroup label="Открывают ChatGPT, Gemini и Claude">
-      <option value="https://dns.zapret.moe/dns-query">zapret.moe</option>
-      <option value="https://de.magicdns.ru/dns-query">magicdns.ru</option>
-      <option value="https://not-a-dns.quic.best/dns-query">not-a-dns.quic.best</option>
-      <option value="https://sync.bezmezhau.com/dns-query">bezmezhau.com</option>
-      <option value="https://api.magicinfo.art/dns-query">magicinfo.art</option>
-      <option value="https://dns.wlrus.cfd/dns-query">wlrus.cfd</option>
-      <option value="https://dns.semqka.xyz/dns-query">semqka.xyz</option>
-      <option value="https://tamaev-gifts.xyz/dns-query">tamaev-gifts.xyz</option>
-      <option value="https://dns.geohide.ru:444/dns-query">dns.geohide.ru:444</option>
-      <option value="https://geohide.ru/dns-query">geohide.ru</option>
-      <option value="https://dns.comss.one/dns-query">comss.one</option>
-      </optgroup>
-      <optgroup label="Обычные, для приватности">
-      <option value="https://dns.google/dns-query">Google</option>
-      <option value="https://cloudflare-dns.com/dns-query">Cloudflare</option>
-      <option value="https://dns.adguard-dns.com/dns-query">AdGuard</option>
-      <option value="https://dns.quad9.net/dns-query">Quad9</option>
-      <option value="https://unfiltered.joindns4.eu/dns-query">DNS4EU (без фильтров)</option>
-      <option value="https://doh.libredns.gr/dns-query">LibreDNS</option>
-      </optgroup>
-      <option value="custom">Свой адрес…</option>
+    <div class="txt"><div class="t">Какие DNS спрашивать</div>
+      <div class="s" id="geoModeSub"></div></div>
+    <select data-key="DNS_GEO_MODE">
+      <option value="split">Обычные + гео-DoH для ИИ</option>
+      <option value="off">Только обычные</option>
+      <option value="all">Только гео-DoH</option>
     </select>
-    <input type="text" id="upCustom" placeholder="https://example.com/dns-query" style="display:none" autocapitalize="off" autocorrect="off" spellcheck="false">
-    <div class="err" id="upErr" style="display:none"></div>
+  </div>
+  <div class="row col" data-dep="DNSPROXY_ENABLE">
+    <div class="txt"><div class="t">Серверы DNS (DoH)</div>
+      <div class="s">По порядку: первый — основной, для всех сайтов; не отвечает — следующий, за ними гео-DoH. ChatGPT, Gemini, Claude и другие сервисы гео-списка модуль спрашивает отдельно, у гео-DoH («Тонкая настройка»).</div></div>
     <div class="st-line s" id="upAi"></div>
+  </div>
+  <div id="upList" data-dep="DNSPROXY_ENABLE" data-gm="all"></div>
+  <div class="row col" data-dep="DNSPROXY_ENABLE" data-gm="all">
+    <div class="inline" style="margin-top:-10px"><input type="text" id="upIn" list="dnsKnownUp" placeholder="https://сервер/dns-query или Google" aria-label="Новый сервер DNS" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="upAdd">Добавить</button></div>
+    <div class="err" id="upErr" style="display:none"></div>
   </div>
   <div class="row" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Для самого телефона</div>
@@ -830,9 +851,32 @@ details > summary::after { border-color: currentColor; }
 <details class="card more">
   <summary>Тонкая настройка</summary>
   <div class="row col">
-    <div class="txt"><div class="t">Запасные DoH-серверы</div>
-      <div class="s">По порядку, если основной не отвечает. Google и Cloudflare не добавляйте: с ними ИИ-сервисы пишут «недоступно в вашем регионе».</div></div>
-    <input type="text" data-key="DNS_FALLBACKS" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <div class="txt"><div class="t">Гео-DoH</div>
+      <div class="s">Для ChatGPT, Gemini, Claude и других сервисов, закрытых для России: отдают адреса своих прокси. По порядку: работает первый отвечающий; замолчал — следующий; молчат все — эти сервисы идут через основной.</div></div>
+  </div>
+  <div id="geoList" data-gm="off"></div>
+  <div class="row col" data-gm="off">
+    <div class="inline" style="margin-top:-10px"><input type="text" id="geoIn" list="dnsKnownGeo" placeholder="https://сервер/dns-query" aria-label="Новый гео-DoH" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="geoAdd">Добавить</button></div>
+    <div class="err" id="geoErr" style="display:none"></div>
+  </div>
+<datalist id="dnsKnownUp"></datalist><datalist id="dnsKnownGeo"></datalist>
+  <div class="row col">
+    <div class="head">
+      <div class="txt"><div class="t">Проверка сервисов</div>
+        <div class="s">Есть ли у гео-DoH прокси для ChatGPT, Gemini, Claude, Grok, Spotify, Notion, JetBrains и DeepL и отвечает ли он. Около 5 с. Зелёный — прокси работает; пустит ли сам сервис, так не узнать (Gemini о неподходящем регионе говорит обычной страницей).</div></div>
+      <button class="btn small" id="geoChkBtn">Проверить</button>
+    </div>
+    <div class="kv" id="geoChkOut" style="display:none"></div>
+  </div>
+  <div class="row" data-gm="off" data-gm2="all">
+    <div class="txt"><div class="t">Без гео-DoH — не давать адреса</div>
+      <div class="s">Если молчат все гео-DoH, сервисам гео-списка (ChatGPT, Gemini, Claude …) адрес не даётся, пока гео-DoH не оживёт. Выключено — они получают настоящие адреса через основной: из России всё равно не откроются, а приложения запомнят их и после возврата гео-DoH ещё несколько минут не будут работать.</div></div>
+    <label class="sw"><input type="checkbox" data-key="DNS_GEO_STRICT"><span></span></label>
+  </div>
+  <div class="row col" data-gm="off" data-gm2="all">
+    <div class="txt"><div class="t">Свои имена для гео-DoH</div>
+      <div class="s">Домены через пробел, с поддоменами — к гео-списку модуля (около 80 сервисов: ИИ, Spotify, Notion, DeepL, JetBrains …).</div></div>
+    <input type="text" data-key="DNS_GEO_DOMAINS" placeholder="example.com" autocapitalize="off" autocorrect="off" spellcheck="false">
   </div>
   <div class="row col">
     <div class="txt"><div class="t">Серверы DoH через VPN</div>
@@ -865,6 +909,13 @@ details > summary::after { border-color: currentColor; }
     <input type="text" data-key="DNS_META_UPSTREAMS" autocapitalize="off" autocorrect="off" spellcheck="false">
   </div>
 </details>
+<div class="card" style="margin-top:16px">
+  <div class="row wrap">
+    <div class="txt"><div class="t">Сбросить настройки вкладки</div>
+      <div class="s">Вернёт умолчания «DNS» после «Применить». Свой список сайтов, конфиги WARP и стратегии сетей не трогаются.</div></div>
+    <button class="btn small" data-tabreset="net">Сбросить</button>
+  </div>
+</div>
 </section>
 
 <section class="tab" data-tab="warp">
@@ -946,6 +997,13 @@ details > summary::after { border-color: currentColor; }
 <h2>Приложения <small id="routeAppsN"></small></h2>
 <div class="card" id="routeApps"></div>
 <div class="hint">Всё, чего нет здесь, идёт как выбрано на Главной: через VPN телефона или напрямую с обходом.</div>
+<div class="card" style="margin-top:16px">
+  <div class="row wrap">
+    <div class="txt"><div class="t">Сбросить настройки вкладки</div>
+      <div class="s">Вернёт умолчания «Выходы» после «Применить»: что идёт в WARP и Opera, их настройки. Выключатели WARP и Opera и конфиги WARP не трогаются.</div></div>
+    <button class="btn small" data-tabreset="warp">Сбросить</button>
+  </div>
+</div>
 </section>
 
 <section class="tab" data-tab="tools">
@@ -1016,6 +1074,16 @@ details > summary::after { border-color: currentColor; }
       <div class="s">Сразу, без «Применить». Запоминается отдельно в этом окне: у WebUI в KernelSU и у приложения VPN Tether выбор свой.</div></div>
     <div class="seg" id="themeSeg" role="radiogroup" aria-label="Оформление" style="margin-top:10px"><button data-t="" role="radio">Системная</button><button data-t="light" role="radio">Светлая</button><button data-t="dark" role="radio">Тёмная</button></div>
   </div>
+  <div class="row wrap">
+    <div class="txt"><div class="t">Обновления</div>
+      <div class="s" id="updState">Новая версия модуля на GitHub — проверка сама раз в 6 часов, при открытии окна.</div></div>
+    <button class="btn small" id="updCheck">Проверить</button>
+  </div>
+  <div class="row wrap">
+    <div class="txt"><div class="t">Перезапустить модуль</div>
+      <div class="s">Как после перезагрузки телефона: правила снимаются и ставятся заново. Интернет и раздача прервутся на 10–20 секунд, видео может остановиться.</div></div>
+    <button class="btn small" id="daemonRestart">Перезапустить</button>
+  </div>
 </div>
 
 <h2>Настройки</h2>
@@ -1071,9 +1139,9 @@ details > summary::after { border-color: currentColor; }
 
 <nav class="tabbar" id="tabbar"><div class="in">
   <button data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg><span>Главная</span></button>
+  <button data-tab="net"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg><span>DNS</span></button>
   <button data-tab="bypass"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11l-3-3"/><path d="M20 17H9l3 3"/></svg><span>Обход</span></button>
   <button data-tab="warp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h6"/><path d="M10 12c3 0 4-6 8-6"/><path d="M10 12c3 0 4 6 8 6"/><circle cx="19" cy="6" r="1.5"/><circle cx="19" cy="18" r="1.5"/></svg><span>Выходы</span></button>
-  <button data-tab="net"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg><span>DNS</span></button>
   <button data-tab="tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>Сервис</span></button>
 </div></nav>
 
@@ -1165,6 +1233,7 @@ function friendly(ifs) {
 }
 
 let ST = {};
+let DNS_ST_KEY = '';   // dns_alt|dns_upstream, по которым подписан список DNS
 function kvRow(k, v, dot) {
   return '<div class="k">' + k + '</div><div class="v">' + (dot ? '<span class="dot ' + dot + '"></span>' : '') +
     '<span>' + v + '</span></div>';
@@ -1225,6 +1294,9 @@ function renderTop(s, names, exTxt, exOld) {
 
 function renderStatus(s) {
   ST = s;
+  renderFakeSni();
+  renderWinHint();
+  if ((s.dns_alt || '') + '|' + (s.dns_upstream || '') !== DNS_ST_KEY) { DNS_ST_KEY = (s.dns_alt || '') + '|' + (s.dns_upstream || ''); renderDnsLists(); }
   $('#ver').textContent = s.module_version || '';
   $('#foot').textContent = 'VPN Tether ' + (s.module_version || '') + ', Kubarev';
   const dot = $('#heroDot'), title = $('#heroTitle'), sub = $('#heroSub'), btn = $('#toggleBtn');
@@ -1287,6 +1359,11 @@ function renderStatus(s) {
     else if (s.phone_dns === '1') h += kvRow('DNS телефона', up + ', зашифрован', 'green');
     else h += kvRow('DNS телефона', 'обычный', '');
   }
+  // гео-DoH (ИИ и др.): пусто — гео-строка не подключена (основной сам гео-DoH, VPN с dnat/cache/doh)
+  if (s.dnsproxy_enable === '1' && s.dns_geo && s.dns_degraded !== '1') {
+    if (s.dns_geo === 'off') h += kvRow('Гео-DoH', CUR.DNS_GEO_STRICT === '0' ? 'молчат все — ИИ и др. пока через основной' : 'молчат все — сервисам гео-списка адресов не даю', 'amber');
+    else h += kvRow('Гео-DoH', esc(s.dns_geo) + ' — ИИ и сервисы гео-списка', 'green');
+  }
   if (s.stealth === 'on') {
     const f = +s.ttl_foreign || 0;
     h += kvRow('Скрытие раздачи', f ? (s.stealth_strict === '1' ? 'отбито пакетов с чужим TTL: ' + f : 'чужой TTL у устройства раздачи (' + f + ' пак.) — установите на нём TTL 64') : 'включено, чужого TTL нет', f ? 'amber' : 'green');
@@ -1317,7 +1394,9 @@ function renderStatus(s) {
       const k = (+s.yt_retry_kills || 0) + (+s.yt_retry_rsts || 0), q = +s.yt_req_kills || 0;
       h += kvRow('Зависшие видеосоединения', 'порвано: ' + k + ' · запросов без ответа: ' + q +
         (+s.yt_ramp > 0 ? ' · малое окно: ' + esc(s.yt_ramp) + ' групп адресов' : '') +
-        (+s.yt_front > 0 ? ' · отказ мёртвым серверам: ' + esc(s.yt_front) : ''), 'green');
+        (+s.yt_front > 0 ? ' · отказ мёртвым серверам: ' + esc(s.yt_front) : '') +
+        (+s.yt_pokes > 0 ? ' · пустых ACK при простое: ' + esc(s.yt_pokes) : '') +
+        (+s.yt_idle_kills > 0 ? ' · порвано по простою: ' + esc(s.yt_idle_kills) : ''), 'green');
     }
     if (s.zwd === '1') {
       const w = (s.zwd_last || '').split('|'), t = w[1] || '';
@@ -1327,7 +1406,7 @@ function renderStatus(s) {
   }
   else if (s.zapret === 'fail') h += kvRow('Обход блокировок', 'nfqws не запустился, повтор через минуту', 'red');
   else if (s.zapret === 'nokernel') h += kvRow('Обход блокировок', 'ядро телефона не поддерживает NFQUEUE — обход невозможен, нужен VPN', 'red');
-  else if (s.zapret === 'wl') h += kvRow('Обход блокировок', 'пауза: белый список оператора — обход и смена адреса не помогут, нужен VPN', 'amber');
+  else if (s.zapret === 'wl') h += kvRow('Обход блокировок', 'пауза: белые списки оператора — обход и смена адреса не помогут, нужен VPN', 'amber');
   if (s.dnsproxy_enable === '1' && s.meta_eu === '1') {
     if (s.meta_eu_on === '1') h += kvRow('Instagram, Facebook, WhatsApp', 'как из Европы (ECS ' + esc(s.meta_ecs) + ')', 'green');
     else if (s.vpn_up === '1') h += kvRow('Instagram, Facebook, WhatsApp', 'через VPN, Европа не нужна', '');
@@ -1416,9 +1495,9 @@ async function loadStatus() {
 
 // ---------------------------------------------------------------- настройки
 let DEF = {}, USR = {}, CUR = {};   // умолчания, из файла, текущие в форме
-const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAMS','DNS_FALLBACKS','DNS_VPN_UPSTREAMS',
+const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAMS','DNS_FALLBACKS','DNS_GEO_UPSTREAMS','DNS_GEO_DOMAINS','DNS_GEO_STRICT','DNS_GEO_MODE','DNS_VPN_UPSTREAMS',
   'DNS_BOOTSTRAP','DNS_HEALTH_INTERVAL','DNS_HEALTH_RECOVER','KILL_SWITCH','KILL_SWITCH_STRICT','NET_PROFILE_ADAPTIVE',
-  'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_ENGINE','ZAPRET2_STRATEGY','ZAPRET2_ARGS','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE','ZAPRET_EXCL_APPS',
+  'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_ENGINE','ZAPRET2_STRATEGY','ZAPRET2_ARGS','ZAPRET2_FAKE_SNI','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE','ZAPRET_EXCL_APPS',
   'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','DNS_VIA_ZAPRET','YT_GGC_BLOCK','YT_DEAD_FAILFAST','YT_WSSIZE_RAMP','YT_RETRY_MAX','ZAPRET_WATCHDOG','ZAPRET_AUTOPICK','ZAPRET_WATCHDOG_MIN',
   'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','ZAPRET_AUTO_FAIL',
   'WARP_ENABLE','WARP_CONF','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_COUNTRY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
@@ -1451,13 +1530,7 @@ function renderForm() {
     else el.value = v;
   });
   $('#directDoh').checked = CUR.DNS_DIRECT !== 'plain';
-  // DoH-сервер
-  const first = (CUR.DNS_UPSTREAMS || '').trim();
-  const opt = Array.from($('#upSelect').options).find((o) => o.value === first);
-  $('#upSelect').value = opt ? first : 'custom';
-  $('#upCustom').style.display = opt ? 'none' : '';
-  if (!opt) $('#upCustom').value = first;
-  renderUpAi();
+  renderDnsLists();
   renderChips();
   renderDeps();
   renderBar();
@@ -1531,12 +1604,113 @@ $('#routeGroups').addEventListener('click', (e) => {
 }));
 $('#routeSites').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'routeSiteIn') { e.preventDefault(); $('#routeSiteAdd').click(); } });
 
-// DNS: открывает ли выбранный сервер ИИ-сервисы; что значит выбор «DNS раздачи при VPN»
+// DNS: два списка по порядку. Основной: первый — DNS_UPSTREAMS, остальные — DNS_FALLBACKS; гео — DNS_GEO_UPSTREAMS.
+// Известные и свои адреса равноправны: поднять, опустить, убрать
+const DNS_KNOWN = [
+  ['https://dns.google/dns-query', 'Google'], ['https://cloudflare-dns.com/dns-query', 'Cloudflare'],
+  ['https://dns.adguard-dns.com/dns-query', 'AdGuard'], ['https://dns.quad9.net/dns-query', 'Quad9'],
+  ['https://unfiltered.joindns4.eu/dns-query', 'DNS4EU (без фильтров)'], ['https://doh.libredns.gr/dns-query', 'LibreDNS'],
+  ['https://doh.fuckingspeedtest.com/dns-query', 'zapret.moe (новое имя)'], ['https://dns.zapret.moe/dns-query', 'zapret.moe'],
+  ['https://dns.semqka.xyz/dns-query', 'semqka.xyz'], ['https://dns.commonnet.work/dns-query', 'commonnet.work'],
+  ['https://not-a-dns.quic.best/dns-query', 'quic.best'], ['https://w.quic.best/dns-query', 'quic.best (второе имя)'],
+  ['https://sync.bezmezhau.com/dns-query', 'bezmezhau.com'], ['https://dns.geodema.love/dns-query', 'geodema.love'],
+  ['https://dns.dagami.ru/dns-query', 'dagami.ru'], ['https://dns.keyoneday.ru/dns-query', 'keyoneday.ru']];
+const dnsWords = (k, o) => ((o || CUR)[k] || '').split(/\s+/).filter(Boolean);
+// гео-DoH — те, что у демона в гео-списке по умолчанию (service.sh --defaults), и свои из гео-списка
+const dnsGeoDef = () => dnsWords('DNS_GEO_UPSTREAMS', DEF);
+// известные: подписанные + все из умолчаний демона (новый там — сразу в подсказках)
+const dnsKnownAll = () => Array.from(new Set(DNS_KNOWN.map((x) => x[0]).concat(dnsWords('DNS_UPSTREAMS', DEF), dnsWords('DNS_FALLBACKS', DEF), dnsGeoDef())));
+const upList = () => Array.from(new Set(dnsWords('DNS_UPSTREAMS').concat(dnsWords('DNS_FALLBACKS'))));
+const geoList = () => Array.from(new Set(dnsWords('DNS_GEO_UPSTREAMS')));
+const dnsName = (u) => { const k = DNS_KNOWN.find((x) => x[0] === u); return k ? k[1] : u.replace(/^[a-z0-9]+:\/\//, '').replace(/\/dns-query$/, ''); };
+// гео-DoH основным подменяет адреса и не ИИ (www.googleapis.com, api.github.com, 4PDA)
+const dnsIsGeo = (u) => dnsGeoDef().includes(u) || geoList().includes(u);
+// сколько первых в списке — основные (DNS_UPSTREAMS бывает из нескольких: dnsproxy спрашивает их все)
+const upN = () => Math.max(1, new Set(dnsWords('DNS_UPSTREAMS')).size);
+const dnsHost = (u) => u.replace(/^[a-z0-9]+:\/\//, '').replace(/^\[/, '').replace(/[\]\/:].*$/, '');
+
+function setDnsList(kind, l, n) {
+  if (kind === 'up') { n = Math.max(1, Math.min(n || upN(), l.length)); CUR.DNS_FALLBACKS = l.slice(n).join(' '); setCur('DNS_UPSTREAMS', l.slice(0, n).join(' ')); }
+  else setCur('DNS_GEO_UPSTREAMS', l.join(' '));
+  renderDnsLists();
+}
+const DNS_OPEN = {};   // свёрнут/раскрыт список DNS (up, geo) — до перезагрузки страницы
+function renderDnsLists() {
+  const ul = upList(), gl = geoList(), n = upN(), alt = ST.dns_alt === '1' && ST.dns_upstream;
+  const row = (kind, u, i, n, sub, amber) => '<div class="row item"><div class="txt"><div class="t">' + (amber ? '<span class="dot amber"></span>' : '') + esc(dnsName(u)) + '</div>' +
+    '<div class="s">' + esc(sub) + '</div></div>' +
+    (kind === 'geo' ? '<button class="x" data-dchk="' + i + '" aria-label="Проверить ' + esc(dnsName(u)) + '" title="Проверить сервисы через него">✓</button>' : '') +
+    '<button class="x" data-dmv="' + kind + '" data-i="' + i + '" data-d="-1"' + (i === 0 ? ' disabled' : '') + ' aria-label="Выше: ' + esc(dnsName(u)) + '">▲</button>' +
+    '<button class="x" data-dmv="' + kind + '" data-i="' + i + '" data-d="1"' + (i === n - 1 ? ' disabled' : '') + ' aria-label="Ниже: ' + esc(dnsName(u)) + '">▼</button>' +
+    '<button class="x" data-drm="' + kind + '" data-i="' + i + '"' + (kind === 'up' && n === 1 ? ' disabled' : '') + ' aria-label="Убрать ' + esc(dnsName(u)) + '">✕</button></div>';
+  // хост — только у известных (у своего имя и есть хост)
+  const host = (u) => (DNS_KNOWN.some((x) => x[0] === u) ? ' · ' + u.replace(/^https:\/\//, '').replace(/\/dns-query$/, '') : '');
+  const now = (u, i) => !alt ? '' : dnsHost(u) === ST.dns_upstream ? ' · сейчас через него' : i < n ? ' · не отвечает' : '';
+  // длинный список свёрнут до основных (гео — до первого): видно, кто отвечает сейчас, а не 11 строк. Пока DNS на
+  // запасном — раскрыт сам (виден «сейчас через него»), пока не свернут руками
+  const fold = (kind, rows, l, keep) => {
+    if (rows.length <= keep + 1) return rows.join('');
+    const open = kind in DNS_OPEN ? DNS_OPEN[kind] : kind === 'up' && !!alt, rest = l.slice(keep).map(dnsName);
+    // строка «свернуть/развернуть» — на месте, раскрытые ниже неё: палец не ищет её в конце списка
+    return rows.slice(0, keep).join('') + '<div class="row item fold" role="button" tabindex="0" data-dfold="' + kind + '" data-open="' + (open ? 1 : 0) + '">' +
+      '<div class="txt"><div class="s">' + (open ? 'Свернуть' : 'Ещё ' + rest.length + ': ' + esc(rest.join(', '))) + '</div></div><span class="chev">' + (open ? '▴' : '▾') + '</span></div>' +
+      (open ? rows.slice(keep).join('') : '');
+  };
+  $('#upList').innerHTML = fold('up', ul.map((u, i) => row('up', u, i, ul.length, (i < n ? 'основной' : 'запасной ' + (i - n + 1)) + host(u) + now(u, i) +
+    // гео-DoH в запасных демон пропускает до конца списка обычных (dns_not_geo, dns_try_alt)
+    // режим «только обычные»: гео-списка у демона нет — такой сервер обычный запасной
+    (i >= n && gl.includes(u) && CUR.DNS_GEO_MODE !== 'off' ? ' · в гео-списке — только после обычных' : ''), dnsIsGeo(u))), ul, n) +
+    (gl.length && CUR.DNS_GEO_MODE !== 'off' ? '<div class="row"><div class="txt"><div class="s">Молчат все — дальше гео-DoH из списка ниже, для всех имён: при ограничениях сети у них больше шансов ответить. Потом DNS оператора.</div></div></div>' : '');
+  $('#geoList').innerHTML = gl.length ? fold('geo', gl.map((u, i) => row('geo', u, i, gl.length, (i === 0 ? 'первый' : i + 1 + '-й') + host(u), false)), gl, 1) :
+    '<div class="row"><div class="txt"><div class="s">Пусто — гео-DoH выключен: ChatGPT, Gemini и др. идут через основной, настоящими адресами (из России не откроются).</div></div></div>';
+  const opts = (l) => l.map((u) => '<option value="' + esc(u) + '">' + esc(dnsName(u)) + '</option>').join('');
+  $('#dnsKnownUp').innerHTML = opts(dnsKnownAll().filter((u) => !ul.includes(u)));
+  $('#dnsKnownGeo').innerHTML = opts(dnsGeoDef().filter((u) => !gl.includes(u)));
+  renderUpAi();
+}
+function dnsAdd(kind) {
+  const inp = $(kind === 'up' ? '#upIn' : '#geoIn'), err = $(kind === 'up' ? '#upErr' : '#geoErr');
+  let v = inp.value.trim();
+  const k = dnsKnownAll().find((u) => dnsName(u).toLowerCase() === v.toLowerCase()); if (k) v = k;
+  // голое имя — DoH по стандартному пути; адрес:53 — обычный DNS, как есть
+  const plain = /^(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-fA-F:]+\]):53$/.test(v);
+  if (!plain && /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?$/i.test(v)) v = 'https://' + v + '/dns-query';
+  let ok = kind === 'up' ? plain || /^(https|tls|quic|h3|sdns|udp|tcp):\/\/[A-Za-z0-9:\/._\[\]-]+$/.test(v) : /^https:\/\/[A-Za-z0-9:\/._\[\]-]+$/.test(v);
+  let msg = kind === 'up' ? 'Нужен адрес вида https://сервер/dns-query (или tls://, quic://, IP:53)' : 'Гео-DoH — только https://сервер/dns-query';
+  // обычный DNS из известных (Google, Quad9 …) гео-прокси не отдаёт: в гео-списке он прятал бы ИИ
+  if (ok && kind === 'geo' && dnsKnownAll().includes(v) && !dnsGeoDef().includes(v)) { ok = false; msg = dnsName(v) + ' — обычный DNS, адресов прокси для ИИ не отдаёт'; }
+  err.style.display = ok ? 'none' : ''; err.textContent = ok ? '' : msg;
+  if (!ok) { inp.focus(); return; }
+  const l = kind === 'up' ? upList() : geoList();
+  if (l.includes(v)) { toast(dnsName(v) + ' уже в списке'); return; }
+  inp.value = ''; l.push(v); DNS_OPEN[kind] = true; setDnsList(kind, l);
+}
+$('#upAdd').addEventListener('click', () => dnsAdd('up'));
+$('#geoAdd').addEventListener('click', () => dnsAdd('geo'));
+['#upList', '#geoList'].forEach((id) => $(id).addEventListener('keydown', (e) => {
+  const f = e.target.closest('[data-dfold]');
+  if (f && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); f.click(); }
+}));
+['#upIn', '#geoIn'].forEach((id) => $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); dnsAdd(id === '#upIn' ? 'up' : 'geo'); } }));
+['#upList', '#geoList'].forEach((id) => $(id).addEventListener('click', (e) => {
+  const f = e.target.closest('[data-dfold]');
+  if (f) { DNS_OPEN[f.dataset.dfold] = f.dataset.open !== '1'; renderDnsLists(); return; }
+  const c = e.target.closest('[data-dchk]');
+  if (c) { const u = geoList()[+c.dataset.dchk]; if (u) runGeoCheck(u); return; }
+  const b = e.target.closest('button.x'); if (!b || b.disabled) return;
+  const kind = b.dataset.dmv || b.dataset.drm, i = +b.dataset.i, l = kind === 'up' ? upList() : geoList();
+  let n = upN();
+  if (b.dataset.drm) { l.splice(i, 1); if (i < n) n--; }
+  else { const j = i + +b.dataset.d; if (j < 0 || j >= l.length) return; [l[i], l[j]] = [l[j], l[i]]; }
+  setDnsList(kind, l, n);
+}));
 function renderUpAi() {
-  const v = upValue(), grp = Array.from($('#upSelect').querySelectorAll('optgroup')[0].children).map((o) => o.value);
-  const ai = grp.includes(v), noGem = /comss/.test(v);
-  $('#upAi').innerHTML = !v || $('#upSelect').value === 'custom' ? '' : '<span class="dot ' + (ai ? noGem ? 'amber' : 'green' : '') + '"></span>' +
-    'ИИ-сервисы без VPN: ' + (ai ? noGem ? 'ChatGPT и Claude, Gemini — нет' : 'открываются' : 'нет');
+  const v = upList()[0] || '', geo = dnsIsGeo(v), m = CUR.DNS_GEO_MODE;
+  // «только гео-DoH» — основной список не в деле; «только обычные» — гео-DoH не спрашиваются
+  if (m === 'all') { $('#upAi').innerHTML = '<span class="dot amber"></span>Все имена — через гео-DoH («Тонкая настройка»), этот список не используется'; return; }
+  $('#upAi').innerHTML = !v ? '' : '<span class="dot ' + (geo ? 'amber' : 'green') + '"></span>' +
+    (geo ? 'Основной — гео-DoH: отвечает за все сайты, а его прокси бывают и у Google API, GitHub, 4PDA' :
+      m === 'off' ? 'Все имена — настоящими адресами, гео-DoH не спрашиваются' : 'ИИ и сервисы гео-списка — через гео-DoH, остальное — настоящими адресами');
 }
 const DNS_VPN_SUB = {
   dnat: 'Отвечает VPN-клиент. Нужно, если он выбирает путь по доменам: fake-ip в sing-box, NekoBox, Incy, AmneziaVPN по сайтам.',
@@ -1545,21 +1719,87 @@ const DNS_VPN_SUB = {
   geo: 'Тот же сервер, что выбран выше, через туннель. ChatGPT, Gemini и Claude открываются и сразу после выключения VPN, без сброса кэша. Выбор пути по доменам в VPN-клиенте для раздачи не работает.'
 };
 
+const GEO_MODE_SUB = {
+  split: 'Сайты — через серверы ниже; ChatGPT, Gemini, Claude и другие сервисы гео-списка — через гео-DoH («Тонкая настройка»), они отдают адреса своих прокси.',
+  off: 'Все имена — через серверы ниже, гео-DoH не спрашиваются. Сервисы, закрытые для России (ChatGPT, Gemini …), получат настоящие адреса и без VPN не откроются.',
+  all: 'Все имена — через гео-DoH из «Тонкой настройки», по порядку: первый — основной, остальные — запасные. Некоторые из них отдают свои прокси и для Google (www.googleapis.com) — YouTube может работать хуже.'
+};
+let fakeOwnPick = false;   // выбрано «своё имя…», а имя ещё не введено
+// команда netsh для меток времени Windows — только если у работающей стратегии есть подделки с tcp_ts
+// (status zapret2_ts от демона; не знаем — показываем). Зовут и форма (renderDeps), и опрос статуса
+function renderWinHint() {
+  $('#zEngWin').style.display = CUR.ZAPRET_ENGINE === 'nfqws2' && CUR.ZAPRET_ENABLE === '1' && ST.zapret2_ts !== '0' ? '' : 'none';
+}
+// punycode (xn--…) -> кириллица, только для показа (RFC 3492, расшифровка); не разобрали — метка как есть
+function punyToU(h) {
+  const base = 36, tmin = 1, tmax = 26;
+  const adapt = (d, n, first) => {
+    d = first ? Math.floor(d / 700) : d >> 1; d += Math.floor(d / n);
+    let k = 0; while (d > ((base - tmin) * tmax) >> 1) { d = Math.floor(d / (base - tmin)); k += base; }
+    return k + Math.floor((base - tmin + 1) * d / (d + 38));
+  };
+  const dig = (c) => (c >= 48 && c <= 57 ? c - 22 : c >= 65 && c <= 90 ? c - 65 : c >= 97 && c <= 122 ? c - 97 : base);
+  return String(h || '').split('.').map((l) => {
+    if (!/^xn--/i.test(l)) return l;
+    try {
+      const s = l.slice(4), b = Math.max(0, s.lastIndexOf('-')), out = Array.from(s.slice(0, b));
+      let n = 128, i = 0, bias = 72;
+      for (let p = b > 0 ? b + 1 : 0; p < s.length;) {
+        const oldi = i;
+        for (let w = 1, k = base; ; k += base) {
+          if (p >= s.length) throw 0;
+          const d = dig(s.charCodeAt(p++)); if (d >= base) throw 0;
+          i += d * w; const t = k <= bias ? tmin : k >= bias + tmax ? tmax : k - bias;
+          if (d < t) break; w *= base - t;
+        }
+        bias = adapt(i - oldi, out.length + 1, oldi === 0);
+        n += Math.floor(i / (out.length + 1)); i %= out.length + 1;
+        out.splice(i++, 0, String.fromCodePoint(n));
+      }
+      return out.join('');
+    } catch (e) { return l; }
+  }).join('.');
+}
+function renderFakeSni() {
+  const sel = $('#fakeSniSel'), inp = $('#fakeSniIn'); if (!sel) return;
+  // что стоит в подделке у действующей стратегии (своя у сети, если есть) — от демона (status zapret2_gfake, «-» — подделки
+  // нет); nfqws2 не запущен — не знаем: пункт доступен, имени в подписи нет
+  const gf = ST.zapret2_gfake, own = gf && gf !== '-' ? gf : '', can = gf === undefined || gf === '' || !!own;
+  const eff = (ST.zapret2_strategy || '').replace(/\+$/, ''), other = eff && eff !== (CUR.ZAPRET2_STRATEGY || 'vt_soft_crck');
+  const v = CUR.ZAPRET2_FAKE_SNI || '';
+  // два пункта (18.11): имя стратегии или свой сайт; своё — в поле, кириллицей (в конфиге — punycode)
+  $('#fakeSniOwn').textContent = 'как в стратегии' + (own ? ' (' + punyToU(own) + ')' : '');
+  sel.value = !fakeOwnPick && !v ? '' : '*';
+  inp.style.display = sel.value === '*' ? '' : 'none';
+  if (sel.value === '*' && document.activeElement !== inp) inp.value = punyToU(v);
+  sel.disabled = inp.disabled = !can;
+  $('#fakeSniNote').textContent = (can ? 'Какое имя ТСПУ видит в поддельном ClientHello общего профиля (сайты, API YouTube); свои профили стратегии (видео, Google, Discord) и QUIC — без изменений. «Как в стратегии» — имя из её файла.'
+    : 'В общем профиле работающей стратегии нет подделки Google — имя ставить некуда.') +
+    (other ? ' Сейчас в этой сети работает «' + eff + '» — подпись и имя про неё.' : '');
+}
 function renderDeps() {
   renderRoutes();
+  // какие DNS спрашивать: ненужный список гасим (data-gm — режим, в котором он не нужен; data-gm2 — второй такой)
+  $$('[data-gm]').forEach((el) => el.classList.toggle('gm-off', CUR.DNS_GEO_MODE === el.dataset.gm || (!!el.dataset.gm2 && CUR.DNS_GEO_MODE === el.dataset.gm2)));
+  if ($('#geoModeSub')) $('#geoModeSub').textContent = GEO_MODE_SUB[CUR.DNS_GEO_MODE] || GEO_MODE_SUB.split;
   if ($('#dnsVpnSub')) $('#dnsVpnSub').textContent = DNS_VPN_SUB[CUR.DNS_VPN] || 'DNS для устройств раздачи, когда VPN включён.';
   $$('.seg[data-key]').forEach((g) => g.querySelectorAll('button').forEach((b) => {
     const on = b.dataset.v === CUR[g.dataset.key]; b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false');
   }));
   // data-depoff — настройка, которая главнее: включена — эта не действует (гасим)
-  $$('[data-dep]').forEach((row) => { row.classList.toggle('off', CUR[row.dataset.dep] !== '1' || (!!row.dataset.depoff && CUR[row.dataset.depoff] === '1')); });
+  // data-dep2 — вторая нужная настройка (обе включены — строка действует)
+  $$('[data-dep]').forEach((row) => { row.classList.toggle('off', CUR[row.dataset.dep] !== '1' || (!!row.dataset.dep2 && CUR[row.dataset.dep2] !== '1') || (!!row.dataset.depoff && CUR[row.dataset.depoff] === '1')); });
+  renderFakeSni();
   // главный выключатель — только на Главной; во вкладках подсказка, если он выключен
   $$('[data-offnote]').forEach((n) => { n.hidden = CUR[n.dataset.offnote] === '1'; });
   // nfqws2: стратегии, подбор и сторож — только у nfqws1, у nfqws2 свой перебор приёмов
   $$('[data-nfqws1]').forEach((el) => { el.style.display = CUR.ZAPRET_ENGINE === 'nfqws2' ? 'none' : ''; });
   $$('[data-nfqws2]').forEach((el) => { el.style.display = CUR.ZAPRET_ENGINE === 'nfqws2' ? '' : 'none'; });
+  // nfqws1 скрыт из интерфейса (18.11, до вырезания из демона): выбор движка — только тем, у кого он ещё стоит,
+  // чтобы могли перейти на nfqws2. Демон nfqws1 по-прежнему умеет (и сам уходит на него, если nfqws2 не запустился)
+  $('#zEngRow').style.display = saved('ZAPRET_ENGINE') === 'nfqws1' || CUR.ZAPRET_ENGINE === 'nfqws1' ? '' : 'none';
   // подсказка про метки времени Windows — только nfqws2 (hardcorp74 на них держится) и при включённом обходе
-  $('#zEngWin').style.display = CUR.ZAPRET_ENGINE === 'nfqws2' && CUR.ZAPRET_ENABLE === '1' ? '' : 'none';
+  renderWinHint();
   $('#zArgsBox').style.display = CUR.ZAPRET_STRATEGY === 'custom' ? '' : 'none';
   const pn = CUR.ZAPRET_PER_NET === '1';
   $('#znetBox').style.display = pn && CUR.ZAPRET_ENGINE !== 'nfqws2' ? '' : 'none';   // у nfqws2 — свой блок (z2netBox)
@@ -1589,6 +1829,8 @@ function setCur(k, v) {
     if (el.type === 'checkbox') el.checked = v === '1';
     else if (el.tagName === 'SELECT') el.value = v;
   });
+  // подписи в списках DNS зависят от режима
+  if (k === 'DNS_GEO_MODE') renderDnsLists();
   renderDeps(); renderBar();
 }
 
@@ -1723,17 +1965,6 @@ $('#themeSeg').addEventListener('click', (e) => {
 
 $('#directDoh').addEventListener('change', (e) => setCur('DNS_DIRECT', e.target.checked ? 'doh' : 'plain'));
 
-function upValue() {
-  const sel = $('#upSelect').value;
-  return sel === 'custom' ? $('#upCustom').value.trim() : sel;
-}
-$('#upSelect').addEventListener('change', () => {
-  const custom = $('#upSelect').value === 'custom';
-  $('#upCustom').style.display = custom ? '' : 'none';
-  if (custom) $('#upCustom').focus();
-  setCur('DNS_UPSTREAMS', upValue()); renderUpAi();
-});
-$('#upCustom').addEventListener('input', () => setCur('DNS_UPSTREAMS', upValue()));
 
 // ---------------------------------------------------------------- QUIC: приложения
 let APPS = null;   // [{pkg, label}]
@@ -1830,7 +2061,7 @@ $('#sheetBg').addEventListener('click', () => openSheet(false));
 // ---------------------------------------------------------------- применить
 function validate() {
   const u = CUR.DNS_UPSTREAMS || '';
-  const bad = CUR.DNSPROXY_ENABLE === '1' && (!u || !/^(https|tls|quic|h3|sdns|udp|tcp):\/\/\S+(\s+\S+)*$/.test(u));
+  const bad = CUR.DNSPROXY_ENABLE === '1' && (!u || !/^((https|tls|quic|h3|sdns|udp|tcp):\/\/\S+|[0-9.]+:53|\[[0-9a-fA-F:]+\]:53)(\s+\S+)*$/.test(u));
   $('#upErr').style.display = bad ? '' : 'none';
   $('#upErr').textContent = bad ? 'Нужен адрес вида https://сервер/dns-query' : '';
   if (bad) { toast('Сервер DNS: нужен адрес вида https://сервер/dns-query'); return false; }
@@ -1900,15 +2131,31 @@ $('#applyBtn').addEventListener('click', async () => {
   }
 });
 $('#revertBtn').addEventListener('click', () => {
-  KEYS.forEach((k) => { CUR[k] = saved(k); }); $('#zlist').value = ZL_SAVED;
+  KEYS.forEach((k) => { CUR[k] = saved(k); }); $('#zlist').value = ZL_SAVED; fakeOwnPick = false;
   $('#upErr').style.display = 'none'; $('#zlistErr').style.display = 'none';
   renderForm(); loadWarp();
 });
+// сброс вкладки: её поля (data-key внутри) и то, что в ней рисуется списками и выбором приложений — к умолчаниям
+const TAB_KEYS_EXTRA = { net: ['DNS_DIRECT', 'DNS_UPSTREAMS', 'DNS_FALLBACKS', 'DNS_GEO_UPSTREAMS'],
+  bypass: ['QUIC_BLOCK_APPS', 'ZAPRET2_FAKE_SNI', 'ZAPRET_EXCL_APPS', 'ZAPRET_WATCHDOG_MIN', 'ZAPRET_ALT_MIN'],
+  warp: ['WARP_CONF', 'WARP_GOOGLE', 'WARP_TELEGRAM', 'WARP_APPS', 'WARP_DOMAINS', 'OPERA_DOMAINS', 'OPERA_TELEGRAM', 'OPERA_GOOGLE', 'OPERA_APPS'] };
+const TAB_NAMES = { net: 'DNS', bypass: 'Обход', warp: 'Выходы' };
+$$('[data-tabreset]').forEach((b) => b.addEventListener('click', () => {
+  if (busy) { toast('Подождите — применяются настройки'); return; }
+  const t = b.dataset.tabreset, sec = $('.tab[data-tab="' + t + '"]');
+  // выключатели WARP и Opera стоят на этой же вкладке — сброс их не трогает, как главные выключатели обхода и DNS
+  const keys = Array.from(new Set(Array.from(sec.querySelectorAll('[data-key]')).map((e) => e.dataset.key).concat(TAB_KEYS_EXTRA[t] || [])))
+    .filter((k) => KEYS.includes(k) && k !== 'WARP_ENABLE' && k !== 'OPERA_ENABLE');
+  if (!confirm('Вернуть настройки вкладки «' + TAB_NAMES[t] + '» к значениям по умолчанию?')) return;
+  keys.forEach((k) => { CUR[k] = DEF[k] || ''; }); fakeOwnPick = false;
+  renderForm(); if (t === 'warp') loadWarp();
+  toast('Вкладка «' + TAB_NAMES[t] + '» сброшена — нажмите «Применить»');
+}));
 $('#resetAll').addEventListener('click', () => {
   // как у импорта: «Применить» в конце перечитывает форму — сброс пропал бы
   if (busy) { toast('Подождите — применяются настройки'); return; }
   if (!confirm('Вернуть все настройки к значениям по умолчанию?')) return;
-  KEYS.forEach((k) => { CUR[k] = DEF[k] || ''; }); renderForm(); loadWarp();
+  KEYS.forEach((k) => { CUR[k] = DEF[k] || ''; }); fakeOwnPick = false; renderForm(); loadWarp();
 });
 // экспорт — сохранённое (vpn_tether.conf и свой список), не то, что сейчас в форме
 $('#cfgExp').addEventListener('click', async () => {
@@ -2311,6 +2558,60 @@ $('#diagBtn').addEventListener('click', async () => {
     o.innerHTML = rows.length ? rows.map((f) => kvRow(esc(f[2] || f[0]), esc(f.slice(3).join('|')), col[f[1]] || '')).join('')
       : kvRow('Ошибка', esc((r.out || 'нет ответа').replace(/^ERR /, '')), 'red');
   } finally { b.disabled = false; b.textContent = 'Проверить ещё раз'; }
+});
+// u — адрес гео-DoH (кнопка ✓ в списке): спрашиваем прямо его; без u — DNS модуля, как получит телефон
+let geoChkBusy = false;
+async function runGeoCheck(u) {
+  if (geoChkBusy) { toast('Идёт проверка — подождите'); return; }
+  const b = $('#geoChkBtn'), o = $('#geoChkOut');
+  geoChkBusy = true; b.disabled = true; b.textContent = 'Проверяю…';
+  o.style.display = ''; o.innerHTML = kvRow('Идёт проверка', '8 сервисов ' + (u ? 'через ' + esc(dnsName(u)) : 'через DNS модуля'), '');
+  o.scrollIntoView({ block: 'nearest' });
+  try {
+    const r = await ctlBg('geocheck' + (u ? ' ' + q(u) : ''));
+    const out = r.out || '', h = /^H (.*)$/m.exec(out);
+    const rows = out.split('\n').filter((l) => l.indexOf('R ') === 0).map((l) => l.slice(2).split('|'));
+    const col = { ok: 'green', warn: 'amber', bad: 'red' };
+    o.innerHTML = rows.length ? (h && h[1] ? kvRow('Гео-DoH', esc(h[1] === 'off' ? 'молчат все' : h[1]), h[1] === 'off' ? 'amber' : '') : '') +
+      rows.map((f) => kvRow(esc(f[2] || f[0]), esc(f.slice(3).join('|')), col[f[1]] || '')).join('')
+      : kvRow('Ошибка', esc(out.replace(/^[\s\S]*?ERR /, '') || 'нет ответа'), 'red');
+  } finally { geoChkBusy = false; b.disabled = false; b.textContent = 'Проверить ещё раз'; }
+}
+$('#geoChkBtn').addEventListener('click', () => runGeoCheck(''));
+$('#fakeSniSel').addEventListener('change', () => {
+  const v = $('#fakeSniSel').value; $('#fakeSniErr').style.display = 'none';
+  if (v === '*') { fakeOwnPick = true; renderFakeSni(); $('#fakeSniIn').focus(); return; }
+  fakeOwnPick = false; setCur('ZAPRET2_FAKE_SNI', v);
+});
+$('#fakeSniIn').addEventListener('change', () => {
+  // кириллица — в punycode, как ждёт демон (a-z 0-9 . -)
+  const raw = $('#fakeSniIn').value.trim().toLowerCase().replace(/\.$/, ''), err = $('#fakeSniErr');
+  let h = ''; try { h = raw ? new URL('http://' + raw).hostname : ''; } catch (e) { h = '-'; }
+  if (raw && (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(h) || h.length > 100)) { err.textContent = 'Нужно имя сайта, например пример.рф или example.com'; err.style.display = ''; return; }
+  err.style.display = 'none'; fakeOwnPick = false; setCur('ZAPRET2_FAKE_SNI', h);
+});
+$('#updBtn').addEventListener('click', () => { if (UPD_URL) openLink(UPD_URL); });
+// «Проверить» — спросить GitHub сейчас; нашлась новая — та же кнопка открывает релиз
+$('#updCheck').addEventListener('click', async () => {
+  if (UPD_URL) { openLink(UPD_URL); return; }
+  const b = $('#updCheck'), st = $('#updState'); b.disabled = true; b.textContent = 'Проверяю…';
+  try {
+    const out = ((await ctlBg('update force')).out || '').trim();
+    if (applyUpdate(out)) return;
+    st.textContent = out === 'none' ? 'Установлена последняя версия' + (ST.module_version ? ' (' + ST.module_version + ')' : '') + '.'
+      : out === 'busy' ? 'Идёт подбор или проверка обхода — повторите, когда закончится.'
+      : 'GitHub не ответил — попробуйте позже.';
+  } finally { b.disabled = false; if (!UPD_URL) b.textContent = 'Проверить'; }
+});
+$('#daemonRestart').addEventListener('click', async () => {
+  if (busy) { toast('Подождите — применяются настройки'); return; }
+  if (!confirm(changedKeys().length ? 'Есть неприменённые изменения — модуль запустится без них, они останутся только в форме. Перезапустить?'
+    : 'Перезапустить модуль? Интернет прервётся на 10–20 секунд.')) return;
+  const b = $('#daemonRestart'); b.disabled = true; b.textContent = 'Перезапускаю…';
+  try {
+    const r = await ctlBg('restart');
+    toast(isOk(r) ? 'Модуль перезапущен' : errText(r, 'Не получилось перезапустить'));
+  } finally { b.disabled = false; b.textContent = 'Перезапустить'; loadStatus(); }
 });
 $('#logRefresh').addEventListener('click', loadLog);
 $('#logSend').addEventListener('click', async () => {
@@ -2857,6 +3158,19 @@ async function loadLinks() {
   });
   renderLinks();
 }
+// новая версия (webctl update: update.json из main, раз в 6 ч): плашка на Главной со ссылкой на релиз
+let UPD_URL = '';
+// ответ webctl update: плашка на Главной и строка в «Сервисе»; 1 — есть новая
+function applyUpdate(out) {
+  const m = /^new (v[0-9.]+) (https:\/\/github\.com\/\S+)$/m.exec(out || '');
+  UPD_URL = m ? m[2] : '';
+  if (m) $('#updTitle').textContent = 'Вышла новая версия ' + m[1];
+  $('#updCard').hidden = !m;
+  $('#updCheck').textContent = m ? 'Открыть' : 'Проверить';
+  if (m) $('#updState').textContent = 'Вышла ' + m[1] + ' (у вас ' + (ST.module_version || '—') + '): страница релиза — что нового и zip.';
+  return !!m;
+}
+async function loadUpdate() { applyUpdate((await ctlBg('update')).out); }
 const openLink = async (u) => {
   if (!HAS_KSU) { window.open(u, '_blank', 'noopener'); return; }
   const r = await ctl('open ' + q(u));
@@ -2893,6 +3207,7 @@ $('#metaBtn').addEventListener('click', async () => {
   scRefresh();
   loadApps().then(() => { renderChips(); ROUTE_HTML = ''; renderRoutes(); });
   loadLinks();
+  loadUpdate();
   setInterval(() => { if (!document.hidden && !busy && !stBusy) loadStatus(); }, 3000);
   loadClients();
   // со сдвигом 1,5 с от статуса: ksu.exec синхронный, два вызова подряд — заметная пауза страницы
@@ -2927,8 +3242,8 @@ function mockExec(cmd) {
   }
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=предпросмотр\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
-    '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=' + (M.target === 'vpn' ? 'wifi:Дом_5G' : 'mobile:25011') + '\nnet_label=' + (M.target === 'vpn' ? 'Дом_5G' : 'YOTA') + '\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nwan=rmnet_data1\nexit=' + (Math.floor(Date.now() / 1000) - 120) + '|rmnet_data1|188.162.73.24|RU|' + (M.wave ? '000|204' : '204|204') + '\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.comss.one\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nwarp=up\nwarp_conf=warp-2\nwarp_note=\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD ZAPRET_ENGINE=nfqws2\nD ZAPRET2_STRATEGY=hardcorp74\nD ZAPRET2_ARGS=\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.zapret.moe/dns-query\nD DNS_FALLBACKS=https://de.magicdns.ru/dns-query https://not-a-dns.quic.best/dns-query https://sync.bezmezhau.com/dns-query https://api.magicinfo.art/dns-query https://dns.wlrus.cfd/dns-query https://dns.semqka.xyz/dns-query https://tamaev-gifts.xyz/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD DNS_VIA_ZAPRET=0\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD YT_WSSIZE_RAMP=1\nD YT_RETRY_MAX=4\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=1\nD OPERA_API_PROXY=\nD OPERA_COUNTRY=EU\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
+    '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=' + (M.target === 'vpn' ? 'wifi:Дом_5G' : 'mobile:25011') + '\nnet_label=' + (M.target === 'vpn' ? 'Дом_5G' : 'YOTA') + '\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nwan=rmnet_data1\nexit=' + (Math.floor(Date.now() / 1000) - 120) + '|rmnet_data1|188.162.73.24|RU|' + (M.wave ? '000|204' : '204|204') + '\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.google\ndns_geo=dns.zapret.moe\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nwarp=up\nwarp_conf=warp-2\nwarp_note=\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD ZAPRET_ENGINE=nfqws2\nD ZAPRET2_STRATEGY=vt_soft_crck\nD ZAPRET2_ARGS=\nD ZAPRET2_FAKE_SNI=\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.google/dns-query\nD DNS_FALLBACKS=https://cloudflare-dns.com/dns-query https://dns.quad9.net/dns-query https://dns.adguard-dns.com/dns-query https://doh.libredns.gr/dns-query\nD DNS_GEO_UPSTREAMS=https://doh.fuckingspeedtest.com/dns-query https://dns.semqka.xyz/dns-query https://dns.commonnet.work/dns-query https://not-a-dns.quic.best/dns-query https://w.quic.best/dns-query https://sync.bezmezhau.com/dns-query https://dns.geodema.love/dns-query https://dns.dagami.ru/dns-query https://dns.zapret.moe/dns-query https://dns.keyoneday.ru/dns-query\nD DNS_GEO_DOMAINS=\nD DNS_GEO_STRICT=1\nD DNS_GEO_MODE=split\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=list\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=1\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD DNS_VIA_ZAPRET=0\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD YT_WSSIZE_RAMP=1\nD YT_RETRY_MAX=4\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=1\nD OPERA_API_PROXY=\nD OPERA_COUNTRY=EU\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
     Object.keys(M.usr).map((k) => 'U ' + k + '=' + M.usr[k] + '\n').join('') };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +
@@ -2959,6 +3274,8 @@ function mockExec(cmd) {
   if (/^client-(un)?block /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'dnsflush') return { errno: 0, out: 'OK кэш сброшен (dnsproxy перезапущен). На ноутбуке — ещё ipconfig /flushdns' };
   if (a === 'warp-stats') { M.wrx = (M.wrx || 5e6) + 2e5; M.wup = M.wup || Date.now(); return { errno: 0, out: 'hs_age=' + (Math.floor(Date.now() / 1000) % 130) + '\nrx=' + M.wrx + '\ntx=' + Math.round(M.wrx / 9) + '\nendpoint=188.114.96.1:2408\npeer=bmXOC+hWy3/DnZ3VUUTE7y0yOZfVvcRK0Xf4cPfgyo=\nup=' + Math.round((Date.now() - M.wup) / 1000 + 2534) + '\n' }; }
+  if (a === 'restart') return { errno: 0, out: 'OK' };
+  if (a === 'update' || a === 'update force') return { errno: 0, out: 'none' };
   if (a === 'net-renew') { M.wave = 0; return { errno: 0, out: 'OK сеть переподключена, внутренний адрес новый' }; }
   if (a === 'links') return { errno: 0, out: 'tg=https://t.me/kubarev_mods\n' };
   if (a === 'warp-reconnect') return { errno: 0, out: 'OK переподключаю' };
@@ -2971,6 +3288,7 @@ function mockExec(cmd) {
   if (a === 'zauto-clear') return { errno: 0, out: 'OK' };
   if (/^zalt( |$)/.test(a)) return { errno: 0, out: 'rutracker.org|--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld|2026-10-22 18:00\nnnmclub.to|--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld|2026-10-22 18:00\n' };
   if (a === 'zalt-clear') return { errno: 0, out: 'OK' };
+  if (a === 'geocheck' || a.indexOf('geocheck ') === 0) return { errno: 0, out: 'H not-a-dns.quic.best\nR gpt|ok|ChatGPT|прокси 201.58.191.60, ответ за 432 мс, выход: PL\nR gemini|ok|Gemini|прокси 201.58.191.60, ответ за 485 мс\nR claude|ok|Claude|прокси 201.58.191.60, ответ за 426 мс, выход: PL\nR grok|ok|Grok|прокси 201.58.191.60, ответ за 449 мс, выход: PL\nR spotify|ok|Spotify|прокси 201.58.191.60, ответ за 727 мс\nR notion|bad|Notion|прокси нет: настоящий адрес 208.103.161.2, из России закрыт\nR jb|warn|JetBrains|прокси 201.58.191.60, ответ за 2535 мс — медленно\nR deepl|bad|DeepL|прокси нет: сервис видит Россию (адрес 172.64.148.47)\n' };
   if (a === 'diag') return { errno: 0, out: 'R dns|warn|Подмена DNS|оператор подменяет ответы обычного DNS (2 из 3: rutracker.org:195.208.4.1) — без DoH заблокированные сайты получат заглушку\nR tcp16|ok|Обрыв на 16–64 КБ|нет: 128 КБ скачались (4 из 4)\nR wl|ok|Белые списки|нет: зарубежные сайты открываются (4 из 4)\nR tg|bad|Telegram|закрыт по IP: серверы (0 из 5) и веб-версия недоступны — только через VPN\n' };
   if (/^zevents/.test(a)) return { errno: 0, out: '2026-10-21 12:40|YOTA|сторож: стратегия работает\n2026-10-21 13:44|YOTA|сторож: стратегия не открывает заблокированные (www.youtube.com discord.com) — ищу замену\n2026-10-21 13:45|YOTA|сторож: вернул прежнюю стратегию: --dpi-desync=multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1\n' };
   if (a === 'zscan-status') return { errno: 0, out: 'state=done\nmode=quick\ndone=21\ntotal=21\nstage=готово\nmsg=\nblocked=www.youtube.com i.ytimg.com discord.com gateway.discord.gg x.com www.facebook.com rutracker.org www.linkedin.com\nalive=0\n' };

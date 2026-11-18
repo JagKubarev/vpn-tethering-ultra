@@ -182,7 +182,7 @@ dnsproxy_spawn() {
     local certs="SSL_CERT_DIR=/apex/com.android.conscrypt/cacerts:/system/etc/security/cacerts"
     if [ "$DNSPROXY_SU_G" = "1" ]; then
         dnsproxy_exempt force
-        su -g "$DNSPROXY_GID" -c "$certs exec $DNSPROXY_BIN $1 -o $2" >/dev/null 2>&1 < /dev/null &
+        $SUG_CMD "$DNSPROXY_GID" -c "$certs exec $DNSPROXY_BIN $1 -o $2" >/dev/null 2>&1 < /dev/null &
     else
         env "$certs" $DNSPROXY_BIN $1 -o "$2" >/dev/null 2>&1 < /dev/null &
     fi
@@ -212,12 +212,18 @@ meta_eu_stop() {
     DNSPROXY_META_ON=0
 }
 
+# Гео-DoH в запасных (-f) — нет (18.11): -f dnsproxy спрашивает все сразу на любом сбое основного, берёт
+# первый ответ, а гео-DoH чужим именам отдают свои прокси (quic.best на www.googleapis.com — 201.58.191.60,
+# TTL 600: API YouTube 10 мин мёртв при живом основном). Даже если записаны в DNS_FALLBACKS. Заменой
+# основного (dns_try_alt) — да, но после обычных: тогда молчат все обычные
+dns_not_geo() { local u; for u in "$@"; do case " $DNS_GEO_UPSTREAMS " in *" $u "*) ;; *) echo "$u" ;; esac; done; }
+
 meta_eu_start() {
     local args u i
     meta_eu_stop
     args="-l 127.0.0.1 -p $META_EU_PORT --edns --edns-addr=$DNS_META_ECS --timeout=3s --refuse-any"
     for u in $DNS_META_UPSTREAMS; do args="$args -u $u"; done
-    for u in $DNS_FALLBACKS; do args="$args -f $u"; done
+    for u in $(dns_not_geo $DNS_FALLBACKS); do args="$args -f $u"; done
     for u in $DNS_BOOTSTRAP $DNS_BOOTSTRAP_ENC; do args="$args -b $u"; done
     : > "$META_EU_LOG"
     dnsproxy_spawn "$args" "$META_EU_LOG"
@@ -317,7 +323,7 @@ dnsproxy_probe() {   # [адрес] — по умолчанию dnsproxy; с а�
         # мимо перехвата DNS телефона: от root он ушёл бы в тот же dnsproxy
         nc="$BUSYBOX nc -u -w $DNS_PROBE_TIMEOUT $1 53"
         if [ "$DNSPROXY_SU_G" = "1" ]; then
-            nc="su -g $DNSPROXY_GID -c '$nc'"
+            nc="$SUG_CMD $DNSPROXY_GID -c '$nc'"
         else
             # без su -g root перехватывается (кроме серверов самого dnsproxy): адрес оператора
             # открываем только на время проверки — насовсем нельзя, на него ходит резолвер (netd)
@@ -395,23 +401,25 @@ dnsproxy_start() {
     # Авито, Google и т.п.) — смена узла CDN доезжала бы до клиентов часами.
     args="-l 0.0.0.0 -p $DNSPROXY_PORT --cache --cache-optimistic --cache-max-ttl=600 --timeout=3s --refuse-any"
     for u in $ups; do args="$args -u $u"; done
-    local fb="$DNS_FALLBACKS"
+    local fb
+    fb=$(dns_not_geo $DNS_FALLBACKS)
     if [ -n "$DNS_ALT_UPS" ] && [ "$ups" = "$DNS_ALT_UPS" ]; then
         # на запасном: остальные запасные и сам основной — его фолбэки
-        fb=$(for u in $DNS_FALLBACKS $DNS_UPSTREAMS; do [ "$u" = "$DNS_ALT_UPS" ] || echo "$u"; done | awk '!s[$0]++')
+        fb=$(for u in $(dns_not_geo $DNS_FALLBACKS) $DNS_UPSTREAMS; do [ "$u" = "$DNS_ALT_UPS" ] || echo "$u"; done | awk '!s[$0]++')
         fb=$(echo $fb)
     fi
     # фолбэком не повторяем то, что уже основное (comss есть и в DNS_FALLBACKS)
-    for u in $fb; do case " $ups " in *" $u "*) continue ;; esac; args="$args -f $u"; done
+    local fbl=""
+    for u in $fb; do case " $ups " in *" $u "*) continue ;; esac; fbl="$fbl $u"; done
     for u in $DNS_BOOTSTRAP $DNS_BOOTSTRAP_ENC; do args="$args -b $u"; done
 
     : > "$DNSPROXY_LOG"
 
     if [ -z "$DNSPROXY_SU_G" ]; then
         DNSPROXY_SU_G=0
-        [ -n "$DNSPROXY_GID" ] && su -g "$DNSPROXY_GID" -c true >/dev/null 2>&1 && DNSPROXY_SU_G=1
+        [ -n "$DNSPROXY_GID" ] && [ -n "$SUG_CMD" ] && $SUG_CMD "$DNSPROXY_GID" -c true >/dev/null 2>&1 && DNSPROXY_SU_G=1
         [ -n "$DNSPROXY_GID" ] && [ "$DNSPROXY_SU_G" = "0" ] && \
-            log "WARNING: su -g не работает — dnsproxy без своего GID, HTTPS-фильтр AdGuard сломает DoH"
+            log "WARNING: нет ни su -g, ни bin/vtgid — dnsproxy без своего GID, HTTPS-фильтр AdGuard сломает DoH"
     fi
 
     # Meta "как из Европы" — только у экземпляра без VPN (direct-doh: раздача
@@ -424,6 +432,42 @@ dnsproxy_start() {
             args="$args -u $META_EU_UPS_FILE"
             meta=" + Meta через ECS $DNS_META_ECS"
         fi
+    fi
+
+    # гео-список — гео-DoH (17.11): без VPN и при DNS_VPN=geo (через туннель). Основной сам гео-DoH — не нужно.
+    # Файл — только пока он в аргументах: по нему dns_geo_check решает, подключён ли гео
+    rm -f "$DNS_GEO_FILE"
+    case "$tag" in
+        direct-doh|vpn-geo)
+            if [ "$DNS_GEO_OFF" != 1 ]; then
+                # новый — проверка ИИ (dns_geo_check) на ближайшем проходе, а не через 10 мин от прежнего
+                [ -n "$DNS_GEO_ACT" ] || { DNS_GEO_ACT=$(echo $DNS_GEO_UPSTREAMS | awk '{ print $1 }'); DNS_GEO_AI_LAST=0; DNS_GEO_FAILS=0; }
+                u=$(dns_geo_names)
+                if [ -n "$DNS_GEO_ACT" ] && [ -n "$u" ] && [ "$ups" != "$DNS_GEO_ACT" ]; then
+                    printf '[/%s/]%s\n' "$u" "$DNS_GEO_ACT" > "$DNS_GEO_FILE"
+                    args="$args -u $DNS_GEO_FILE"
+                    meta="$meta + гео ($(echo "$u" | tr '/' '\n' | grep -c .) имён) через $(dns_hosts_of $DNS_GEO_ACT)"
+                fi
+            elif [ "$DNS_GEO_STRICT" = 1 ] && [ -n "$DNS_GEO_UPSTREAMS" ]; then
+                # молчат все гео-DoH, строгий режим: гео-имена — на закрытый локальный порт (UDP 9: ICMP «порт закрыт»
+                # сразу, без таймаута) — клиенту «нет адреса», а не настоящий адрес, который приложения запомнят
+                u=$(dns_geo_names)
+                if [ -n "$u" ]; then
+                    printf '[/%s/]127.0.0.1:9\n' "$u" > "$DNS_GEO_FILE"
+                    args="$args -u $DNS_GEO_FILE"
+                    meta="$meta + гео ($(echo "$u" | tr '/' '\n' | grep -c .) имён): гео-DoH молчат — адресов не даю"
+                fi
+            fi ;;
+    esac
+    # Гео-DoH (или закрытый порт строгого режима) ошибся на запросе — dnsproxy спрашивает запасные (-f), и те
+    # отдавали гео-имени настоящий адрес (проверено на 13T 18.11: chatgpt.com с адресом). При DNS_GEO_STRICT
+    # запасные — файлом с той же строкой гео-имён: им тоже гео-DoH, при отказе клиенту «нет адреса» (SERVFAIL)
+    rm -f "$DNS_GEO_FB_FILE"
+    if [ "$DNS_GEO_STRICT" = 1 ] && [ -n "$fbl" ] && [ -s "$DNS_GEO_FILE" ]; then
+        { for u in $fbl; do echo "$u"; done; cat "$DNS_GEO_FILE"; } > "$DNS_GEO_FB_FILE"
+        args="$args -f $DNS_GEO_FB_FILE"
+    else
+        for u in $fbl; do args="$args -f $u"; done
     fi
 
     # веб-Telegram через WARP: имена с 149.154.167.99 (через WARP молчит) — на
@@ -445,7 +489,7 @@ dnsproxy_start() {
         if [ -n "$u" ] && udp_listening "$DNSPROXY_PORT"; then
             DNSPROXY_SIG="$sig"
             DNSPROXY_STARTED_ROUTE="$route_now"
-            log "dnsproxy запущен (pid $u, gid ${DNSPROXY_GID:-0}, $tag): $ups$meta"
+            log "dnsproxy запущен (pid $u, gid $([ "$DNSPROXY_SU_G" = 1 ] && echo "${DNSPROXY_GID:-0}" || echo 0)$([ "$DNSPROXY_SU_G" = 1 ] && [ "$SUG_CMD" != "su -g" ] && echo ' через vtgid'), $tag): $ups$meta"
             return 0
         fi
         i=$((i + 1))
@@ -718,6 +762,8 @@ dns_degrade() {
 # а DoH вернулся только в 15:24:36).
 dns_route_changed() {
     DNS_ROUTE_CHANGED_TS=$(date +%s)
+    # прокси, молчащий с одной сети, бывает жив с другой: «плохие для ИИ» — заново, и проверка ИИ — сразу (ревью 17.11)
+    DNS_GEO_BAD=""; DNS_GEO_AI_LAST=0
     [ "$DNS_DEGRADED" = "1" ] && DNS_FAST_RECHECK=1
 }
 
@@ -819,7 +865,7 @@ dns_hosts_of() { echo $* | sed -E 's#[a-z0-9]+://([^/: ]+)[^ ]*#\1#g'; }
 
 dns_try_alt() {     # 0 = перешли на запасной DoH и он отвечает
     local why="$1" cur="$DNS_ALT_UPS" cands c t i j=0 n=0 st ok="" now t0 pids="" d="/data/local/tmp/vpn_tether_alt.$$"
-    [ -n "$DNS_FALLBACKS" ] || return 1
+    [ -n "$DNS_FALLBACKS$DNS_GEO_UPSTREAMS" ] || return 1
     case "$DNSPROXY_SIG" in "direct-doh|"*) ;; *) return 1 ;; esac
     # основным — только один запасной: несколько -u dnsproxy опрашивает по
     # очереди, и часть ответов пришла бы от Google без "разблокирующих" адресов.
@@ -834,7 +880,9 @@ dns_try_alt() {     # 0 = перешли на запасной DoH и он от�
     # живой по curl (к этому времени проверки закончились), не больше двух
     # попыток. Не ответил никто — 5 мин без проверки curl-ом (белые списки:
     # откат проверяется раз в 30 с) и первый по списку, как раньше.
-    cands=$(for c in $DNS_FALLBACKS; do case " $DNS_UPSTREAMS $cur " in *" $c "*) ;; *) echo "$c" ;; esac; done)
+    # за обычными запасными — гео-DoH (17.11): молчат все обычные (ограничения сети) — у них больше шансов, чем
+    # у оператора, даже с их прокси для Google. Гео-DoH из DNS_FALLBACKS — тоже здесь, после обычных (18.11)
+    cands=$(for c in $(dns_not_geo $DNS_FALLBACKS) $DNS_GEO_UPSTREAMS; do case " $DNS_UPSTREAMS $cur " in *" $c "*) ;; *) echo "$c" ;; esac; done | awk '!s[$0]++')
     [ -n "$cands" ] || return 1
     now=$(date +%s)
     if [ $((now - DNS_ALT_SCAN_DEAD)) -ge 300 ] && command -v curl >/dev/null 2>&1; then
@@ -873,18 +921,26 @@ dns_try_alt() {     # 0 = перешли на запасной DoH и он от�
         # до dnsproxy_start: по нему он собирает фолбэки запасного
         DNS_ALT_UPS="$ok"
         if dnsproxy_start "direct-doh" "$ok" && dnsproxy_probe_cold; then
-            local keep="" hold="$DNS_ALT_HOLD"
+            local keep="" hold="$DNS_ALT_HOLD" early=0
             dns_alt_reap $pids; rm -f "$d".*
             now=$(date +%s)
             for t in $DNS_ALT_TRIPS; do [ $((now - t)) -lt 1800 ] && keep="$keep $t"; done
+            # DoH через обход, а обход ещё не поднят (запуск демона: DNS настраивается раньше nfqws, 18.11 22:23:41
+            # против 22:23:48) — основной проверяли без обхода. Не «поездка», и проверить снова — через минуту
+            # только «ещё запускается» (off — до первого запуска или пересборки, starting): упал, нет NFQUEUE, пауза
+            # белых списков (fail, nokernel, wl) — надолго, там обычная защита от дёргающегося основного (ревью 18.11)
+            if [ "$DNS_VIA_ZAPRET" = 1 ] && [ "$ZAPRET_ENABLE" = 1 ]; then
+                case "$ZAPRET_STATE" in off|starting) early=1 ;; esac
+            fi
             # уход с основного — «поездка»; смена одного запасного на другой — нет:
             # иначе основной считался бы «дёргающимся» и ждал 30 мин вместо 10
-            [ -n "$cur" ] || keep="$keep $now"
+            [ -n "$cur" ] || [ "$early" = 1 ] || keep="$keep $now"
             DNS_ALT_TRIPS="$keep"
             [ "$(echo $DNS_ALT_TRIPS | wc -w)" -ge 2 ] && hold="$DNS_ALT_HOLD_FLAP"
-            log "WARNING: DoH-апстрим не отвечает ($why) — DNS через запасные DoH ($(dns_hosts_of $ok)); на $(dns_hosts_of $DNS_UPSTREAMS) вернусь не раньше чем через $((hold / 60)) мин$([ "$hold" = "$DNS_ALT_HOLD_FLAP" ] && echo ' (он дёргается)')"
+            log "WARNING: DoH-апстрим не отвечает ($why) — DNS через запасные DoH ($(dns_hosts_of $ok)); на $(dns_hosts_of $DNS_UPSTREAMS) вернусь не раньше чем через $([ "$early" = 1 ] && echo '1 мин (обход DoH ещё не поднят — проверю через него)' || echo "$((hold / 60)) мин")$([ "$early" = 0 ] && [ "$hold" = "$DNS_ALT_HOLD_FLAP" ] && echo ' (он дёргается)')"
             DNS_ALT_LAST=$now
             DNS_ALT_SINCE=$now
+            [ "$early" = 1 ] && DNS_ALT_SINCE=$((now - hold + 60))
             DNS_ALT_OKS=0
             phone_status_refresh
             return 0
@@ -934,7 +990,7 @@ dns_doh_alive() {
     # поддерживает) и «HTTP/0.9» (DNS4EU: сразу кадры HTTP/2) — TLS с этим именем
     # прошёл, сервер на месте. Подмена ТСПУ и тишина TLS не проходят (02.11, 13T)
     if [ "$DNSPROXY_SU_G" = "1" ]; then
-        code=$(su -g "$DNSPROXY_GID" -c "$CURL_BIN -s -o /dev/null -m 4 --no-alpn --capath $ca -H 'accept: application/dns-message' -w '%{http_code} %{errormsg}' '$u'" 2>/dev/null)
+        code=$($SUG_CMD "$DNSPROXY_GID" -c "$CURL_BIN -s -o /dev/null -m 4 --no-alpn --capath $ca -H 'accept: application/dns-message' -w '%{http_code} %{errormsg}' '$u'" 2>/dev/null)
     else
         code=$(curl -s -o /dev/null -m 4 --no-alpn --capath $ca -H 'accept: application/dns-message' -w '%{http_code} %{errormsg}' "$u" 2>/dev/null)
     fi
@@ -945,6 +1001,164 @@ dns_doh_alive() {
 
 # Основной DoH отвечает? (первый из DNS_UPSTREAMS)
 dns_primary_alive() { set -- $DNS_UPSTREAMS; dns_doh_alive "$1"; }
+
+# ============================================================================
+# Гео-DoH (17.11): имена гео-списка (dns/geo.txt + DNS_GEO_DOMAINS) dnsproxy спрашивает у одного гео-DoH —
+# DNS_GEO_ACT, первого живого из DNS_GEO_UPSTREAMS, — остальные у основного (dnsproxy_start, строка
+# «[/имена/]адрес», как у Meta). Раньше гео-DoH отвечал на всё и подменял не только ИИ.
+# ============================================================================
+dns_geo_names() {   # -> имена через «/»
+    { [ -f "$DNS_GEO_LIST" ] && grep -v '^#' "$DNS_GEO_LIST"; for u in $DNS_GEO_DOMAINS; do echo "$u"; done; } | \
+        awk 'NF && !s[$1]++ { printf "%s%s", (n++ ? "/" : ""), $1 }'
+}
+# Первый живой DoH по порядку (как dns_try_alt: curl-ом параллельно, до ~5 с; кого ждать дольше — первый
+# уже ответивший). dns_first_alive "<кроме, через пробел>" <адреса...> -> адрес или пусто
+dns_first_alive() {
+    local skip="$1" c i st ok="" t0 pids="" d="/data/local/tmp/vpn_tether_geo.$$"
+    shift
+    command -v curl >/dev/null 2>&1 || return 0
+    rm -f "$d".*
+    i=0
+    for c in "$@"; do
+        i=$((i + 1)); case " $skip " in *" $c "*) continue ;; esac
+        # вывод — мимо: иначе $(...) ждал бы и недождавшиеся curl
+        ( dns_doh_alive "$c" any && : > "$d.$i.y" || : > "$d.$i.n" ) >/dev/null 2>&1 &
+        pids="$pids $!"
+    done
+    t0=$(uptime_ms)
+    while :; do
+        i=0; st=dead
+        for c in "$@"; do
+            i=$((i + 1)); case " $skip " in *" $c "*) continue ;; esac
+            [ -e "$d.$i.y" ] && { ok="$c"; st=done; break; }
+            [ -e "$d.$i.n" ] || { st=wait; break; }
+        done
+        [ "$st" = wait ] || break
+        [ $(( $(uptime_ms) - t0 )) -ge 5000 ] && break
+        sleep 0.1
+    done
+    i=0
+    [ -n "$ok" ] || for c in "$@"; do i=$((i + 1)); [ -e "$d.$i.y" ] && { ok="$c"; break; }; done
+    dns_alt_reap $pids; rm -f "$d".*
+    echo "$ok"
+}
+# Адреса chatgpt.com (IPv4, через пробел) у DoH — запрос RFC 8484 от группы dnsproxy; записи A — «0 1 0 1» (тип, класс),
+# TTL, «0 4», адрес. dns_doh_chatgpt <адрес DoH>
+dns_doh_chatgpt() {
+    local u="$1" ca run="sh -c"
+    case "$u" in *\?*) u="$u&" ;; *) u="$u?" ;; esac
+    ca=/apex/com.android.conscrypt/cacerts; [ -d "$ca" ] || ca=/system/etc/security/cacerts
+    [ "$DNSPROXY_SU_G" = "1" ] && run="$SUG_CMD $DNSPROXY_GID -c"
+    $run "$CURL_BIN -s -m 5 --no-alpn --capath $ca -H 'accept: application/dns-message' '${u}dns=AAABAAABAAAAAAAAB2NoYXRncHQDY29tAAABAAE'" 2>/dev/null | \
+        od -An -tu1 | tr -s ' \n' '  ' | \
+        awk '{ for (k = 13; k + 13 <= NF; k++) if ($k == 0 && $(k+1) == 1 && $(k+2) == 0 && $(k+3) == 1 && $(k+8) == 0 && $(k+9) == 4) printf "%s%d.%d.%d.%d", (n++ ? " " : ""), $(k+10), $(k+11), $(k+12), $(k+13) }'
+}
+# Гео-DoH открывает ИИ? (17.11, шаг 3: zapret.moe отвечал, а ИИ через него молчали.) Спрашиваем у него chatgpt.com:
+# адрес тот же, что у Google (эталон: настоящие адреса — Cloudflare, 17.11 это 8.6.112.5 и 8.47.69.5, вне «обычных»
+# 104.16/13 и 172.64/13; Google не ответил — по этим диапазонам) — прокси для ИИ у него нет. Адрес прокси — HTTPS к
+# нему с этим именем: любой ответ HTTP (и 403 Cloudflare: curl-ом ChatGPT через любой прокси — 403, 08.11) — прокси
+# жив, тишина — нет. Gemini так не проверить: «регион не поддерживается» Google отдаёт обычной страницей.
+# dns_geo_ai_ok <адрес DoH> -> 0 открывает, 1 нет, 2 не знаю (проверить нечем, DoH не ответил)
+dns_geo_ai_ok() {
+    local ips ref ip code run="sh -c"
+    case "$1" in https://*) ;; *) return 2 ;; esac
+    [ -n "$CURL_BIN" ] && command -v od >/dev/null 2>&1 || return 2
+    [ "$DNSPROXY_SU_G" = "1" ] && run="$SUG_CMD $DNSPROXY_GID -c"
+    # гео-DoH не ответил — не «нет», а «не знаю»: его молчание ловит проверка живости. 17.11 MT6580 (загрузка ~10):
+    # запрос DoH 8–9 с, и «нет» по тайм-ауту за час выключило бы весь гео
+    ips=$(dns_doh_chatgpt "$1")
+    [ -n "$ips" ] || return 2
+    ref=$(dns_doh_chatgpt https://dns.google/dns-query)
+    for ip in $ips; do case " $ref " in *" $ip "*) return 1 ;; esac; done
+    ip=${ips%% *}
+    case "$ip" in 104.1[6-9].*|104.2[0-3].*|172.6[4-9].*|172.7[01].*|8.6.112.*|8.47.69.*|0.*|127.*) return 1 ;; esac
+    code=$($run "$CURL_BIN -sk -o /dev/null -m 10 --resolve chatgpt.com:443:$ip -w '%{http_code}' https://chatgpt.com/" 2>/dev/null)
+    case "$code" in ''|000*) return 1 ;; esac
+    return 0
+}
+# Из цикла: гео-DoH отвечает? Раз в DNS_GEO_CHECK, только при запросах DNS (батарея, как dns_health) и
+# пока гео-строка нужна (без VPN или DNS_VPN=geo). Жив — любой ответ HTTP, как при выборе запасного: geohide по
+# HTTP/1.1 даёт 503, а dnsproxy (HTTP/2) отвечает. Не ответил — следующий живой; первые 10 мин после
+# переключения — только после 3 проверок подряд (17.11 MT6580: zapret.moe и bezmezhau по ~4 с, гео менялся раз в
+# 2 мин). Раз в 10 мин — открывает ли ИИ (dns_geo_ai_ok); не открывает — час его не берём (DNS_GEO_BAD). На
+# запасном — раз в 30 мин проба вернуться к первому. Молчат все — гео-имена в основной (DNS_GEO_OFF), раз в 5 мин
+dns_geo_check() {
+    local now act ok first bad e r why="" ai=0 was=0
+    [ -n "$DNS_GEO_UPSTREAMS" ] && [ "$DNS_DEGRADED" = 0 ] || return 0
+    case "$DNSPROXY_SIG" in "direct-doh|"*|"vpn-geo|"*) ;; *) return 0 ;; esac
+    [ "$DNS_GEO_OFF" = 1 ] || [ -s "$DNS_GEO_FILE" ] || return 0
+    # сначала срок, процессы (dnsproxy_alive, счётчики) — потом: зовут каждый проход цикла (~2 с)
+    now=$(date +%s)
+    # минуту после старта и смены маршрута — нет: путь (и обход для DoH) ещё поднимается — 17.11 оба телефона в первые
+    # 10–15 с «потеряли» zapret.moe, а он отвечал 200 за 0,5 с
+    [ $((now - DNS_ROUTE_CHANGED_TS)) -ge 60 ] || return 0
+    # «сети нет» (dns_health: молчат и DoH, и DNS оператора) и минуту после — ничего не решаем: молчит связь, а не
+    # гео-DoH. 18.11 метро 09:30: проверка признала мёртвыми все гео-DoH и до 09:35 отправила ИИ в основной
+    [ "$DNS_NONET" = 1 ] && return 0
+    [ $((now - ${DNS_NONET_TS:-0})) -ge 60 ] || return 0
+    if [ "$DNS_GEO_OFF" = 1 ]; then r=300; else r="$DNS_GEO_CHECK"; fi
+    [ $((now - DNS_GEO_LAST)) -ge "$r" ] || return 0
+    dnsproxy_alive || return 0
+    act=$(dns_activity)
+    [ "$act" = "$DNS_GEO_SEEN" ] && return 0
+    DNS_GEO_SEEN="$act"; DNS_GEO_LAST=$now
+    # не открывавшие ИИ — час мимо («адрес|время»)
+    bad=""; e=""
+    for r in $DNS_GEO_BAD; do [ $((now - ${r##*"|"})) -lt 3600 ] && { e="$e $r"; bad="$bad ${r%"|"*}"; }; done
+    DNS_GEO_BAD="$e"
+    set -- $DNS_GEO_UPSTREAMS; first="$1"
+    if [ "$DNS_GEO_OFF" = 1 ]; then
+        ok=$(dns_first_alive "$bad" $DNS_GEO_UPSTREAMS)
+        [ -n "$ok" ] || return 0
+        log "DNS: гео-DoH $(dns_hosts_of $ok) отвечает — гео-имена снова через него"
+    # не ответил — сразу вторая проверка: одна медленная секунда — не повод (как у основного)
+    elif dns_doh_alive "$DNS_GEO_ACT" any || dns_doh_alive "$DNS_GEO_ACT" any; then
+        DNS_GEO_FAILS=0
+        if [ $((now - DNS_GEO_AI_LAST)) -ge 600 ]; then
+            DNS_GEO_AI_LAST=$now
+            dns_geo_ai_ok "$DNS_GEO_ACT" || dns_geo_ai_ok "$DNS_GEO_ACT"; r=$?
+            if [ "$r" = 1 ]; then
+                why="отвечает, но ИИ через него не открываются (chatgpt.com)"; ai=1
+                case " $bad " in *" $DNS_GEO_ACT "*) was=1 ;; esac
+                DNS_GEO_BAD="$DNS_GEO_BAD $DNS_GEO_ACT|$now"; bad="$bad $DNS_GEO_ACT"
+            fi
+        fi
+        if [ -z "$why" ]; then
+            case " $bad " in *" $first "*) return 0 ;; esac
+            [ "$DNS_GEO_ACT" != "$first" ] && [ $((now - DNS_GEO_SINCE)) -ge 1800 ] && dns_doh_alive "$first" any || return 0
+            ok="$first"
+            log "DNS: первый гео-DoH $(dns_hosts_of $first) снова отвечает — гео-имена обратно через него"
+        fi
+    else
+        # молчит и DNS оператора — молчит связь, а не гео-DoH: основная проверка (DNS_NONET) могла ещё не заметить
+        # провал, а эта успела бы перебрать весь список и выключить гео-DoH (ревью 18.11)
+        dns_operator_dead && return 0
+        DNS_GEO_FAILS=$((DNS_GEO_FAILS + 1))
+        [ $((now - DNS_GEO_SINCE)) -lt 600 ] && [ "$DNS_GEO_FAILS" -lt 3 ] && return 0
+        why="не отвечает"
+    fi
+    if [ -n "$why" ]; then
+        ok=$(dns_first_alive "$DNS_GEO_ACT $bad" $DNS_GEO_UPSTREAMS)
+        if [ -n "$ok" ]; then
+            log "WARNING: DNS: гео-DoH $(dns_hosts_of $DNS_GEO_ACT) $why — гео-имена через $(dns_hosts_of $ok)"
+        elif [ "$ai" = 1 ]; then
+            # ИИ через него нет, а замены нет — оставляем: Spotify, Notion и прочие из списка через него могут работать,
+            # в основном они точно закрыты (ревью 17.11). В журнал — один раз, пока он в «плохих»
+            [ "$was" = 1 ] || log "WARNING: DNS: гео-DoH $(dns_hosts_of $DNS_GEO_ACT) $why, других живых нет — оставляю его для остальных сервисов списка"
+            return 0
+        else
+            log "WARNING: DNS: гео-DoH $(dns_hosts_of $DNS_GEO_ACT) $why, других живых нет — $([ "$DNS_GEO_STRICT" = 1 ] && echo "сервисам гео-списка (ИИ и др.) адресов не даю, пока гео-DoH не оживёт" || echo "гео-имена (ИИ и др.) пока через основной, настоящими адресами")"
+            DNS_GEO_OFF=1; DNS_GEO_ACT=""; DNS_GEO_FAILS=0; rm -f "$DNS_GEO_FILE"
+            dnsproxy_restart "гео-DoH" quiet
+            phone_status_refresh
+            return 0
+        fi
+    fi
+    # новому — проверка ИИ на ближайшей проверке
+    DNS_GEO_OFF=0; DNS_GEO_ACT="$ok"; DNS_GEO_SINCE=$now; DNS_GEO_FAILS=0; DNS_GEO_AI_LAST=0
+    dnsproxy_restart "гео-DoH" quiet
+    phone_status_refresh
+}
 
 dns_alt_recheck() {
     local hold="$DNS_ALT_HOLD"
@@ -1110,7 +1324,7 @@ dns_health() {
 # Без аргумента — их IPv4; «other» — код 0, если среди них есть имя или IPv6 (адрес не исключить)
 dnsproxy_plain_ips() {
     local u
-    for u in $DNS_BOOTSTRAP $DNS_UPSTREAMS $DNS_FALLBACKS $DNS_META_UPSTREAMS $DNS_VPN_UPSTREAMS; do
+    for u in $DNS_BOOTSTRAP $DNS_UPSTREAMS $DNS_FALLBACKS $DNS_GEO_UPSTREAMS $DNS_META_UPSTREAMS $DNS_VPN_UPSTREAMS; do
         case "$u" in udp://*|tcp://*) u=${u#*://} ;; *://*) continue ;; esac
         u=${u%%/*}
         case "$u" in *:*:*|\[*) echo "x $u"; continue ;; *:*) u=${u%:*} ;; esac
@@ -1130,7 +1344,7 @@ phone_dns_rules_on() {
         # сам dnsproxy (bootstrap :53) — мимо, иначе петля
         [ -n "$DNSPROXY_GID" ] && \
             $t -t nat -A "$CHAIN_PHONE_DNS" -m owner --gid-owner "$DNSPROXY_GID" -j RETURN 2>/dev/null
-        # su -g не работает (Magisk < 26): dnsproxy работает от root. Мимо — только root к его
+        # нет ни su -g (Magisk < 26), ни bin/vtgid: dnsproxy работает от root. Мимо — только root к его
         # обычным DNS-серверам (bootstrap, апстримы без шифрования), а не весь root: на Android 8
         # системный резолвер (netd) спрашивает от root за все приложения, и 09.11 на MT6580
         # мимо DoH шёл DNS всех приложений, кроме Chrome со своим резолвером

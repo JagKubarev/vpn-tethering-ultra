@@ -114,16 +114,20 @@ free_name() {
 # правило -o <WAN> не совпадёт, и запрос просто уйдёт в туннель. В обоих
 # случаях — мимо прокси AdGuard (подменяет сертификаты).
 Q=204   # 202 — sitetest, 203 — scan.sh
+# свои соединения (root, кроме dnsproxy) — по биту connmark из OUTPUT, как у scan.sh: владелец в POSTROUTING на
+# части ядер совпадает со всеми пакетами (17.11 MT6580, ядро 3.18) — обход снимался бы со всего трафика
+RULE_MK="-m owner --uid-owner 0 ! --gid-owner 3999 -j CONNMARK --set-xmark 0x08000000/0x08000000"
 bypass_on() {
     local wan nk nl
     iptables -w 2 -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
-    iptables -w 2 -t mangle -I VPN_ZAPRET 1 -m owner --uid-owner 0 -j RETURN 2>/dev/null
+    iptables -w 2 -t mangle -I OUTPUT 1 $RULE_MK 2>/dev/null
+    iptables -w 2 -t mangle -I VPN_ZAPRET 1 -m connmark --mark 0x08000000/0x08000000 -j RETURN 2>/dev/null
     wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
     [ -n "$wan" ] && [ -x "$NQ" ] || return 0
     # ядро без connbytes (zapret_caps демона) — без него
-    CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:20"   # как у демона (ZAPRET_CB_OUT)
+    CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:40"   # как у демона (ZAPRET_CB_OUT)
     grep -q '^cb=0' /data/local/tmp/vpn_tether_zcaps 2>/dev/null && CB_OUT=""
-    RULE_NFQ="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
+    RULE_NFQ="-o $wan -m connmark --mark 0x08000000/0x08000000 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
     iptables -w 2 -t mangle -I POSTROUTING 1 $RULE_NFQ
     nk=$(sh "$MODDIR/zapret/netid.sh" "$wan" 2>/dev/null | head -1); nl=${nk#*"|"}; nk=${nk%%"|"*}
     "$NQ" --qnum=$Q --uid=0:3998 --bind-fix4 $(sh "$MODDIR/service.sh" --zapret-strategy "$nk" "$nl" full) >/dev/null 2>&1 &
@@ -133,7 +137,8 @@ bypass_on() {
 bypass_off() {
     [ -n "$NQPID" ] && kill "$NQPID" 2>/dev/null
     [ -n "$RULE_NFQ" ] && iptables -w 2 -t mangle -D POSTROUTING $RULE_NFQ 2>/dev/null
-    iptables -w 2 -t mangle -D VPN_ZAPRET -m owner --uid-owner 0 -j RETURN 2>/dev/null
+    iptables -w 2 -t mangle -D VPN_ZAPRET -m connmark --mark 0x08000000/0x08000000 -j RETURN 2>/dev/null
+    iptables -w 2 -t mangle -D OUTPUT $RULE_MK 2>/dev/null
     iptables -w 2 -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
     NQPID=""; RULE_NFQ=""
 }

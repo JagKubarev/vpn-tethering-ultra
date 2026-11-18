@@ -12,6 +12,10 @@ case "$ARCH" in
         set_perm "$MODPATH/bin/awg-arm64"       0 0 0755
         set_perm "$MODPATH/bin/opera-proxy-arm64" 0 0 0755
         set_perm "$MODPATH/bin/hev-socks5-tproxy-arm64" 0 0 0755
+        rm -f "$MODPATH/bin/vtpoke-arm"
+        set_perm "$MODPATH/bin/vtpoke-arm64"    0 0 0755
+        rm -f "$MODPATH/bin/vtgid-arm"
+        set_perm "$MODPATH/bin/vtgid-arm64"     0 0 0755
         ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + nfqws2 (zapret2) + AmneziaWG + curl 8.23.0 + opera-proxy v1.31.0 + hev-socks5-tproxy 2.13.1, arm64"
         ;;
     arm)
@@ -25,6 +29,10 @@ case "$ARCH" in
         set_perm "$MODPATH/bin/awg-arm"       0 0 0755
         set_perm "$MODPATH/bin/opera-proxy-arm" 0 0 0755
         set_perm "$MODPATH/bin/hev-socks5-tproxy-arm" 0 0 0755
+        rm -f "$MODPATH/bin/vtpoke-arm64"
+        set_perm "$MODPATH/bin/vtpoke-arm"      0 0 0755
+        rm -f "$MODPATH/bin/vtgid-arm64"
+        set_perm "$MODPATH/bin/vtgid-arm"       0 0 0755
         ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + nfqws2 (zapret2) + AmneziaWG + curl 8.23.0 + opera-proxy v1.31.0 + hev-socks5-tproxy 2.13.1, armv7"
         ;;
     *)
@@ -45,6 +53,10 @@ case "$ARCH" in
         set_perm "$MODPATH/bin/awg-arm"         0 0 0755
         set_perm "$MODPATH/bin/opera-proxy-arm" 0 0 0755
         set_perm "$MODPATH/bin/hev-socks5-tproxy-arm" 0 0 0755
+        set_perm "$MODPATH/bin/vtpoke-arm64"    0 0 0755
+        set_perm "$MODPATH/bin/vtpoke-arm"      0 0 0755
+        set_perm "$MODPATH/bin/vtgid-arm64"     0 0 0755
+        set_perm "$MODPATH/bin/vtgid-arm"       0 0 0755
         ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + nfqws2 (zapret2) + AmneziaWG + curl 8.23.0 + opera-proxy v1.31.0 + hev-socks5-tproxy 2.13.1, arm64+armv7"
         ;;
 esac
@@ -134,6 +146,16 @@ else
         ui_print "- Устаревшие настройки Opera убраны из $CONF"
     fi
     rm -f "$CONF.tmp"
+    # nfqws1 скрыт из WebUI (18.11) и будет вырезан: кто на нём — на nfqws2 (умолчание), строка уходит. nfqws2
+    # работает и без connbytes; не запустится на этом ядре — демон сам вернётся на nfqws1 (ZAPRET2_FAIL)
+    # как читает демон (load_user_conf): кавычки " или ', хвост после # — комментарий
+    _e="^[[:space:]]*ZAPRET_ENGINE[[:space:]]*=[[:space:]]*[\"']?nfqws1[\"']?[[:space:]]*(#.*)?\$"
+    if grep -qE "$_e" "$CONF" 2>/dev/null; then
+        grep -vE "$_e" "$CONF" > "$CONF.tmp"
+        cat "$CONF.tmp" > "$CONF"
+        rm -f "$CONF.tmp"
+        ui_print "- Движок обхода: nfqws1 -> nfqws2 (прежний больше не поддерживается)"
+    fi
 fi
 ui_print " "
 ui_print "VPN Tether — что дальше:"

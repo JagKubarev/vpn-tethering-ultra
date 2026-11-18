@@ -284,9 +284,9 @@ warp_probe() {
     local cmd="$CURL_BIN -s -k -m 5 --interface $WARP_IF https://1.1.1.1/cdn-cgi/trace" out rc a
     if [ -z "$WARP_SU_G" ]; then
         WARP_SU_G=0
-        su -g "$DNSPROXY_GID" -c true >/dev/null 2>&1 && WARP_SU_G=1
+        [ -n "$SUG_CMD" ] && $SUG_CMD "$DNSPROXY_GID" -c true >/dev/null 2>&1 && WARP_SU_G=1
     fi
-    if [ "$WARP_SU_G" = "1" ]; then out=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else out=$(eval "$cmd" 2>/dev/null); fi
+    if [ "$WARP_SU_G" = "1" ]; then out=$($SUG_CMD "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else out=$(eval "$cmd" 2>/dev/null); fi
     rc=$?
     WARP_PROBE_NOTE="1.1.1.1 rc=$rc, ответ ${#out} Б"
     WARP_COLO=$(echo "$out" | sed -n 's/^colo=\([A-Z]*\).*/\1/p' | head -1)
@@ -299,7 +299,7 @@ warp_probe() {
         # туннель жив — любой ответ по этим адресам тоже трафик. Cloudflare — строго
         for a in 8.8.8.8 77.88.55.242 140.82.121.3; do
             cmd="$CURL_BIN -s -k -m 3 -o /dev/null -w %{http_code} --interface $WARP_IF https://$a/"
-            if [ "$WARP_SU_G" = "1" ]; then out=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else out=$(eval "$cmd" 2>/dev/null); fi
+            if [ "$WARP_SU_G" = "1" ]; then out=$($SUG_CMD "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else out=$(eval "$cmd" 2>/dev/null); fi
             rc=$?
             WARP_PROBE_NOTE="$WARP_PROBE_NOTE, $a rc=$rc, код ${out:-нет}"
             case "$out" in ''|000) ;; *) return 0 ;; esac
@@ -317,7 +317,7 @@ warp_tg_dead() {
     local a c
     for a in 149.154.167.51 149.154.167.91 149.154.175.50; do
         if [ "$WARP_SU_G" = "1" ]; then
-            c=$(su -g "$DNSPROXY_GID" -c "$CURL_BIN -s -o /dev/null -m 3 --interface $WARP_IF -w %{http_code} http://$a/api" 2>/dev/null)
+            c=$($SUG_CMD "$DNSPROXY_GID" -c "$CURL_BIN -s -o /dev/null -m 3 --interface $WARP_IF -w %{http_code} http://$a/api" 2>/dev/null)
         else
             c=$(curl -s -o /dev/null -m 3 --interface $WARP_IF -w %{http_code} "http://$a/api" 2>/dev/null)
         fi
@@ -330,7 +330,7 @@ warp_tg_dead() {
 
 # пауза до повтора и заметка в статус, когда туннель молчит, а дело не в конфиге
 warp_nonet_wait() { if [ "$ZAPRET_WL" = "1" ]; then echo "$WARP_WL_RETRY"; else echo "$WARP_NONET_RETRY"; fi; }
-warp_nonet_note() { if [ "$ZAPRET_WL" = "1" ]; then echo "белый список"; else echo "нет сети"; fi; }
+warp_nonet_note() { if [ "$ZAPRET_WL" = "1" ]; then echo "белые списки"; else echo "нет сети"; fi; }
 
 # Сеть вообще есть? Туннель молчит — проверка мимо него (Cloudflare, Google по IP).
 # Метро 29.10 11:15–11:22: связь пропадала каждые ~2 мин, и WARP браковал
@@ -347,11 +347,11 @@ warp_uplink() {
     # шёл бы от root через прокси AdGuard
     if [ -z "$WARP_SU_G" ]; then
         WARP_SU_G=0
-        su -g "$DNSPROXY_GID" -c true >/dev/null 2>&1 && WARP_SU_G=1
+        [ -n "$SUG_CMD" ] && $SUG_CMD "$DNSPROXY_GID" -c true >/dev/null 2>&1 && WARP_SU_G=1
     fi
     for u in https://1.1.1.1/cdn-cgi/trace https://8.8.8.8/; do
         if [ "$WARP_SU_G" = "1" ]; then
-            su -g "$DNSPROXY_GID" -c "$CURL_BIN -s -k -m 3 -o /dev/null $u" >/dev/null 2>&1 && return 0
+            $SUG_CMD "$DNSPROXY_GID" -c "$CURL_BIN -s -k -m 3 -o /dev/null $u" >/dev/null 2>&1 && return 0
         else
             curl -s -k -m 3 -o /dev/null "$u" >/dev/null 2>&1 && return 0
         fi
@@ -440,7 +440,7 @@ warp_reconcile() {
     case "$WARP_STATE" in
         off|fail)
             if [ "$WARP_STATE" = fail ] && [ "$now" -lt "$WARP_RETRY_TS" ]; then
-                if [ "$WARP_NOTE" = "белый список" ] && [ "$ZAPRET_WL" != "1" ]; then
+                if [ "$WARP_NOTE" = "белые списки" ] && [ "$ZAPRET_WL" != "1" ]; then
                     :   # список снят — сразу, не ждать остаток WARP_WL_RETRY
                 else
                     # конфиги создали/импортировали в WebUI — сразу, не через 5 мин
@@ -613,8 +613,8 @@ warp_reconcile() {
                 WARP_FAILS=$((WARP_FAILS + 1))
                 WARP_CHECK_TS=$((now - WARP_CHECK_SECS + 10))
                 if [ $WARP_FAILS -ge 3 ]; then
-                    log "WARP: $WARP_CUR не отвечает, у оператора белый список — снимаю, повтор через $WARP_WL_RETRY с"
-                    warp_down; WARP_RETRY_TS=$(( $(date +%s) + WARP_WL_RETRY )); warp_set_state fail "белый список"
+                    log "WARP: $WARP_CUR не отвечает, у оператора белые списки — снимаю, повтор через $WARP_WL_RETRY с"
+                    warp_down; WARP_RETRY_TS=$(( $(date +%s) + WARP_WL_RETRY )); warp_set_state fail "белые списки"
                 else
                     log "WARP: $WARP_CUR не отвечает ($WARP_FAILS/3)"
                 fi

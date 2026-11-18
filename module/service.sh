@@ -706,6 +706,13 @@ DNS_VPN="dnat"         # VPN-режим:    dnat  = DNAT в DNS из VPN (как
                        #                       режимах, после выключения VPN в кэше
                        #                       клиентов нет «настоящих» (гео-ошибки)
 # Основные апстримы (DoH https://, DoT tls://, DoQ quic://, обычный ip:53).
+# 17.11 — два списка: основной (здесь и DNS_FALLBACKS) — обычные DoH с настоящими адресами, для всех имён;
+# гео-DoH (DNS_GEO_UPSTREAMS) — только для гео-списка (dns/geo.txt + DNS_GEO_DOMAINS). Гео-DoH «для всего»
+# подменял не только ИИ: www.googleapis.com — свой прокси (YouTube «время ожидания», 16.11), api.github.com —
+# 403 (MagicDNS, 09.11), 4pda и Instagram — мёртвые прокси, Wlrus — github.com без адресов (03.11). Замер
+# 17.11 (YOTA, раз в 20 с, 28 раз): dns.google, cloudflare-dns.com, Quad9 — 28/28 за 0,3–0,6 с. На Android 8
+# у Cloudflare нет корня сертификата в системе (MT6580) — первым Google. Ниже — история, когда основным
+# был гео-DoH.
 # not-a-dns (3.22.1): Wlrus 03.11 на github.com отвечал «имя есть, адресов нет»
 # (NOERROR без ответов, три раза подряд) — это не ошибка, на запасные dnsproxy
 # не уходит, и GitHub не открывался; not-a-dns, comss и Google отдают адрес.
@@ -714,7 +721,7 @@ DNS_VPN="dnat"         # VPN-режим:    dnat  = DNAT в DNS из VPN (как
 # ни через WARP), api.magicdns.ru и dns.magicdns.ru не отвечают (MagicDNS переехал 4.11 на
 # de.magicdns.ru). Скан 23 DoH на YOTA: zapret.moe 0,5 с, настоящие адреса github.com, YouTube,
 # x.com, 4pda, Instagram (57.14x), прокси 5.129.221.64 — ChatGPT и Gemini 200
-DNS_UPSTREAMS="https://dns.zapret.moe/dns-query"
+DNS_UPSTREAMS="https://dns.google/dns-query"
 # Если основные недоступны. Только шифрованные — иначе запросы ушли бы
 # оператору открытым текстом.
 # Первый, которого нет среди основных, — замена основному; при сбое основным
@@ -756,7 +763,27 @@ DNS_UPSTREAMS="https://dns.zapret.moe/dns-query"
 # только для ИИ) — выше wlrus; dns.semqka.xyz отдаёт своим прокси 45.198.0.84 и x.com, discord.com
 # (голос Discord по UDP через него не пойдёт), tamaev-gifts.xyz — www.youtube.com и github.com
 # (2.26.80.94: YouTube мимо отбоя застрявших) — ниже wlrus
-DNS_FALLBACKS="https://de.magicdns.ru/dns-query https://not-a-dns.quic.best/dns-query https://sync.bezmezhau.com/dns-query https://api.magicinfo.art/dns-query https://dns.wlrus.cfd/dns-query https://dns.semqka.xyz/dns-query https://tamaev-gifts.xyz/dns-query https://dns.geohide.ru:444/dns-query https://geohide.ru/dns-query https://dns.comss.one/dns-query"
+# 17.11: запасные основного — тоже обычные DoH (Cloudflare, Quad9); за ними при сбое идут гео-DoH
+# (DNS_GEO_UPSTREAMS) — для всех имён, как раньше, — и только потом оператор. Порядок и история гео-DoH — выше
+# обычные DoH с настоящими адресами (прежний список для приватности в WebUI), по порядку; 18.11. DNS4EU — нет: отвечает
+# только по HTTP/2, а проверки живости модуля (curl без HTTP/2) сочли бы его мёртвым всегда (TLS alert no_application_protocol)
+DNS_FALLBACKS="https://cloudflare-dns.com/dns-query https://dns.quad9.net/dns-query https://dns.adguard-dns.com/dns-query https://doh.libredns.gr/dns-query"
+# Гео-DoH: по порядку, работает один — первый живой (dns_geo_check: раз в минуту при запросах DNS; замолчал —
+# следующий; на запасном — раз в 30 мин проба вернуться к первому; молчат все — гео-имена идут в основной)
+# 18.11 перепроверено с YOTA (8 сервисов, webctl geocheck): по порядку — сколько открывают. fuckingspeedtest — новое имя
+# zapret.moe (тот же сервер; dns.zapret.moe на YOTA режут по имени), w.quic.best — второе имя not-a-dns. Убраны
+# мёртвые: magicdns/magicinfo, wlrus, tamaev, geohide, comss (без прокси). Ожили commonnet и geodema (без Gemini)
+DNS_GEO_UPSTREAMS="https://doh.fuckingspeedtest.com/dns-query https://dns.semqka.xyz/dns-query https://dns.commonnet.work/dns-query https://not-a-dns.quic.best/dns-query https://w.quic.best/dns-query https://sync.bezmezhau.com/dns-query https://dns.geodema.love/dns-query https://dns.dagami.ru/dns-query https://dns.zapret.moe/dns-query https://dns.keyoneday.ru/dns-query"
+# Свои имена для гео-DoH (домены через пробел, с поддоменами) — к списку модуля dns/geo.txt
+DNS_GEO_DOMAINS=""
+# Молчат все гео-DoH — сервисам гео-списка адреса не давать (1), а не настоящие адреса через основной (0). Им
+# настоящий адрес почти бесполезен (закрыты для России по адресу), а приложения его запоминают: и после возврата
+# гео-DoH сервис ещё минуты не открывался бы. Ответ «нет адреса» не запоминают — оживёт сразу (18.11)
+DNS_GEO_STRICT=1
+# Какие DNS спрашивать (18.11): split — основной для всех + гео-DoH для имён гео-списка; off — только основной
+# список, гео-DoH не спрашиваем; all — гео-DoH для всех имён (первый из DNS_GEO_UPSTREAMS — основной, остальные —
+# запасные; адреса Google у них свои прокси). Списки в конфиге не трогаем — conf_apply_overrides
+DNS_GEO_MODE=split
 # Апстримы для DNS_VPN=doh (идут через туннель)
 DNS_VPN_UPSTREAMS="https://dns.google/dns-query https://cloudflare-dns.com/dns-query"
 # Чем резолвить имена самих апстримов (dns.wlrus.cfd и т.д.). Подмена тут не
@@ -840,13 +867,21 @@ ZAPRET_MODE=list        # list = встроенный + свой + автосп�
 # среднее ожидание 4,1 против 7,2–8,0 с. В режиме nfqws2 стратегии сетей и сайтов, сторож,
 # подбор, отбой мёртвых и обрыв медленных видеосерверов не работают — они построены вокруг
 # аргументов nfqws1. nfqws1 — прежний движок; на него же модуль уходит, если nfqws2 нет
-# или ядро без connbytes
+# или он не запустился (ядро без connbytes — с 17.11 тоже nfqws2, в упрощённом режиме)
 ZAPRET_ENGINE=nfqws2    # nfqws2 | nfqws1
 # Стратегия nfqws2 — файл zapret2/strategies/<имя>.conf (стратегии nfqws2-android, авторы — meta.tsv);
-# нет такого файла — hardcorp74. ZAPRET2_ARGS — свои приёмы TCP (--payload/--lua-desync…) вместо
+# нет такого файла — vt_soft_crck. ZAPRET2_ARGS — свои приёмы TCP (--payload/--lua-desync…) вместо
 # приёмов стратегии: её подделки и Lua те же
-ZAPRET2_STRATEGY=hardcorp74
+ZAPRET2_STRATEGY=vt_soft_crck
 ZAPRET2_ARGS=""
+# Имя в поддельном ClientHello стратегий nfqws2 (подделки blob=tls_google: сайты, API YouTube) — вместо
+# имени из файла стратегии; домен латиницей или punycode, пусто — как в стратегии (у vt_soft_crck — www.google.com).
+# Видео (подделка из нулей) и QUIC не трогает. Стенд 16.11 (YOTA, 2 круга × 17 целей): контрактцентр.рф и
+# защитник.рф — 33 из 34, президентскиегранты.рф — 32, www.google.com — 27; TLS 0,25 с против 0,42, скорость не
+# ниже. 16.11 убирали («YouTube хуже» — с контрактцентр.рф), 18.11 вернули выбором в WebUI. 18.11 днём проверка сайтов
+# подряд: три .рф наравне (своя стратегия у 4–5 сайтов), www.google.com — у 23; по ощущению Kubarev гранты и
+# контрактцентр через ~5 мин тормозят YouTube, защитник — нет (не замерено; самое короткое из трёх)
+ZAPRET2_FAKE_SNI=""   # пусто — как в стратегии (у vt_soft_crck — защитник.рф в самом файле, 18.11)
 ZAPRET_PHONE=1         # 1 = и приложения телефона (кроме VPN-клиентов)
 # Приложения телефона мимо обхода (пакеты через пробел) — как VPN-клиенты.
 # 30.10, 4PDA: OnePlus 6 (ядро 4.9, без connbytes) — ВТБ и ОТП не ходили в сеть
@@ -899,6 +934,33 @@ YT_RETRY_WIN=60
 # запрос клиент повторит через RTO, и живой сервер подтвердит позже. 1 с пробовали 15.11 — вернули 2
 YT_REQ_AFTER=2
 YT_REQ_KILLS=0          # порвано таких (status: yt_req_kills)
+# Простаивающее видеосоединение (16.11, проба): прямое к серверу Google, YT_IDLE_KILL с ни пакета ни в одну
+# сторону — рвём заранее (телефону ss -K; с 17.11 — только когда не отправляет vtpoke, раздаче — никогда), чтобы плеер взял новое, а не
+# ждал ответа по старому. 16.11 YOTA: после простоя запрос в том же соединении остаётся без ответа (даже без
+# ACK — ответ до телефона не доходит): 5 с — 2 из 21, 10 с — 4, 15 с — 10, 20 с — 17; «запрос без ответа»
+# рвёт его лишь через 2–3 с — это чёрный экран шортса. Простой — по таймеру conntrack (0 — выключено)
+YT_IDLE_KILL=10
+YT_IDLE_KILLS=0         # порвано таких (status: yt_idle_kills)
+# Вместо обрыва — держать поток (16.11): ТСПУ забывает соединение, по которому ~10 с ничего не шло; пустой
+# ACK с чужим seq (bin/vtpoke) — сервер отвечает своим ACK, и поток живёт. Стенд (7 стоек малого окна):
+# после 15 с простоя умерло 2 из 31 против 15 из 17, после 60 с — 6 из 24 против 23 из 23. Обрыв простоя
+# ломал плеер: звук начинался заново, а картинка ждала (16.11 23:41 — обрыв простоявшего соединения к
+# серверу ролика за 4 с до этого). Телефону: прямое видеосоединение (Google или кэш оператора), YT_POKE с ни пакета, данные от
+# сервера были не раньше YT_POKE_MAX с назад — пакет; дольше без данных — не трогаем (пул брошен, а
+# «запрос без ответа» подстрахует). Раздаче (17.11) — тот же пакет с адресом WAN и портом после NAT, мимо conntrack
+# телефона (YT_POKE_NT); обрыва раздаче нет: он действовал во всех сетях, хотя смерть потока видели только на YOTA.
+# Нет vtpoke или он не отправил — обрыв телефону, как раньше (0 — выключено)
+YT_POKE=3
+YT_POKE_MAX=120
+YT_POKES=0              # отправлено пакетов (status: yt_pokes)
+YT_POKE_FAIL=0          # время сбоя vtpoke (сокет, интерфейс, запуск): 5 мин или до другой сети — обрыв простоя
+YT_POKE_FAIL_NET=""     # сеть (NET_KEY), где был сбой
+YT_POKE_NT=0            # 1 — стоит правило «мимо conntrack» для пакета vtpoke (yt_dead_on): пустой ACK и раздаче
+YT_POKE_NT_M="-m mark --mark 0x40000000/0x40000000 -p tcp --tcp-flags ALL ACK -m length --length 40"
+YT_LINK_DEAD=0          # 1 — связь молчит целиком (yt_dead_scan): зависшие видеосоединения не рвём
+YT_WAN_RX=0             # rx_bytes WAN на прошлом проходе (для «связь молчит»)
+YT_IDLE_LIST=""         # "ключ время" — уже порванные (не рвать и не писать в журнал повторно)
+YT_CT_EST=0             # таймаут ESTABLISHED в conntrack (yt_dead_on)
 # Малое окно для молчащих стоек (только nfqws2, нужен YT_DEAD_FAILFAST). ТСПУ режет TLS с части адресов
 # Google по началу ответа сервера, но читает его лишь в пределах окна клиента (вики zapret, 10.2026).
 # Видеосервер (googlevideo.com), дважды за YT_RETRY_WIN принявший ClientHello и замолчавший, — его стойка (/28) на 12 ч в
@@ -917,6 +979,7 @@ YT_DEAD_AFTER=3         # сек без ответа сервера после C
 YT_RTT_TS=0; YT_RTT_MS=""; YT_SA_LAST=""; YT_RTT_LOG_TS=0   # RTT канала для порогов повтора (yt_dead_scan)
 YT_DATA_TS=0            # когда в последний раз видеосервер слал данные (сигнал сторожу — только без живого видео)
 YT_DATA_SUM=0           # байт от видеосерверов на прошлом круге (данные = прирост)
+YT_GDATA_SUM=""         # то же — только с серверов Google напрямую (снять метку волны, yt_dead_scan); пусто — ещё не мерили
 # Сторож обхода (3.0): раз в ZAPRET_WATCHDOG_MIN минут (и сразу, если
 # видео-соединения стали застревать на ClientHello) zapret/scan.sh check
 # проверяет стратегию сети; сломалась — прежние рабочие, затем быстрый
@@ -1047,7 +1110,7 @@ _ip4_valid() {
 _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списка)
     local key="$1" val="$2" ok=1
     case "$key" in
-        DNSPROXY_ENABLE|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
+        DNSPROXY_ENABLE|DNS_GEO_STRICT|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         DNS_VIA_ZAPRET|ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_QUIC_FAKE|QUIC_BLOCK_YT|QUIC_YT_FAKE|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
         OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|YT_WSSIZE_RAMP|ZAPRET_WATCHDOG|ZAPRET_AUTOPICK|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
@@ -1064,6 +1127,8 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
         ZAPRET2_STRATEGY) case "$val" in ''|*[!A-Za-z0-9_]*) ok=0 ;; esac
             [ ${#val} -le 40 ] || ok=0 ;;
         ZAPRET2_ARGS)    zapret2_args_valid "$val" || ok=0 ;;
+        ZAPRET2_FAKE_SNI) case "$val" in *[!a-z0-9.-]*|.*|*.) ok=0 ;; esac
+            [ ${#val} -le 100 ] || ok=0 ;;
         WARP_CONF)       # имя конфига, как в warp/warp.sh; пусто — по порядку
             case "$val" in *[!A-Za-z0-9_.-]*|.*) ok=0 ;; esac
             [ ${#val} -le 40 ] || ok=0 ;;
@@ -1072,17 +1137,22 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
         DNS_META_ECS)    _ip4_valid "$val" || ok=0 ;;
         DNS_DIRECT) case "$val" in doh|plain) ;; *) ok=0 ;; esac ;;
         DNS_VPN)    case "$val" in dnat|cache|doh|geo) ;; *) ok=0 ;; esac ;;
+        DNS_GEO_MODE) case "$val" in split|off|all) ;; *) ok=0 ;; esac ;;
         DNS_HEALTH_INTERVAL|DNS_HEALTH_RECOVER)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 2 ] && [ "$val" -le 600 ] || ok=0 ;; esac ;;
-        DNS_UPSTREAMS|DNS_FALLBACKS|DNS_VPN_UPSTREAMS|DNS_BOOTSTRAP|DNS_META_UPSTREAMS)
+        DNS_UPSTREAMS|DNS_FALLBACKS|DNS_GEO_UPSTREAMS|DNS_VPN_UPSTREAMS|DNS_BOOTSTRAP|DNS_META_UPSTREAMS)
             # только адреса апстримов: буквы, цифры, : / . - _ [ ] и пробелы
-            case "$val" in ''|*[!A-Za-z0-9:/._\ \[\]-]*) ok=0 ;; esac
+            case "$val" in *[!A-Za-z0-9:/._\ \[\]-]*) ok=0 ;; esac
+            # пусто — только запасные (нет запасных) и гео-DoH (выключен): списки в WebUI можно очистить
+            [ -n "$val" ] || case "$key" in DNS_FALLBACKS|DNS_GEO_UPSTREAMS) ;; *) ok=0 ;; esac
             # и не флаг dnsproxy (токен с «-»: «-o /data/…»)
             case " $val" in *" -"*) ok=0 ;; esac
             # bootstrap — только ip:порт: имя в -b dnsproxy не примет и не стартует
             # (tls://1.1.1.1 с IP он принял бы, но ip:порт — проще и хватает)
-            [ "$key" = "DNS_BOOTSTRAP" ] && case "$val" in *[!0-9a-fA-F.:\ \[\]]*) ok=0 ;; esac ;;
-        WARP_DOMAINS)
+            [ "$key" = "DNS_BOOTSTRAP" ] && case "$val" in *[!0-9a-fA-F.:\ \[\]]*) ok=0 ;; esac
+            # гео-DoH — только https://: живость и ИИ проверяются curl-ом по HTTPS, другой вид был бы «вечно молчит»
+            if [ "$key" = "DNS_GEO_UPSTREAMS" ]; then for _t in $val; do case "$_t" in https://?*) ;; *) ok=0 ;; esac; done; fi ;;
+        WARP_DOMAINS|DNS_GEO_DOMAINS)
             # домены через пробел; пусто — выключить
             case "$val" in *[!a-z0-9.\ -]*) ok=0 ;; esac
             [ ${#val} -le 2000 ] || ok=0 ;;
@@ -1128,7 +1198,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS DNS_VIA_ZAPRET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_WSSIZE_RAMP YT_RETRY_MAX ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_GEO_UPSTREAMS DNS_GEO_DOMAINS DNS_GEO_STRICT DNS_GEO_MODE DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET2_FAKE_SNI ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS DNS_VIA_ZAPRET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_WSSIZE_RAMP YT_RETRY_MAX ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 # Убранные ключи: в старом конфиге — молча мимо, без «неизвестный ключ» (15.11)
 CONF_RETIRED="YT_DEAD_WARP YT_SLOW_RETRY"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
@@ -1174,6 +1244,14 @@ conf_apply_overrides() {
         DNS_VPN="dnat"
         DNS_PHONE=0
     fi
+    # DNS_GEO_MODE: один список на все имена — дальше демон работает как с ним одним
+    case "$DNS_GEO_MODE" in
+        off) DNS_GEO_UPSTREAMS="" ;;
+        all) if [ -n "$DNS_GEO_UPSTREAMS" ]; then
+                 set -- $DNS_GEO_UPSTREAMS
+                 DNS_UPSTREAMS="$1"; shift; DNS_FALLBACKS="$*"; DNS_GEO_UPSTREAMS=""
+             fi ;;
+    esac
 }
 conf_apply_overrides
 
@@ -1251,13 +1329,13 @@ zapret2_net_entry() {
     echo "$n"
     return $rc
 }
-# Для scan.sh и WebUI: стратегия nfqws2 сети (своя, иначе общая из vpn_tether.conf, нет файла — hardcorp74)
+# Для scan.sh и WebUI: стратегия nfqws2 сети (своя, иначе общая из vpn_tether.conf, нет файла — vt_soft_crck)
 #   --zapret2-strategy КЛЮЧ [НАЗВАНИЕ]
 if [ "$1" = "--zapret2-strategy" ]; then
     _d="${0%/*}/zapret2/strategies"; _n=""
     [ "$ZAPRET_PER_NET" = "1" ] && _n=$(zapret2_net_entry "$2" "$3" "$_d")
     [ -n "$_n" ] || _n="$ZAPRET2_STRATEGY"
-    [ -f "$_d/$_n.conf" ] || _n=hardcorp74
+    [ -f "$_d/$_n.conf" ] || _n=vt_soft_crck
     echo "$_n"
     exit 0
 fi
@@ -1445,6 +1523,24 @@ for _c in $_CT_CANDIDATES; do
 done
 [ -z "$CONNTRACK_BIN" ] && command -v conntrack >/dev/null 2>&1 && CONNTRACK_BIN="conntrack"
 CONNTRACK_WARNED=0
+# vtpoke (свой, tools/vtpoke): пустой ACK в простаивающие видеосоединения (YT_POKE, yt_dead_scan)
+case "$(uname -m 2>/dev/null)" in
+    aarch64|arm64) VTPOKE_BIN="$MODULE_DIR/bin/vtpoke-arm64" ;;
+    *)             VTPOKE_BIN="$MODULE_DIR/bin/vtpoke-arm" ;;
+esac
+[ -x "$VTPOKE_BIN" ] || VTPOKE_BIN=""
+# Запуск со своей группой при uid 0 (dnsproxy, opera-proxy, проверки мимо AdGuard): «$SUG_CMD GID -c КОМАНДА».
+# KernelSU, APatch и Magisk 26+ — su -g; Magisk старше его не умеет (MT6580, 25.2) — свой bin/vtgid
+# (tools/vtgid: группа и sh -c, то же самое). Без своей группы dnsproxy шёл от root, и мимо перехвата DNS
+# телефона пускался весь root к его серверам — с ним и системный резолвер Android 8 (netd, тоже root):
+# в сети, где DNS 8.8.8.8, запросы всех приложений шли мимо DoH. Нет ни того, ни другого — пусто, как раньше
+case "$(uname -m 2>/dev/null)" in
+    aarch64|arm64) VTGID_BIN="$MODULE_DIR/bin/vtgid-arm64" ;;
+    *)             VTGID_BIN="$MODULE_DIR/bin/vtgid-arm" ;;
+esac
+SUG_CMD=""
+if su -g 3999 -c true >/dev/null 2>&1; then SUG_CMD="su -g"
+elif [ -x "$VTGID_BIN" ] && "$VTGID_BIN" 3999 -c true >/dev/null 2>&1; then SUG_CMD="$VTGID_BIN"; fi
 
 case "$(uname -m 2>/dev/null)" in
     aarch64|arm64) _DP_CANDIDATES="$MODULE_DIR/bin/dnsproxy-arm64" ;;
@@ -1460,6 +1556,9 @@ DNSPROXY_BIN_FOUND="$DNSPROXY_BIN"
 [ "$DNSPROXY_ENABLE" = "1" ] || DNSPROXY_BIN=""
 DNSPROXY_PID_FILE="/data/local/tmp/vpn_tether_dnsproxy.pid"
 DNSPROXY_LOG="/data/local/tmp/vpn_tether_dnsproxy.log"
+DNS_GEO_LIST="$MODULE_DIR/dns/geo.txt"                # гео-список модуля (tools/geo/build_geo.py)
+DNS_GEO_FILE="/data/local/tmp/vpn_tether_geo.ups"     # строка «[/имена/]гео-DoH» для dnsproxy
+DNS_GEO_FB_FILE="/data/local/tmp/vpn_tether_geo_fb.ups"  # запасные (-f) + та же строка — при DNS_GEO_STRICT
 
 # --- zapret / nfqws ---
 case "$(uname -m 2>/dev/null)" in
@@ -1534,6 +1633,7 @@ GGC_STATE=""            # что стоит: "" | v4 | v4+v6 (для лога)
 # демон ищет их в conntrack и рвёт застрявшие (повтор).
 CHAIN_YT_RST="VPN_YT_RST"       # filter FORWARD: RST одному застрявшему соединению раздачи
 YT_CTMARK=0x10000000
+YT_PLAY_XMARK=0x12000000/0x12000000   # загрузки Play (стойки gvt1): видео (YT_CTMARK) + свой бит 0x02000000 (yt_match_build)
 YT_HS_MAX=16384         # больше этого от сервера — уже видео, а не рукопожатие (~5 КБ): «видео идёт»
 YT_SEEN_FILE="/data/local/tmp/vpn_tether_ytseen"   # кандидаты: "кортеж впервые_вид вид учтён"; .req — «запрос без ответа»
 YT_GRANGES="/data/local/tmp/vpn_tether_ytgr"       # сети Google числами: "начало конец"
@@ -1546,6 +1646,8 @@ YT_FRONT_TTL=900        # с: срок отказа фронту (адрес м�
 YT_FRONT_LIST=""        # "сеть адрес до_когда" по строке
 YT_FRONT_DEAD=""        # "адрес время" — первое молчание фронта (yt_front_hit)
 YT_FRONT_N=0; YT_FRONT_KEY=""; YT_FRONT_TS=0; YT_DEAD_ON_TS=0
+YT_FRONT_HOLD=0         # до этого времени новых отказов нет: была волна (молчало сразу несколько адресов)
+YT_FRONT_HOLD_KEY=""    # сеть (NET_KEY), где была волна: в других сетях пауза не действует
 CHAIN_YT_RAMP="VPN_YT_RAMP"     # mangle: все исходящие пакеты к стойкам малого окна — в nfqws2 (YT_WSSIZE_RAMP)
 YT_RAMP_FILE="/data/adb/vpn_tether_ytramp"         # "сеть|стойка/28|epoch" — молчащие стойки по сетям, 12 ч, до 128 на сеть
 YT_RAMP_RUN="/data/local/tmp/vpn_tether_ytramp.list"   # стойки текущей сети для --ipset nfqws2 (всегда есть 0.0.0.0/32)
@@ -1611,6 +1713,15 @@ DNS_ALT_SINCE=0        # когда ушли на запасные
 DNS_ALT_OKS=0          # удачных проверок основного подряд
 DNS_ALT_TRIPS=""       # время уходов на запасные (за 30 мин) — признак "дёргается"
 DNS_ALT_SCAN_DEAD=0    # когда curl-проверка запасных не нашла живых (5 мин не повторяем)
+DNS_GEO_ACT=""         # гео-DoH, которому сейчас идут имена гео-списка (пусто — первый из DNS_GEO_UPSTREAMS)
+DNS_GEO_OFF=0          # 1 — все гео-DoH молчат, гео-имена идут в основной (dns_geo_check)
+DNS_GEO_LAST=0         # когда проверяли гео-DoH
+DNS_GEO_SINCE=0        # когда переключились на текущий
+DNS_GEO_SEEN=""        # счётчик DNS-редиректов на прошлой проверке (проверяем только при запросах)
+DNS_GEO_CHECK=60       # с: как часто проверять гео-DoH
+DNS_GEO_FAILS=0        # проверок подряд без ответа (первые 10 мин после переключения меняем после 3)
+DNS_GEO_AI_LAST=0      # когда проверяли, открывает ли гео-DoH ИИ (dns_geo_ai_ok, раз в 10 мин)
+DNS_GEO_BAD=""         # «адрес|время» — не открывали ИИ, час не берём
 DNS_EXEMPT_TICK=0      # исключение AdGuard проверяем раз в ~10с
 DHCP_IFACES_CACHE=""   # ss -lun раз в ~6с (раздача и так видна по ip rule netd)
 DHCP_IFACES_TICK=0

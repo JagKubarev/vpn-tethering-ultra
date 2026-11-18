@@ -196,11 +196,15 @@ ZAPRET_CAPS_FILE=/data/local/tmp/vpn_tether_zcaps
 # Первые 20 исходящих пакетов соединения (было 9). В счёт идут и подделки nfqws: у YouTube
 # (fake ×6 + разрез) окно 9 кончалось на первом же ClientHello, и повтор потерянной части
 # уходил мимо обхода с открытым именем — ТСПУ резал, сервер молчал. 08.11, netem (RTT ~380 мс,
-# потери 4%): живых среди отбитых «принял ClientHello и молчит» 5 из 22 против 10–13 при 9
-ZAPRET_CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:20"
+# потери 4%): живых среди отбитых «принял ClientHello и молчит» 5 из 22 против 10–13 при 9.
+# 17.11 — 40: у nfqws2 (vt_soft_crck + synack) до первого ответа сервера уходит 14 пакетов, один повтор
+# ClientHello уже не влезал бы и в 20 (в 15 у nfqws2 — тем более). Каждый повтор с обходом — ещё ~10
+ZAPRET_CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:40"
 
 ZAPRET_CAPS_TRIES=0
-rm -f "$ZAPRET_CAPS_FILE" 2>/dev/null   # от прошлой загрузки: /data/local/tmp её переживает
+# от прошлой загрузки: /data/local/tmp её переживает. Только демон: файл подключают и scan.sh, и webctl.sh (сборка
+# аргументов nfqws2) — они стирали итог демона, и на ядре без connbytes их правила вставали с ним и не работали (17.11)
+case "${0##*/}" in service.sh) rm -f "$ZAPRET_CAPS_FILE" 2>/dev/null ;; esac
 # 0 — проверено (ZAPRET_CAPS заполнен), 1 — не сейчас (сбой не от ядра: замок
 # xtables у netd/scan.sh, не создалась цепочка) — повтор в следующем такте.
 # Иначе разовый сбой на загрузке выключал zapret до перезагрузки (ревью 27.10)
@@ -242,7 +246,7 @@ zapret_caps() {
         log "WARNING: zapret: без NFQUEUE обход невозможен — выключен до перезагрузки; нужен VPN или другое ядро"
     elif [ "$cb" = 0 ]; then
         ZAPRET_CB_OUT=""
-        log "WARNING: zapret: упрощённый режим — в nfqws все исходящие HTTPS-пакеты (больше нагрузка), без подстройки по ответу сервера (autottl, --wssize); автосписок — только по зависаниям"
+        log "WARNING: zapret: упрощённый режим (ядро без connbytes) — в nfqws все исходящие пакеты TCP, кроме пустых ACK (больше нагрузка), без подстройки по ответу сервера (autottl, --wssize), UDP (звонки, QUIC) — мимо обхода; автосписок — только по зависаниям$([ "$ZAPRET_ENGINE" = nfqws2 ] && [ -s "$ZAPRET_NETS_FILE" ] && echo ". Движок nfqws2: стратегии сетей, подобранные для nfqws1, не действуют — до подбора nfqws2 общая (сайты могут не открываться, подбор — в WebUI)")"
         # GGC и отбой мёртвых — по одной строке SNI, без «первых пакетов»
         GGC_MATCH="-p tcp --dport 443 -m string --string googlevideo.com --algo bm"
         GVT_MATCH="-p tcp --dport 443 -m string --string gvt1.com --algo bm"
@@ -456,11 +460,14 @@ zapret_nfqws_log_trim() {
 # DoH, которые обход ломает: любой fake доходит до сервера и рвёт TLS (09.11, YOTA: LibreDNS
 # напрямую 3/3, через обход 0/3 с md5sig и badseq; без fake открывается, но без fake не
 # открывается dns.zapret.moe). Им — пустой профиль первым: соединение идёт как есть.
-# tamaev-gifts.xyz — так же (12.11, YOTA: через обход 0/5, напрямую 5/5 за 0,1–0,25 с)
-ZAPRET_DOH_ASIS="doh.libredns.gr tamaev-gifts.xyz"
+# tamaev-gifts.xyz — так же (12.11, YOTA: через обход 0/5, напрямую 5/5 за 0,1–0,25 с); dns.dagami.ru — так же
+# (09.11 и 18.11, YOTA: через обход 0 из 8 имён, напрямую 4–5 из 8 с прокси). С новым приёмом профиля (нулевая
+# подделка, 18.11 стенд t41): LibreDNS 4/6 против 6/6 без приёмов — по-прежнему «как есть»; dagami стенд на curl не
+# меряет (по HTTP/1.1 молчит и без приёмов, отвечает только dnsproxy по HTTP/2) — оставлен «как есть»
+ZAPRET_DOH_ASIS="doh.libredns.gr tamaev-gifts.xyz dns.dagami.ru"
 zapret_doh_targets() {
     local u h hp p n="" i="" ps="" x=""
-    for u in $DNS_UPSTREAMS $DNS_FALLBACKS $DNS_META_UPSTREAMS $DNS_BOOTSTRAP_ENC; do
+    for u in $DNS_UPSTREAMS $DNS_FALLBACKS $DNS_GEO_UPSTREAMS $DNS_META_UPSTREAMS $DNS_BOOTSTRAP_ENC; do
         case "$u" in https://*) p=443 ;; tls://*) p=853 ;; *) continue ;; esac
         h=$(dns_hosts_of "$u")
         hp=${u#*://}; hp=${hp%%/*}
@@ -485,43 +492,110 @@ zapret_doh_targets() {
 # Госуслуги), свой список сайтов из WebUI. Порты и лимит пакетов у всех стратегий выпуска одни
 ZAPRET2_TP="80,443,1984,2053,2083,2087,2096,5222,8443"
 ZAPRET2_UP="443,590:600,1400,3478:3481,5349,19294:19344,49152:65535"
-ZAPRET2_PKT=15     # первые пакеты соединения в nfqws2, туда и обратно (PKT_LIMIT_OUT/IN)
-# Каким движком запускать: nfqws2 — если выбран, есть бинарник и Lua и ядро умеет connbytes
-# (без него в nfqws2 ушёл бы весь трафик); иначе прежний nfqws1
+# Первые пакеты соединения в nfqws2: исходящие — 40, ответы — 15 (у nfqws2-android обе 15: PKT_LIMIT_OUT/IN).
+# 17.11, 13T, YOTA: до первых данных от сервера телефон отправил 14 пакетов (SYN, ACK, 2 поддельных SYN-ACK,
+# 2 подделки, 8 кусков разреза) — повтор потерянного ClientHello (метро, слабый Wi-Fi) уходил 15-м и дальше
+# мимо nfqws2 целиком, с открытым именем: ТСПУ резал соединение и, похоже, копил штраф до волны Google.
+# Тот же урок у nfqws1 — 08.11 (9 -> 20, ZAPRET_CB_OUT)
+ZAPRET2_PKT=40
+ZAPRET2_PKT_IN=15
+# Каким движком запускать: nfqws2 — если выбран, есть бинарник и Lua; иначе прежний nfqws1.
+# Ядро без connbytes — тоже nfqws2, в упрощённом режиме, как у nfqws1: в очередь весь исходящий TCP, кроме
+# порта 80 и пустых ACK (zapret2_rules), приёмы — на первых 20 перехваченных пакетах (zapret2_args): пустые ACK в счёт
+# не идут, так что это примерно connbytes 1:40, где считаются все исходящие (ревью 18.11).
+# 17.11 стенд cbbench: на пакет nfqws2 не дороже nfqws1 — 13T ~47 мкс против ~66, Redmi 4X (3.18) 120–160 против 200–240
 ZAPRET2_FAIL=0     # nfqws2 не запустился — до выключения обхода работаю на nfqws1
 zapret_engine() {
     [ "$ZAPRET2_FAIL" != 1 ] && [ "$ZAPRET_ENGINE" = nfqws2 ] && [ -n "$NFQWS2_BIN" ] && [ -f "$ZAPRET2_DIR/lua/zapret-lib.lua" ] && \
-        zapret_cap cb && { echo nfqws2; return 0; }
+        { echo nfqws2; return 0; }
     echo nfqws1
 }
-# Файл выбранной стратегии; нет такого — hardcorp74
+# Файл выбранной стратегии; нет такого — vt_soft_crck
 zapret2_strat_file() {
-    local f="$ZAPRET2_DIR/strategies/${ZAPRET2_EFF:-${ZAPRET2_STRATEGY:-hardcorp74}}.conf"
-    [ -f "$f" ] || f="$ZAPRET2_DIR/strategies/hardcorp74.conf"
+    local f="$ZAPRET2_DIR/strategies/${ZAPRET2_EFF:-${ZAPRET2_STRATEGY:-vt_soft_crck}}.conf"
+    [ -f "$f" ] || f="$ZAPRET2_DIR/strategies/vt_soft_crck.conf"
     echo "$f"
 }
-# Приёмы стратегии одним чтением файла -> Z2_BASE, Z2_CUSTOM, Z2_UDP, Z2_QUIC, Z2_TCP (каждый одной
+# Приёмы стратегии одним чтением файла -> Z2_BASE, Z2_CUSTOM, Z2_UDP, Z2_QUIC, Z2_TCP, Z2_SYN (каждый одной
 # строкой). Файл — модуля (формат nfqws2-android: присваивания с $LUA_DIR/$BLOBS_DIR/$LISTS_DIR),
-# читается в подоболочке
+# читается в подоболочке. NFQWS_ARGS_SYN — наше: приёмы на SYN клиента (у vt_soft_crck — synack), профилем последним
 zapret2_strat_load() {   # файл
     local _o
     _o=$(
         LUA_DIR="$ZAPRET2_DIR/lua"; BLOBS_DIR="$ZAPRET2_DIR/blobs"; LISTS_DIR="$ZAPRET2_DIR/lists"; LOG_DIR=/dev/null
         . "$1" >/dev/null 2>&1
-        for _v in NFQWS_BASE_ARGS NFQWS_ARGS_CUSTOM NFQWS_ARGS_UDP NFQWS_ARGS_QUIC NFQWS_ARGS; do
+        for _v in NFQWS_BASE_ARGS NFQWS_ARGS_CUSTOM NFQWS_ARGS_UDP NFQWS_ARGS_QUIC NFQWS_ARGS NFQWS_ARGS_SYN; do
             eval "printf '%s' \"\$$_v\"" | tr '\n\t' '  ' | tr -s ' '
             echo
         done
     )
-    { read -r Z2_BASE; read -r Z2_CUSTOM; read -r Z2_UDP; read -r Z2_QUIC; read -r Z2_TCP; } <<EOF
+    { read -r Z2_BASE; read -r Z2_CUSTOM; read -r Z2_UDP; read -r Z2_QUIC; read -r Z2_TCP; read -r Z2_SYN; } <<EOF
 $_o
 EOF
+    # имя в подделке — из конфига (ZAPRET2_FAKE_SNI), у всех стратегий одно и для демона, и для подбора. Только общий
+    # профиль (сайты, API YouTube): свои профили стратегий (Google, YouTube, Discord у alt*, видео у vt_soft_crck) авторы
+    # делали с подделкой Google под адреса Google — имя .рф там ТСПУ видел бы на адресе Google (ревью 18.11)
+    [ -n "$ZAPRET2_FAKE_SNI" ] && Z2_TCP=$(zapret2_fake_sni "$Z2_TCP")
     # hostfakesplit_alt — из zapret-smart.lua, а alt13 и eduncey его не подключают: nfqws2 не
     # запускался («desync function 'hostfakesplit_alt' does not exist», подбор 13.11 на YOTA).
     # Файл при загрузке только объявляет функции и таблицы — умный режим сам не включается
     case "$Z2_BASE" in *zapret-smart.lua*) ;; *)
         case "$Z2_CUSTOM $Z2_UDP $Z2_QUIC $Z2_TCP" in *hostfakesplit_alt*) Z2_BASE="$Z2_BASE --lua-init=@$ZAPRET2_DIR/lua/zapret-smart.lua" ;; esac ;;
     esac
+}
+# Для WebUI (status zapret2_gfake): имя в подделке Google общего профиля действующей стратегии — то, что заменит
+# ZAPRET2_FAKE_SNI; «-» — такой подделки нет, имя ставить некуда. zapret2_ts: 1 — есть подделки со сдвигом tcp_ts=N (им нужны метки
+# времени TCP у клиента; у Windows их нет — WebUI показывает команду netsh), 0 — нет. Считается при смене стратегии (не на каждый статус) —
+# в основном процессе, не в $(…): иначе запомненное терялось бы. Список в WebUI устаревал бы с обновлением стратегий
+Z2_GF_KEY=""; Z2_GF=""; Z2_TS=""
+zapret2_gfake_upd() {
+    local f k r
+    f=$(zapret2_strat_file); k="$f|$ZAPRET2_ARGS"
+    [ "$k" = "$Z2_GF_KEY" ] && return 0
+    # имя — родное, из файла: без подстановки ZAPRET2_FAKE_SNI (в подоболочке; ревью 18.11 — показывалось выбранное)
+    r=$(
+        ZAPRET2_FAKE_SNI=""
+        zapret2_strat_load "$f"; t="$Z2_TCP"; [ -n "$ZAPRET2_ARGS" ] && t="$ZAPRET2_ARGS"
+        # Подделки, которые держатся на сдвиге метки времени (tcp_ts=N), в любом профиле: у клиента без меток
+        # (Windows) сдвигать нечего, fool_nots заменяет его на badseq+badack, но хуже (стенд 12.11, hardcorp74:
+        # без меток 64 из 72 сайтов, с метками — 71). tcp_ts_up (поднять метку, если есть) — не в счёт: он лишь
+        # дополняет плохой ack, а без метки fool_nots добавляет и плохой seq — замены хватает (у vt_soft_crck
+        # так видеопрофиль; Kubarev 18.11: подсказка при vt_soft_crck лишняя)
+        ts=0; printf '%s\n' "$Z2_CUSTOM $t $Z2_SYN" | tr ' ' '\n' | \
+            grep -E '^--lua-desync=(fake|hostfakesplit|hostfakesplit_alt|fakedsplit|fakeddisorder):' | grep -qE 'tcp_ts=' && ts=1
+        case "$t" in *fake:blob=tls_google*)
+            n=$(printf '%s\n' "$t" | tr ' ' '\n' | grep 'fake:blob=tls_google' | grep -oE 'sni=[^:,]+' | head -1); n=${n#sni=} ;;
+            *) n=- ;; esac
+        echo "${n:-www.google.com} $ts"
+    )
+    set -- $r
+    # не разобрали — не запоминаем: следующий статус попробует снова, а не «не знаю» до смены стратегии
+    [ -n "$2" ] || { Z2_GF=""; Z2_TS=""; return 0; }
+    Z2_GF_KEY="$k"; Z2_GF="$1"; Z2_TS="$2"
+}
+# ZAPRET2_FAKE_SNI: у подделок blob=tls_google (поддельный ClientHello www.google.com) имя — из конфига:
+# есть tls_mod с sni= — меняем его, есть tls_mod без sni — дописываем, нет — ставим tls_mod=sni=<имя>.
+# Подделки из других файлов и нулей (видео) не трогаем
+zapret2_fake_sni() {   # приёмы
+    printf '%s\n' "$1" | awk -v n="$ZAPRET2_FAKE_SNI" '{
+        for (i = 1; i <= NF; i++) {
+            t = $i
+            if (t ~ /^--lua-desync=fake:blob=tls_google(:|$)/) {
+                c = split(t, f, ":"); o = ""; m = 0
+                for (j = 1; j <= c; j++) {
+                    if (f[j] ~ /^tls_mod=/) {
+                        m = 1
+                        if (f[j] ~ /(=|,)sni=/) sub(/sni=[^,]*/, "sni=" n, f[j]); else f[j] = f[j] ",sni=" n
+                    }
+                    o = o (j > 1 ? ":" : "") f[j]
+                }
+                if (!m) sub(/blob=tls_google/, "blob=tls_google:tls_mod=sni=" n, o)
+                t = o
+            }
+            printf "%s%s", (i > 1 ? " " : ""), t
+        }
+        print ""
+    }'
 }
 # Наше (исключения, списки, адреса) — к каждому профилю стратегии: у z2r_rocket в TCP их три через
 # --new, и дописанное в конец строки досталось бы только последнему — первые два шли бы на все
@@ -534,7 +608,7 @@ zapret2_add() {   # ПРОФИЛИ ДОБАВКА
 # наших списков; fool_nots — как у демона
 zapret2_scan_args() {   # имя очередь
     zapret2_strat_load "$ZAPRET2_DIR/strategies/$1.conf"
-    echo "--qnum=$2 --uid=0:3998 --bind-fix4 $Z2_BASE --lua-init=@$ZAPRET2_DIR/lua/vpn-tether.lua ${Z2_CUSTOM:+$Z2_CUSTOM --new }$Z2_TCP" | zapret2_fool
+    echo "--qnum=$2 --uid=0:3998 --bind-fix4 $Z2_BASE --lua-init=@$ZAPRET2_DIR/lua/vpn-tether.lua ${Z2_CUSTOM:+$Z2_CUSTOM --new }$Z2_TCP${Z2_SYN:+ --new --filter-tcp=443 $Z2_SYN}" | zapret2_fool
 }
 # Для «Проверить QUIC» (scan.sh quic) у nfqws2: основа стратегии и её профиль QUIC
 zapret2_scan_quic_args() {   # имя очередь
@@ -543,7 +617,7 @@ zapret2_scan_quic_args() {   # имя очередь
     echo "--qnum=$2 --uid=0:3998 --bind-fix4 $Z2_BASE --lua-init=@$ZAPRET2_DIR/lua/vpn-tether.lua $Z2_QUIC"
 }
 # Стратегия сайтам со своей стратегией (ZAPRET_ALT) — одна у демона (zapret2_alt_profiles) и у подбора
-# (zapret2_scan_site_args): TLS-приёмы её TCP на порт 443, без её своих профилей (googlevideo у _gv) и UDP.
+# (zapret2_scan_site_args): TLS-приёмы её TCP на порт 443, без её своих профилей (googlevideo у vt_soft_crck) и UDP.
 # Со своими списками или несколькими профилями в TCP (z2r_rocket) — нет: список сайтов дописался бы к
 # их спискам. -> Z2_SITE (и Z2_BASE от zapret2_strat_load); 1 — сайтам не годится
 zapret2_site_tcp() {   # имя
@@ -556,9 +630,15 @@ zapret2_site_tcp() {   # имя
 }
 # Для подбора сайтов (scan.sh sites): кандидат — ровно тем профилем, что демон потом даст сайтам
 # (ревью 15.11: мерили со всеми профилями стратегии — сайт мог открыться тем, чего демон ему не даёт)
-zapret2_scan_site_args() {   # имя очередь
+# Приёмы на SYN (synack) — от основной стратегии сети (третий аргумент): у демона её профиль SYN последним
+# достаётся всем соединениям, в том числе сайтам со своей стратегией (ревью 17.11)
+zapret2_scan_site_args() {   # имя очередь [основная_стратегия]
+    local syn=""
+    if [ -n "$3" ] && [ -f "$ZAPRET2_DIR/strategies/$3.conf" ]; then
+        zapret2_strat_load "$ZAPRET2_DIR/strategies/$3.conf"; syn="$Z2_SYN"
+    fi
     zapret2_site_tcp "$1" || return 1
-    echo "--qnum=$2 --uid=0:3998 --bind-fix4 $Z2_BASE --lua-init=@$ZAPRET2_DIR/lua/vpn-tether.lua $Z2_SITE" | zapret2_fool
+    echo "--qnum=$2 --uid=0:3998 --bind-fix4 $Z2_BASE --lua-init=@$ZAPRET2_DIR/lua/vpn-tether.lua $Z2_SITE${syn:+ --new --filter-tcp=443 $syn}" | zapret2_fool
 }
 # Подделка, которую берут приёмы сайтов, а в основе nfqws2 она под тем же именем, но другая
 # (--blob=имя:… первым объявлением выигрывает) -> её имя; нет — пусто
@@ -667,7 +747,7 @@ zapret2_base_merge() {   # основа добавка
     }'
 }
 # Приёмы стратегии для видео — к профилю малого окна (YT_WSSIZE_RAMP): её профиль googlevideo из своих
-# (у _gv), иначе первый профиль TLS; без фильтров выбора (порт, протокол, списки): профиль выбирается по
+# (у vt_soft_crck), иначе первый профиль TLS; без фильтров выбора (порт, протокол, списки): профиль выбирается по
 # адресу стойки ещё на SYN. Без --payload в начале — tls_client_hello: после vt_wssize_ramp стоит
 # --payload=all, и приёмы легли бы на каждый пакет
 zapret2_ramp_techs() {   # свои_профили профиль_TLS
@@ -684,7 +764,7 @@ zapret2_ramp_techs() {   # свои_профили профиль_TLS
         }'
 }
 zapret2_args() {
-    local L="$ZAPRET2_DIR/lua" B="$ZAPRET2_DIR/blobs" S="$ZAPRET2_DIR/lists" ex="" us="" f base custom udp quic tcp tcpt extra ipset P=""
+    local L="$ZAPRET2_DIR/lua" B="$ZAPRET2_DIR/blobs" S="$ZAPRET2_DIR/lists" ex="" us="" f base custom udp quic tcp syn tcpt extra ipset P=""
     grep -q '[a-z0-9]' "$ZAPRET_LIST_EXCL" 2>/dev/null && ex="--hostlist-exclude=$ZAPRET_LIST_EXCL"
     grep -q '[a-z0-9]' "$ZAPRET_LIST_USER" 2>/dev/null && us="--hostlist=$ZAPRET_LIST_USER"
     f=$(zapret2_strat_file)
@@ -692,9 +772,11 @@ zapret2_args() {
     # основа стратегии + свои: vpn-tether.lua (fool_nots) и подделка vt_tls для профилей DoH (своё
     # имя: у чужой стратегии tls_clienthello может не быть или быть другим файлом)
     base="$Z2_BASE --lua-init=@$L/vpn-tether.lua --blob=vt_tls:@$B/tls_clienthello.bin"
-    custom="$Z2_CUSTOM"; udp="$Z2_UDP"; quic="$Z2_QUIC"; tcp="$Z2_TCP"
+    custom="$Z2_CUSTOM"; udp="$Z2_UDP"; quic="$Z2_QUIC"; tcp="$Z2_TCP"; syn="$Z2_SYN"
     # свои приёмы TCP (ZAPRET2_ARGS) — вместо приёмов стратегии; её подделки и Lua остаются
     [ -n "$ZAPRET2_ARGS" ] && tcp="--filter-tcp=443,80,1984,5222 --filter-l7=http,tls $ZAPRET2_ARGS"
+    # имя в подделке (ZAPRET2_FAKE_SNI) — и в своих приёмах: выбранное в WebUI действует на всё
+    [ -n "$ZAPRET2_ARGS" ] && [ -n "$ZAPRET2_FAKE_SNI" ] && tcp=$(zapret2_fake_sni "$tcp")
     # hostfakesplit_alt в своих приёмах — zapret-smart.lua, как в zapret2_strat_load для файла
     case "$base" in *zapret-smart.lua*) ;; *) case "$ZAPRET2_ARGS" in *hostfakesplit_alt*) base="$base --lua-init=@$L/zapret-smart.lua" ;; esac ;; esac
     # «мимо обхода» — в каждый профиль по именам
@@ -737,13 +819,17 @@ zapret2_args() {
         grep -q '^0\.0\.0\.0/32$' "$YT_RAMP_RUN" 2>/dev/null || echo 0.0.0.0/32 >> "$YT_RAMP_RUN"
         _z2p "--filter-tcp=443 --ipset=$YT_RAMP_RUN --out-range=a --payload=all --lua-desync=vt_wssize_ramp:wsize=1:scale=1 $(zapret2_ramp_techs "$custom" "$tcpt")"
     fi
-    # DoH через обход (DNS_VIA_ZAPRET): как у nfqws1 — свои профили первыми, подделка с md5 и разрез
-    # по середине имени; «как есть» (ZAPRET_DOH_ASIS) — пустой профиль
+    # DoH через обход (DNS_VIA_ZAPRET): свои профили первыми; «как есть» (ZAPRET_DOH_ASIS) — пустой профиль.
+    # Приём — как у видеопрофиля vt_soft_crck: 2 нулевые подделки с плохим ack и разрез посередине имени. 18.11 YOTA
+    # режет по имени cloudflare-dns.com и dns.zapret.moe; стенд t40 (своя копия nfqws2, по 6 запросов): прежний
+    # (подделка vt_tls с md5 + multidisorder midsld) — 0/6 и 0/6, этот — 6/6 и 6/6 (0,28 и 0,52 с); так же открывали
+    # общий профиль vt_soft_crck (с synack и без) и fakedsplit с плохим seq/ack; hostfakesplit, seqovl, подделки с
+    # tcp_ts или tcp_seq — 0
     local dt dn di dpp dx dd
     if [ "$DNS_VIA_ZAPRET" = "1" ]; then
         dt=$(zapret_doh_targets)
         dn=${dt%%"|"*}; dt=${dt#*"|"}; di=${dt%%"|"*}; dt=${dt#*"|"}; dpp=${dt%%"|"*}; dx=${dt#*"|"}
-        dd="--payload=tls_client_hello --lua-desync=fake:blob=vt_tls:tcp_md5 --lua-desync=multidisorder:pos=midsld"
+        dd="--payload=tls_client_hello --lua-desync=fake:blob=0x00000000:tcp_ack=-66000:tcp_ts_up:repeats=2 --lua-desync=multisplit:pos=midsld"
         [ -n "$dx" ] && _z2p "--filter-tcp=$dpp --hostlist-domains=$dx"
         [ -n "$dn" ] && _z2p "--filter-tcp=$dpp --filter-l7=tls $ex --hostlist-domains=$dn $dd"
         [ -n "$di" ] && _z2p "--filter-tcp=$dpp --filter-l7=tls --ipset-ip=$di $dd"
@@ -779,13 +865,20 @@ zapret2_args() {
     [ -n "$ruh" ] && _z2p "$(zapret2_add "$tcp" "$ruh")"
     _z2p "$(zapret2_add "$tcp" "$extra")"
     [ "$ZAPRET_MODE" = "all" ] && _z2p "$(zapret2_add "$tcpt" "--hostlist-exclude=$S/exclude.list $rux")"
+    # приёмы стратегии на SYN клиента (NFQWS_ARGS_SYN, у vt_soft_crck — synack) — последним профилем, без фильтров
+    # по имени и протоколу: на SYN их ещё нет, а профили выше с --filter-l7 и списками SYN не берут. Стоял бы
+    # раньше — при пересмотре профиля на ClientHello забрал бы соединение у профилей с приёмами TLS. Стойкам малого
+    # окна — нет: их профиль первый и берёт SYN по адресу. Из локальной копии: Z2_* к этому месту перезаписаны
+    # стратегиями сайтов (zapret2_alt_profiles) — 17.11 на 13T synack из-за этого не встал
+    [ -n "$syn" ] && _z2p "--filter-tcp=443 $syn"
     # малое окно: настоящий масштаб окна соединения vt_wssize_ramp держит в conntrack nfqws2, а тот по
     # умолчанию забывает соединение через 300 с без пакетов (60:300:60:60) — пул YouTube простаивает
     # дольше, и после простоя сервер видел бы окно в ~128 раз меньше. Закрытые уходят по FIN/RST (их
     # пакеты в очереди всегда), так что час держат только живые
     local ct=""
     [ "$YT_WSSIZE_RAMP" = "1" ] && [ "$YT_DEAD_FAILFAST" = "1" ] && ct="--ctrack-timeouts=60:3600:60:60"
-    echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $ct $base $P" | tr '\n' ' ' | tr -s ' ' | zapret2_fool
+    echo "--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6 $ct $base $P" | tr '\n' ' ' | tr -s ' ' | zapret2_fool | \
+        if zapret_cap cb; then cat; else sed -E 's/(--filter-(tcp|udp)=[^ ]*)/\1 --out-range=-n20/g'; fi
 }
 # Название стратегии и автор (meta.tsv) — для журнала и WebUI
 zapret2_strat_label() {
@@ -806,20 +899,41 @@ zapret2_rule() {   # таблица цепочка proto dports|sports порт�
         $t -t mangle -A "$c" -p "$pr" $sd "$p" $x "$@" 2>/dev/null
     done
 }
+# Ядро без connbytes: в очередь шёл бы каждый исходящий пакет TCP, а при закачке это почти одни пустые ACK — приёмам они
+# не нужны (им — SYN, ClientHello, FIN/RST). Пустой ACK (флаги ровно ACK, длина до 52 байт у IPv4 и до 72 у IPv6:
+# заголовки с метками времени, без данных) — мимо очереди. Больше нельзя: 80 пропускало и сегменты до 28 байт данных
+# без PSH (ClientHello, порезанный обходчиком на ноутбуке, начинается с 1–2 байт); ACK с SACK (при потерях) идут в
+# очередь, их мало. Стойкам малого окна (CHAIN_YT_RAMP, раньше этого правила) — все пакеты: vt_wssize_ramp правит
+# окно и в ACK. Issue #26 (Realme, ядро без connbytes: батарея и system_server от очереди на весь HTTPS)
+zapret_ack_skip() {   # таблица [условие — только такие пакеты]
+    local t="$1" l=52
+    zapret_cap cb && return 0
+    [ "$t" = "$ip6tables" ] && l=72
+    shift
+    # shellcheck disable=SC2068
+    $t -t mangle -A "$CHAIN_ZAPRET" -p tcp $@ --tcp-flags ALL ACK -m length --length 0:$l -j RETURN 2>/dev/null
+}
 zapret2_rules() {   # таблица: правила очереди nfqws2 в уже открытые цепочки VPN_ZAPRET/_IN
     local t="$1" q="-j NFQUEUE --queue-num $ZAPRET_QNUM --queue-bypass"
     local co="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:$ZAPRET2_PKT"
-    local ci="-m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:$ZAPRET2_PKT"
+    local ci="-m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:$ZAPRET2_PKT_IN" cb=1
+    # ядро без connbytes: правила с ним не встают (2>/dev/null) — в очереди не было бы ничего. Исходящий TCP —
+    # весь (как nfqws1 в упрощённом режиме), UDP (звонки, QUIC; QUIC раздачи закрыт, как у nfqws1) и ответы с
+    # данными — мимо: это был бы весь поток. Ответы SYN-ACK/FIN/RST — по флагам, их мало
+    # Порт 80 — тоже мимо: закачки по HTTP (обновления Windows, Steam) шли бы через nfqws2 целиком; nfqws1 брал только 443
+    local tp="$ZAPRET2_TP"
+    zapret_cap cb || { co=""; cb=0; tp=$(echo ",$ZAPRET2_TP," | sed 's/,80,/,/; s/^,//; s/,$//'); }
     # молчащие стойки (YT_WSSIZE_RAMP) — все исходящие пакеты, раньше правил с connbytes; только IPv4
     if [ "$t" = "$iptables" ]; then
         yt_ramp_on && yt_ramp_sync "$(date +%s)"
         yt_ramp_chain
         yt_ramp_on && $t -t mangle -A "$CHAIN_ZAPRET" -p tcp --dport 443 -j "$CHAIN_YT_RAMP" 2>/dev/null
     fi
+    zapret_ack_skip "$t"
     # shellcheck disable=SC2086
-    zapret2_rule "$t" "$CHAIN_ZAPRET" udp dports "$ZAPRET2_UP" "" $co $q
+    [ "$cb" = 1 ] && zapret2_rule "$t" "$CHAIN_ZAPRET" udp dports "$ZAPRET2_UP" "" $co $q
     # shellcheck disable=SC2086
-    zapret2_rule "$t" "$CHAIN_ZAPRET" tcp dports "$ZAPRET2_TP" "" $co $q
+    zapret2_rule "$t" "$CHAIN_ZAPRET" tcp dports "$tp" "" $co $q
     # FIN/RST — в nfqws2: по ним он закрывает соединения у себя (circular)
     # shellcheck disable=SC2086
     zapret2_rule "$t" "$CHAIN_ZAPRET" tcp dports "$ZAPRET2_TP" "--tcp-flags fin fin" $q
@@ -832,6 +946,7 @@ zapret2_rules() {   # таблица: правила очереди nfqws2 в у
     zapret2_rule "$t" "$CHAIN_ZAPRET_IN" tcp sports "$ZAPRET2_TP" "--tcp-flags fin fin" $q
     # shellcheck disable=SC2086
     zapret2_rule "$t" "$CHAIN_ZAPRET_IN" tcp sports "$ZAPRET2_TP" "--tcp-flags rst rst" $q
+    [ "$cb" = 1 ] || return 0
     # shellcheck disable=SC2086
     zapret2_rule "$t" "$CHAIN_ZAPRET_IN" udp sports "$ZAPRET2_UP" "" $ci $q
     # shellcheck disable=SC2086
@@ -1077,6 +1192,9 @@ zapret_rules_on() {
         # адреса, порты), остальное nfqws пропускает как есть. Кроме порта 80: от этой группы идёт
         # проверка белых списков (zapret_http_ok, «мимо обхода»), а у nfqws2 порт 80 — в hardcorp74
         # shellcheck disable=SC2086
+        # его пустые ACK без connbytes — мимо (zapret_ack_skip; общее правило ниже, после стоек малого окна, сюда не успевает)
+        [ "$DNS_VIA_ZAPRET" = "1" ] && [ -n "$DNSPROXY_GID" ] && zapret_cap own && \
+            zapret_ack_skip "$t" -m owner --gid-owner "$DNSPROXY_GID"
         [ "$DNS_VIA_ZAPRET" = "1" ] && [ -n "$DNSPROXY_GID" ] && zapret_cap own && \
             $t -t mangle -A "$CHAIN_ZAPRET" -p tcp ! --dport 80 -m owner --gid-owner "$DNSPROXY_GID" $ZAPRET_CB_OUT \
                 -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
@@ -1098,6 +1216,7 @@ zapret_rules_on() {
             $t -t mangle -A "$CHAIN_ZAPRET" -m owner --socket-exists -j RETURN 2>/dev/null
         fi
         # shellcheck disable=SC2086
+        [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] || zapret_ack_skip "$t"
         [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] || $t -t mangle -A "$CHAIN_ZAPRET" -p tcp --dport 443 $ZAPRET_CB_OUT \
             -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
         $t -t mangle -C POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null || \
@@ -1122,7 +1241,9 @@ zapret_rules_on() {
         $t -N "$CHAIN_ZAPRET_QUIC" 2>/dev/null
         $t -F "$CHAIN_ZAPRET_QUIC" 2>/dev/null
         [ "$t" = "$iptables" ] && ZAPRET_QF_ON=0
-        if [ "$ZAPRET_ENGINE_RUN" = nfqws2 ]; then
+        # nfqws2 берёт QUIC раздачи сам (профили UDP) — только с connbytes: без него UDP в очередь не идёт
+        # (zapret2_rules), и QUIC ушёл бы голым — ни подделки, ни закрытия (ревью 17.11)
+        if [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && zapret_cap cb; then
             zapret_qf_off "$t"
             while $t -D FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; do :; done
         elif zapret_qf_on "$t" "$lan"; then
@@ -1182,6 +1303,9 @@ zapret_sites_check() {
     # первая — через ~час после старта
     [ "$ZSITES_LAST" -eq 0 ] && { ZSITES_LAST=$((now - ZAPRET_ALT_MIN * 60 + 3600)); return 0; }
     [ "$now" -ge $((ZSITES_LAST + ZAPRET_ALT_MIN * 60)) ] || return 0
+    # Ночью (01–06): сотни запросов к закрытым именам днём запускали волну Google (16.11: 15:38 — волна
+    # с начала проверки; на Wi-Fi адрес не сменить). Не было ночного окна сутки сверх срока — в любое время
+    case "$(date +%H)" in 0[1-5]) ;; *) [ "$now" -ge $((ZSITES_LAST + ZAPRET_ALT_MIN * 60 + 86400)) ] || return 0 ;; esac
     vpn_up_now && return 0
     zscan_running && return 0   # идёт подбор/сторож
     # сторож запустил scan.sh в этом же такте — его pid-файла ещё нет
@@ -1189,7 +1313,8 @@ zapret_sites_check() {
     ZSITES_LAST=$now
     ZSITES_NET="$NET_KEY"
     log "zapret: проверяю сайты из списков — кому нужна своя стратегия"
-    setsid sh "$ZAPRET_DIR/scan.sh" sites </dev/null >/dev/null 2>&1 &
+    # ZSCAN_AUTO — плановая (scan.sh: после волны час не запускается; из WebUI — всегда)
+    ZSCAN_AUTO=1 setsid sh "$ZAPRET_DIR/scan.sh" sites </dev/null >/dev/null 2>&1 &
 }
 
 zapret_rules_off() {
@@ -1244,7 +1369,7 @@ ZAPRET_WL_FOREIGN="216.239.38.120 140.82.121.4 104.16.124.96 17.253.144.10"
 zapret_url_ok() {   # $1 — URL с адресом; мимо обхода и AdGuard (группа dnsproxy), через WAN
     local cmd c
     cmd="$CURL_BIN -sk -o /dev/null -m 3 --interface $LAST_WAN_IFACE -w %{http_code} $1"
-    if [ "$DNSPROXY_SU_G" = "1" ]; then c=$(su -g "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else c=$(eval "$cmd" 2>/dev/null); fi
+    if [ "$DNSPROXY_SU_G" = "1" ]; then c=$($SUG_CMD "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else c=$(eval "$cmd" 2>/dev/null); fi
     [ -n "$c" ] && [ "$c" != "000" ]
 }
 zapret_http_ok() { zapret_url_ok "http://$1/"; }    # $1 — IP, порт 80
@@ -1350,7 +1475,7 @@ zapret_reconcile() {
         local _qn="$QUIC_NET" _en
         _en=$(zapret_engine)
         [ "$_en" != "$ZAPRET_ENGINE" ] && [ "$_en" != "$ZAPRET_ENGINE_EFF" ] && \
-            log "zapret: движок $ZAPRET_ENGINE недоступен ($([ -z "$NFQWS2_BIN" ] && echo "нет nfqws2" || echo "ядро без connbytes")) — работаю на $_en"
+            log "zapret: движок $ZAPRET_ENGINE недоступен ($([ -z "$NFQWS2_BIN" ] && echo "нет nfqws2" || { [ "$ZAPRET2_FAIL" = 1 ] && echo "не запустился"; } || echo "нет файлов Lua")) — работаю на $_en"
         ZAPRET_ENGINE_EFF="$_en"
         zapret_pick_strategy
         # итог проверки QUIC сменился: в WebUI он виден сразу, а не со следующим событием
@@ -1405,7 +1530,7 @@ zapret_reconcile() {
         ZAPRET_HOOK_TICK=0
         if ! $iptables -t mangle -C POSTROUTING -j "$CHAIN_ZAPRET" 2>/dev/null || \
            { [ "$ZAPRET_QF_ON" = "1" ] && ! $iptables -t mangle -C POSTROUTING -p udp --dport 443 -j "$CHAIN_ZAPRET_QF" 2>/dev/null; } || \
-           { [ "$ZAPRET_QF_ON" != "1" ] && [ "$ZAPRET_QUIC_BLOCK" = "1" ] && [ "$ZAPRET_ENGINE_RUN" != nfqws2 ] && ! $iptables -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; } || \
+           { [ "$ZAPRET_QF_ON" != "1" ] && [ "$ZAPRET_QUIC_BLOCK" = "1" ] && { [ "$ZAPRET_ENGINE_RUN" != nfqws2 ] || ! zapret_cap cb; } && ! $iptables -C FORWARD -j "$CHAIN_ZAPRET_QUIC" 2>/dev/null; } || \
            { case "$GGC_STATE" in v4*) ! $iptables -C FORWARD $GGC_MATCH -j "$CHAIN_ZAPRET_GGC" 2>/dev/null ;; *) false ;; esac; } || \
            { [ "$YT_DEAD_STATE" = "on" ] && ! $iptables -t mangle -C FORWARD $YT_MARK_FWD 2>/dev/null; } || \
            { [ "$YT_GGC_BLOCK" = "1" ] && [ "$GGC_FAILS" -gt 0 ] && [ "$GGC_FAILS" -lt 3 ] && zapret_cap str; } || \
@@ -1421,7 +1546,7 @@ zapret_reconcile() {
     if [ "$ZAPRET_STATE" != "on" ] || [ "$excl" != "$ZAPRET_EXCL_RUN" ] || [ "$_hooks_bad" = 1 ]; then
         zapret_rules_on "$excl"
         if [ "$ZAPRET_STATE" != "on" ]; then
-            log "zapret: включён (режим $ZAPRET_MODE, телефон: $ZAPRET_PHONE, QUIC раздачи: $(if [ "$ZAPRET_QF_ON" = 1 ]; then echo подделка; elif [ "$ZAPRET_QUIC_BLOCK" = 1 ]; then echo закрыт; else echo открыт; fi); в исключениях (VPN-клиенты и «мимо обхода»): ${excl:-нет}$([ "$DNS_VIA_ZAPRET" = 1 ] && echo "; DoH через обход: $(zapret_doh_targets | cut -d'|' -f1,2 | tr ',|' '\n\n' | grep -c .) серверов, порты $(zapret_doh_targets | cut -d'|' -f3)"))"
+            log "zapret: включён (режим $ZAPRET_MODE, телефон: $ZAPRET_PHONE, QUIC раздачи: $(if [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && zapret_cap cb; then echo "через nfqws2"; elif [ "$ZAPRET_QF_ON" = 1 ]; then echo подделка; elif [ "$ZAPRET_QUIC_BLOCK" = 1 ]; then echo закрыт; else echo открыт; fi); в исключениях (VPN-клиенты и «мимо обхода»): ${excl:-нет}$([ "$DNS_VIA_ZAPRET" = 1 ] && echo "; DoH через обход: $(zapret_doh_targets | cut -d'|' -f1,2 | tr ',|' '\n\n' | grep -c .) серверов, порты $(zapret_doh_targets | cut -d'|' -f3)"))"
         elif [ "$excl" != "$ZAPRET_EXCL_RUN" ]; then
             log "zapret: исключения (VPN-клиенты и «мимо обхода»): ${excl:-нет}"
         else

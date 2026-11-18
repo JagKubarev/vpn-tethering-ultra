@@ -467,6 +467,8 @@ setup_direct_rules() {
     $iptables -C FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
         $iptables -I FORWARD 1 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     $iptables -C FORWARD -j ACCEPT 2>/dev/null || $iptables -A FORWARD -j ACCEPT
+    # RST раздаче (youtube.sh) — выше ESTABLISHED, иначе он до установленных соединений не доходит
+    yt_rst_hook_top
 
     if [ -z "$tether_ifaces" ]; then
         apply_dns_mode direct ""
@@ -745,6 +747,13 @@ apply_state() {
         log "VPN действительно упал ($VPN_DOWN_COUNT промахов подряд)"
     fi
     [ "$vpn_active" = "true" ] && VPN_DOWN_COUNT=0
+    # bbr при VPN, напрямую cubic (net.sh). VPN для этого — и tun с адресом без таблицы netd (root-tun: sing-box,
+    # Clash, ядерный wg0 — tun_idx пуст всегда): его TCP-туннелю bbr нужен так же (ревью 17.11)
+    if [ "$vpn_active" = true ] || { [ -z "$tun_idx" ] && [ -d "/sys/class/net/$TUN_NAME" ] && $ip addr show "$TUN_NAME" 2>/dev/null | grep -q "inet "; }; then
+        tcp_cc_apply true
+    else
+        tcp_cc_apply false
+    fi
 
     if [ "$vpn_active" != "$LAST_VPN_ACTIVE" ] || [ "$tether_ifaces" != "$LAST_TETHER_IFACES" ] || [ "$FORCE_UPDATE" -eq 1 ]; then
         VPN_DNS_CACHE=""

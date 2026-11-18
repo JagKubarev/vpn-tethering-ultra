@@ -201,14 +201,14 @@ handle_change() {
 # сброс соединений клиентов). zapret, QUIC приложений и прочее — точечно:
 # 20.10 каждое "Применить" (переключение zapret) рвало все соединения
 # ноутбука и перезапускало dnsproxy с пустым кэшем.
-CONF_GRP_DNS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS"
+CONF_GRP_DNS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_GEO_UPSTREAMS DNS_GEO_DOMAINS DNS_GEO_STRICT DNS_GEO_MODE DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS"
 CONF_GRP_KS="KILL_SWITCH KILL_SWITCH_STRICT"
 CONF_GRP_QUIC="QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE"
 CONF_GRP_STEALTH="TETHER_STEALTH TETHER_TTL_STRICT"
 CONF_GRP_WARP="WARP_ENABLE WARP_CONF"
 CONF_GRP_OPERA="OPERA_ENABLE OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 CONF_GRP_WARPR="WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER"
-CONF_GRP_ZAPRET="DNS_VIA_ZAPRET ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET_MODE ZAPRET_PHONE ZAPRET_EXCL_APPS ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_PER_NET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_WSSIZE_RAMP"
+CONF_GRP_ZAPRET="DNS_VIA_ZAPRET ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET2_FAKE_SNI ZAPRET_MODE ZAPRET_PHONE ZAPRET_EXCL_APPS ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_PER_NET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_WSSIZE_RAMP"
 _conf_grp_sig() {   # $1 = имя переменной-результата, дальше ключи
     local _v="$1" _k _o=""; shift
     for _k in "$@"; do eval "_o=\"\$_o|\$$_k\""; done
@@ -222,6 +222,10 @@ reload_config() {
     _conf_grp_sig s_ks0 $CONF_GRP_KS
     _conf_grp_sig s_quic0 $CONF_GRP_QUIC
     _conf_grp_sig s_zap0 $CONF_GRP_ZAPRET
+    # DoH через обход: имена DoH — в профиле nfqws (zapret_doh_targets), собирается при его запуске. Сменился список
+    # DNS — обход заново, иначе новые DoH до перезапуска шли бы общей стратегией (18.11)
+    # набор, не порядок: ▲▼ в списке DNS обход не меняет (ревью 18.11)
+    [ "$DNS_VIA_ZAPRET" = 1 ] && s_zap0="$s_zap0|$(zapret_doh_targets | tr ',|' '\n\n' | sort | tr '\n' ' ')"
     _conf_grp_sig s_st0 $CONF_GRP_STEALTH
     _conf_grp_sig s_op0 $CONF_GRP_OPERA
     _conf_grp_sig s_wp0 $CONF_GRP_WARP
@@ -237,6 +241,7 @@ reload_config() {
     _conf_grp_sig s_ks1 $CONF_GRP_KS
     _conf_grp_sig s_quic1 $CONF_GRP_QUIC
     _conf_grp_sig s_zap1 $CONF_GRP_ZAPRET
+    [ "$DNS_VIA_ZAPRET" = 1 ] && s_zap1="$s_zap1|$(zapret_doh_targets | tr ',|' '\n\n' | sort | tr '\n' ' ')"
     _conf_grp_sig s_st1 $CONF_GRP_STEALTH
     _conf_grp_sig s_op1 $CONF_GRP_OPERA
     # прокси не трогаем: выключение и новые правила — в opera_reconcile
@@ -273,6 +278,10 @@ reload_config() {
         DNS_STATE=""
         DNS_DEGRADED=0
         DNS_ALT_UPS=""
+        DNS_GEO_ACT=""
+        DNS_GEO_OFF=0
+        DNS_GEO_BAD=""
+        DNS_GEO_AI_LAST=0
         DNS_FAST_RECHECK=0
         DNS_FAIL_SIG=""
         DNS_HEALTH_LAST=0
@@ -388,6 +397,7 @@ monitor_loop() {
             rm -f "$DNS_FLUSH_FILE"
         fi
         dns_health
+        dns_geo_check
         [ $((_loop_count % 15)) -eq 0 ] && quic_block_apply
         [ $((_loop_count % 15)) -eq 7 ] && meta_eu_watchdog
         [ $((_loop_count % 15)) -eq 3 ] && stealth_reconcile

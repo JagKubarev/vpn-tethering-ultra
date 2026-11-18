@@ -141,7 +141,7 @@ opera_saved_ep() {   # регион
     case "$ep" in *[0-9].[0-9]*:[0-9]*) ;; *) return 1 ;; esac
     [ -n "$CURL_BIN" ] || return 1
     if [ "$OPERA_SU_G" = "1" ]; then
-        code=$(su -g "$OPERA_GID" -c "$CURL_BIN -sk -o /dev/null -m 4 -w %{http_code} https://$ep/" 2>/dev/null)
+        code=$($SUG_CMD "$OPERA_GID" -c "$CURL_BIN -sk -o /dev/null -m 4 -w %{http_code} https://$ep/" 2>/dev/null)
     else
         code=$($CURL_BIN -sk -o /dev/null -m 4 -w %{http_code} "https://$ep/" 2>/dev/null)
     fi
@@ -154,8 +154,8 @@ opera_start() {
     _opera_kill $(opera_proxy_pids)
     if [ -z "$OPERA_SU_G" ]; then
         OPERA_SU_G=0
-        su -g "$OPERA_GID" -c true >/dev/null 2>&1 && OPERA_SU_G=1
-        [ "$OPERA_SU_G" = "1" ] || log "WARNING: opera: su -g не работает — opera-proxy без своей группы, HTTPS-фильтр AdGuard ему помешает"
+        [ -n "$SUG_CMD" ] && $SUG_CMD "$OPERA_GID" -c true >/dev/null 2>&1 && OPERA_SU_G=1
+        [ "$OPERA_SU_G" = "1" ] || log "WARNING: opera: нет ни su -g, ни bin/vtgid — opera-proxy без своей группы, HTTPS-фильтр AdGuard ему помешает"
     fi
     opera_exempt
     opera_ca_build || log "WARNING: opera: системные сертификаты не найдены"
@@ -193,7 +193,7 @@ opera_start() {
     : > "$OPERA_LOG"
     # setsid: с nohup opera-proxy умирал вместе с сессией
     if [ "$OPERA_SU_G" = "1" ]; then
-        setsid su -g "$OPERA_GID" -c "exec $OPERA_BIN $args" </dev/null >> "$OPERA_LOG" 2>&1 &
+        setsid $SUG_CMD "$OPERA_GID" -c "exec $OPERA_BIN $args" </dev/null >> "$OPERA_LOG" 2>&1 &
     else
         setsid $OPERA_BIN $args </dev/null >> "$OPERA_LOG" 2>&1 &
     fi
@@ -478,7 +478,7 @@ opera_rules_ok() {
 opera_probe() {
     local code g="sh -c"
     [ -n "$CURL_BIN" ] || return 0      # нечем проверить — не перезапускать рабочий прокси
-    [ "$OPERA_SU_G" = "1" ] && g="su -g $OPERA_GID -c"
+    [ "$OPERA_SU_G" = "1" ] && g="$SUG_CMD $OPERA_GID -c"
     code=$($g "$CURL_BIN -s -o /dev/null -m 6 --socks5-hostname 127.0.0.1:$OPERA_PORT -w %{http_code} http://www.example.com/" 2>/dev/null)
     [ -n "$code" ] && [ "$code" != "000" ]
 }
@@ -490,7 +490,7 @@ opera_where() {
     local g="sh -c" out
     [ -n "$CURL_BIN" ] && [ "$OPERA_WHERE_N" -lt 3 ] || return 0
     OPERA_WHERE_N=$((OPERA_WHERE_N + 1))
-    [ "$OPERA_SU_G" = "1" ] && g="su -g $OPERA_GID -c"
+    [ "$OPERA_SU_G" = "1" ] && g="$SUG_CMD $OPERA_GID -c"
     # -k, как у WARP (warp_probe): нужна только площадка, а корня сертификата 1.1.1.1 нет в
     # хранилище Android 8 (09.11 MT6580: «unable to get local issuer certificate», выход пустой)
     out=$($g "$CURL_BIN -s -k -m 6 --socks5-hostname 127.0.0.1:$OPERA_PORT https://1.1.1.1/cdn-cgi/trace" 2>/dev/null)
@@ -588,7 +588,7 @@ opera_reconcile() {
     if [ "$ZAPRET_WL" = "1" ] && [ "$OPERA_STATE" != "on" ] && ! vpn_up_now; then
         case "$OPERA_STATE" in
             off) ;;
-            *) opera_down nonet; log "opera: остановлен (у оператора белый список)" ;;
+            *) opera_down nonet; log "opera: остановлен (у оператора белые списки)" ;;
         esac
         OPERA_NONET=1
         return 0

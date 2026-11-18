@@ -90,6 +90,7 @@ update_status() {
     # action.sh: он собирает из них понятный человеку текст.
     local vpn_up=0 up_host
     vpn_up_now && vpn_up=1
+    [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && zapret2_gfake_upd
     up_host=$(echo "${DNS_ALT_UPS:-$DNS_UPSTREAMS}" | awk '{print $1}' | sed -E 's#^[a-z0-9]+://##; s#[/:].*##')
     {
         printf '%s\n%s\n' "$status_line" "$ifaces"
@@ -103,7 +104,7 @@ update_status() {
         echo "ggc=$([ -n "$GGC_STATE" ] && echo on || echo off)"
         echo "yt_dead=$([ "$YT_DEAD_STATE" = on ] && echo on || echo off)"
         # сколько застрявших видеосоединений порвано (yt_retry_hits) и запросов без ответа
-        [ "$YT_DEAD_STATE" = on ] && echo "yt_retry_kills=$YT_RETRY_KILLS" && echo "yt_retry_rsts=$YT_RETRY_RSTS" && echo "yt_req_kills=$YT_REQ_KILLS"
+        [ "$YT_DEAD_STATE" = on ] && echo "yt_retry_kills=$YT_RETRY_KILLS" && echo "yt_retry_rsts=$YT_RETRY_RSTS" && echo "yt_req_kills=$YT_REQ_KILLS" && echo "yt_idle_kills=$YT_IDLE_KILLS" && echo "yt_pokes=$YT_POKES"
         yt_ramp_on && echo "yt_ramp=$YT_RAMP_N"
         [ "$YT_DEAD_STATE" = on ] && echo "yt_front=$YT_FRONT_N"
         echo "zwd=$ZAPRET_WATCHDOG"
@@ -117,6 +118,10 @@ update_status() {
         echo "dns_phone_enabled=$DNS_PHONE"
         echo "dnsproxy_enable=$DNSPROXY_ENABLE"
         echo "dns_upstream=$up_host"
+        # гео-DoH: хост, «off» — все молчат (гео-имена через основной), пусто — гео-строки нет (VPN с dnat/cache/doh,
+        # основной — тот же гео-DoH): файл стоит, только пока он в аргументах dnsproxy (ревью 17.11)
+        echo "dns_geo=$(case "$DNSPROXY_SIG" in "direct-doh|"*|"vpn-geo|"*)
+            if [ "$DNS_GEO_OFF" = 1 ]; then echo off; elif [ -s "$DNS_GEO_FILE" ]; then dns_hosts_of $DNS_GEO_ACT; fi ;; esac)"
         echo "kill_switch=$KILL_SWITCH"
         echo "mtu=$tun0_mtu"
         echo "mss=$CURRENT_MSS"
@@ -129,9 +134,11 @@ update_status() {
         echo "zapret_auto=$(cat "$ZAPRET_LIST_AUTO" 2>/dev/null | grep -c '[a-z0-9]')"
         echo "zapret_per_net=$ZAPRET_PER_NET"
         echo "zapret_engine=$ZAPRET_ENGINE_RUN"
-        # стратегия nfqws2, которой он запущен (имя файла; нет файла — hardcorp74), и свои приёмы
+        # стратегия nfqws2, которой он запущен (имя файла; нет файла — vt_soft_crck), и свои приёмы
         [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && echo "zapret2_strategy=$(basename "$(zapret2_strat_file)" .conf)$([ -n "$ZAPRET2_ARGS" ] && echo +)"
         [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && echo "zapret2_src=$ZAPRET2_NET_SRC"
+        [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && echo "zapret2_gfake=$Z2_GF"
+        [ "$ZAPRET_ENGINE_RUN" = nfqws2 ] && echo "zapret2_ts=$Z2_TS"
         echo "zapret_strategy=$ZAPRET_EFF_STRATEGY"
         echo "zapret_eff_args=$ZAPRET_EFF_ARGS"
         echo "zapret_eff_yt=$ZAPRET_EFF_YT"

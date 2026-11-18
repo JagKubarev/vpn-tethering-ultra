@@ -526,6 +526,27 @@ tcp_cc_best() {
     esac
 }
 
+# Управление перегрузкой — по VPN (17.11): bbr только при поднятом VPN, напрямую cubic. YOTA, 13T, свои
+# соединения телефона к YouTube напрямую, три пары A/B по 10 мин: с bbr 10,5 / 9,2 / 26 «запросов без
+# ответа» на 100 МБ видео, с cubic 7,2 / 8,0 / 10; шортсы (40 × 15 с): старт дольше 3 с — 3 против 0, среднее
+# 0,95 против 0,74 с. bbr нужен TCP-туннелю VPN (на потерях 7 Мбит/с против 2, см. STABLE ниже), раздачу
+# (транзит) это не касается. tcp_cc_apply [true|false] — состояние VPN из apply_state; без аргумента — прежнее
+TCP_CC_VPN=false
+TCP_CC_APPLIED=""
+TCP_CC_BEST=""          # tcp_cc_best — один раз: список алгоритмов ядра без перезагрузки не меняется
+tcp_cc_apply() {
+    local cc=cubic
+    [ -n "$1" ] && TCP_CC_VPN=$1
+    if [ "$TCP_CC_VPN" = true ]; then
+        [ -n "$TCP_CC_BEST" ] || TCP_CC_BEST=$(tcp_cc_best)
+        cc=$TCP_CC_BEST
+    fi
+    [ "$cc" = "$TCP_CC_APPLIED" ] && return 0
+    echo "$cc" > /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || true
+    [ -n "$TCP_CC_APPLIED" ] && log "TCP: $cc ($([ "$TCP_CC_VPN" = true ] && echo 'VPN поднят' || echo 'напрямую'))"
+    TCP_CC_APPLIED=$cc
+}
+
 apply_network_profile() {
     local profile=$1 cc
 
@@ -544,10 +565,9 @@ apply_network_profile() {
         # с телефона — так ходит TCP-туннель VPN): без потерь cubic 8.7 vs bbr
         # 8.1 Мбит, но при 1% потерь 1.8-2.5 vs 7.2-7.4, при 3% 0.3-1.3 vs
         # 6.7-7.8. Плохая мобильная связь = потери, то есть "STABLE" резал
-        # скорость в разы ровно тогда, когда включался. Оставляем BBR, на
-        # плохой связи меняем только число SYN-ретраев.
-        cc=$(tcp_cc_best)
-        [ "$cc" = cubic ] || echo "$cc" > /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || true
+        # скорость в разы ровно тогда, когда включался. Оставляем BBR (при VPN —
+        # tcp_cc_apply), на плохой связи меняем только число SYN-ретраев.
+        TCP_CC_APPLIED=""; tcp_cc_apply; cc=$TCP_CC_APPLIED
         # ECN=2 (как у Android): принимаем, но сами не просим — на мобильных
         # сетях встречаются узлы, которые режут или портят ECN-пакеты
         echo 2 > /proc/sys/net/ipv4/tcp_ecn 2>/dev/null || true
@@ -556,8 +576,7 @@ apply_network_profile() {
         set_sysctl net.ipv4.tcp_slow_start_after_idle 0
         log "STABLE profile: $cc + больше SYN-ретраев"
     else
-        cc=$(tcp_cc_best)
-        echo "$cc" > /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || true
+        TCP_CC_APPLIED=""; tcp_cc_apply; cc=$TCP_CC_APPLIED
         echo 2 > /proc/sys/net/ipv4/tcp_ecn 2>/dev/null || true
         echo 1 > /proc/sys/net/ipv4/tcp_ecn_fallback 2>/dev/null || true
         set_sysctl net.ipv4.tcp_syn_retries 3

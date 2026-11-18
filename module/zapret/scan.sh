@@ -87,7 +87,7 @@ nq_up() { # nq_up "<аргументы с @G/@Q>" | "z2:<стратегия nfqw
             # сборка — те же функции, что у демона (lib/zapret.sh): стратегия ко всем сайтам набора, а
             # кандидат подбора сайтов (Z2_SITE_RUN) — тем профилем, что демон даст сайтам
             if [ "$Z2_SITE_RUN" = 1 ]; then
-                _a=$(zapret2_scan_site_args "${1#z2:}" "$Q") || { echo "стратегия ${1#z2:} сайтам не годится" > "$TMP/nq.log"; NQPID=""; return 1; }
+                _a=$(zapret2_scan_site_args "${1#z2:}" "$Q" "${CUR#z2:}") || { echo "стратегия ${1#z2:} сайтам не годится" > "$TMP/nq.log"; NQPID=""; return 1; }
             else
                 _a=$(zapret2_scan_args "${1#z2:}" "$Q")
             fi
@@ -145,7 +145,7 @@ quic_vid() { # скачалось ли с именем видеосервера:
 quic_rules() { # quic_rules -I|-D
     local a="$1"
     [ "$a" = -I ] && a="-I POSTROUTING 1" || a="-D POSTROUTING"
-    $IPT -t mangle $a -o "$WAN" -m owner --uid-owner 0 ! --gid-owner 3999 -p udp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass 2>/dev/null
+    $IPT -t mangle $a -o "$WAN" -m connmark --mark $SCMARK/$SCMARK -p udp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass 2>/dev/null
     [ "$1" = -I ] && a="-I OUTPUT 1" || a="-D OUTPUT"
     $IPT $a -o "$WAN" -m owner --uid-owner 0 -p udp --dport 443 -j ACCEPT 2>/dev/null
 }
@@ -233,6 +233,8 @@ case "$(uname -m)" in aarch64|arm64) NQ2="$MODDIR/bin/nfqws2-arm64" ;; *) NQ2="$
 HIST2=/data/adb/vpn_tether_zapret2_hist
 if [ "$ENG" = nfqws2 ]; then
     ZAPRET2_DIR="$MODDIR/zapret2"
+    # имя в подделке — как у демона (ZAPRET2_FAKE_SNI; zapret2_strat_load подставит)
+    ZAPRET2_FAKE_SNI=$(sh "$MODDIR/service.sh" --get ZAPRET2_FAKE_SNI 2>/dev/null)
     # zapret2_scan_args (zapret2_strat_load, zapret2_fool) — та же сборка стратегии, что у демона (в файле только
     # функции и переменные; имена с функциями сканера не совпадают)
     . "$MODDIR/lib/zapret.sh"
@@ -277,14 +279,18 @@ event() {
 # трогают — иначе его новые соединения во время подбора резались/ломались
 # ядро без connbytes (zapret_caps демона): в очередь — все пакеты сканера,
 # ответы — тоже все, но только его соединений (connmark), трафика мало
-CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:20"   # как у демона (ZAPRET_CB_OUT)
+CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:40"   # как у демона (ZAPRET_CB_OUT)
 CB_IN="-m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3"
 grep -q '^cb=0' /data/local/tmp/vpn_tether_zcaps 2>/dev/null && { CB_OUT=""; CB_IN=""; }
-RULE="-o $WAN -m owner --uid-owner 0 ! --gid-owner 3999 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
-# первые ответы сервера на запросы сканера — тоже в nfqws: без них не
-# работают --wssize и autottl (3.6). Соединения сканера — по биту connmark.
+# Соединения сканера — по биту connmark: его ставит RULE_MK в OUTPUT по владельцу (root, кроме dnsproxy), а
+# в POSTROUTING и в цепочке обхода демона — только по этому биту. Владелец в POSTROUTING на части ядер
+# совпадает со ВСЕМИ пакетами (17.11 MT6580, ядро 3.18: правило для uid 9999 — 2 из 2 пакетов, в OUTPUT — 0;
+# демон это знает — zapret_caps own=0): правила сканера по uid 0 забирали на время проверки весь трафик
+# телефона и раздачи — в очередь кандидата, а «мимо основного обхода» снимало обход со всех.
+# Первые ответы сервера на запросы сканера — тоже в nfqws: без них не работают --wssize и autottl (3.6)
 SCMARK=0x08000000
-RULE_MK="-o $WAN -m owner --uid-owner 0 -p tcp --dport 443 -j CONNMARK --set-xmark $SCMARK/$SCMARK"
+RULE_MK="-o $WAN -m owner --uid-owner 0 ! --gid-owner 3999 -j CONNMARK --set-xmark $SCMARK/$SCMARK"
+RULE="-o $WAN -m connmark --mark $SCMARK/$SCMARK -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
 RULE_IN="-i $WAN -p tcp --sport 443 -m connmark --mark $SCMARK/$SCMARK $CB_IN -j NFQUEUE --queue-num $Q --queue-bypass"
 NQPID=""
 BYPASS=0    # 1 = исключения uid 0 (nat OUTPUT, VPN_ZAPRET) поставлены нами
@@ -297,7 +303,7 @@ cleanup() {
     # такие же ставят проверки WebUI (webctl.sh sitetest и др.): выход до
     # установки своих не должен снимать чужие
     if [ "$BYPASS" = 1 ]; then
-        $IPT -t mangle -D VPN_ZAPRET -m owner --uid-owner 0 -j RETURN 2>/dev/null
+        $IPT -t mangle -D VPN_ZAPRET -m connmark --mark $SCMARK/$SCMARK -j RETURN 2>/dev/null
         $IPT -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
     fi
     rm -rf "$TMP"
@@ -355,6 +361,12 @@ if [ "$MODE" = check ] && [ -n "$(find "$OUTB.wave" -maxdepth 0 -mmin -15 2>/dev
 fi
 # Подбор YouTube в волну выбрал бы случайную: 05.11 в 20:43 сайты то открывались, то
 # нет, и проверенную стратегию сменила та, что проскочила. Метку ставит сторож
+# Плановая проверка сайтов (демон, ZSCAN_AUTO) после волны — час не трогаем: сотни запросов к закрытым
+# именам на только что оштрафованном адресе (на Wi-Fi его не сменить). Из WebUI — по просьбе, без паузы
+if [ "$MODE" = sites ] && [ "$ZSCAN_AUTO" = 1 ] && [ -n "$(find "$OUTB.wave" -maxdepth 0 -mmin -60 2>/dev/null)" ]; then
+    st state=error msg="недавно была волна Google — проверку сайтов отложил"
+    exit 0
+fi
 if [ "$GRP" = yt ] && [ -n "$(find "$OUTB.wave" -maxdepth 0 -mmin -15 2>/dev/null)" ]; then
     st state=error msg="сейчас волна Google: подбор YouTube выбрал бы случайную стратегию. Повторите через 15 минут"
     exit 1
@@ -395,10 +407,11 @@ if [ "$MODE" = sites ]; then
     fi
 fi
 
-# мимо AdGuard; основной zapret не трогает запросы сканера
+# мимо AdGuard; основной zapret не трогает запросы сканера (по биту connmark — его ставит RULE_MK, с этого места)
 BYPASS=1
 $IPT -t nat -I OUTPUT 1 -m owner --uid-owner 0 -p tcp -j RETURN
-$IPT -t mangle -I VPN_ZAPRET 1 -m owner --uid-owner 0 -j RETURN 2>/dev/null
+$IPT -t mangle -I OUTPUT 1 $RULE_MK 2>/dev/null
+$IPT -t mangle -I VPN_ZAPRET 1 -m connmark --mark $SCMARK/$SCMARK -j RETURN 2>/dev/null
 
 if [ "$MODE" = quic ]; then
     quic_check
@@ -548,6 +561,26 @@ wl_closed() {
     [ -n "$_c" ] && [ "$_c" != 000 ]
 }
 
+# Волна посреди проверки или подбора: после прогона, где что-то не открылось, — Google напрямую
+# (nfqws сканера уже остановлен, исключения uid 0 стоят). HTTPS молчит, HTTP отвечает — волна ТСПУ:
+# дальше каждый кандидат — снова закрытые имена в открытом виде (волну их залп и запускает: 06.11
+# прямые запросы 3 из 3; 16.11 Дом.ру — волна сразу после быстрого подбора, YOTA — после прямых
+# запросов 1 из 2, после того же через обход 0 из 3), а итог в волну — мусор (16.11 15:38 «своя
+# стратегия у 32»). Останавливаемся, ничего не запоминаем, метка .wave — сторож 15 мин не проверяет
+wave_mid() {
+    _w443=$(curl -s -o /dev/null -m 5 --interface "$WAN" --capath "$CA" -w '%{http_code}' https://www.google.com/generate_204 2>/dev/null)
+    [ "$_w443" = 000 ] || return 0
+    _w80=$(curl -s -o /dev/null -m 5 --interface "$WAN" -w '%{http_code}' http://www.google.com/generate_204 2>/dev/null)
+    [ "$_w80" = 204 ] || return 0
+    touch "$OUTB.wave"
+    case "$MODE0" in check) _wl="автопроверка" ;; sites) _wl="сайты" ;; *) _wl="подбор" ;; esac
+    event "$_wl: Google по HTTPS замолчал посреди проверки (по HTTP отвечает) — волна ТСПУ: остановился, ничего не запоминаю"
+    [ "$MODE0" = check ] && wd_last "волна посреди проверки, отложил"
+    # проверка сайтов — не «готово»: метка демону повторить через ~час (on_exit), а не через сутки
+    st state="$([ "$MODE0" = sites ] && echo error || echo done)" stage="готово" msg="волна Google посреди проверки — остановился, ничего не запомнил"
+    exit 0
+}
+
 # --- исходное состояние: что вообще заблокировано
 st stage="проверяю, что заблокировано"
 # Напрямую только контрольные, остальные считаем закрытыми (кроме заданных вручную).
@@ -589,7 +622,7 @@ if [ "$MODE" = sites ] && [ -z "$SITES_ARG" ]; then
     fi
     # Google закрыт и по HTTP — это может быть белый список: сайты получили бы чужие стратегии
     if wl_closed "$_g80s"; then
-        st state=error msg="оператор открывает только свои сайты (белый список) — проверку сайтов отложил"
+        st state=error msg="оператор открывает только свои сайты (белые списки) — проверку сайтов отложил"
         exit 1
     fi
 fi
@@ -603,7 +636,6 @@ fi
 # основной zapret на запросы сканера не влияет и с ним: правило сканера стоит
 # в POSTROUTING первым, вердикт NFQUEUE завершает обход mangle
 $IPT -t mangle -I POSTROUTING 1 $RULE
-$IPT -t mangle -I OUTPUT 1 $RULE_MK 2>/dev/null
 $IPT -t mangle -I PREROUTING 1 $RULE_IN 2>/dev/null
 
 # run_strat "<аргументы с @G/@Q>" "этап" -> строка в results
@@ -643,6 +675,9 @@ run_strat() {
     echo "$ok|$NS|$brk|$sum|$a|$stage|${det# }|$ysum|$dsum" >> "$OUT.results"
     S_done=$((S_done + 1))
     st done=$S_done
+    # что-то не открылось — не началась ли волна (выход без записи)
+    [ "$ok" -lt "$NS" ] && wave_mid
+    return 0
 }
 
 # Скорость для подбора yt|dc. Открытая страница мало что говорит о видео и файлах,
@@ -795,7 +830,7 @@ if [ "$MODE" = "sites" ]; then
             [ -f "$ZALT" ] && L="${NETID#*"|"}" K="$KEY" awk -F'|' '$4 ~ /^z2:/ && ($1 == ENVIRON["K"] || (ENVIRON["L"] != "" && $2 == ENVIRON["L"])) { print $4 }' "$ZALT"
             KS=" $KEYS " awk -F'|' 'index(ENVIRON["KS"], " " $1 " ") && $2 != "" { l[++n] = $2 } END { for (i = n; i >= 1; i--) print "z2:" l[i] }' "$HIST2" 2>/dev/null
             echo @@
-            for _s in hardcorp74 universal_v12_gv universal_v12 anti_throttle_gv anti_throttle MartinBacker fake_tls_auto_alt3 $(z2_list ""); do echo "z2:$_s"; done
+            for _s in vt_soft_crck hardcorp74 universal_v12 anti_throttle MartinBacker fake_tls_auto_alt3 $(z2_list ""); do echo "z2:$_s"; done
         } | C="$CUR" awk '$0 == "@@" || (NF && $0 != ENVIRON["C"] && !s[$0]++)' | {
             n=0; b=0
             while IFS= read -r _c; do
@@ -913,6 +948,21 @@ if [ "$MODE" = "check" ]; then
     nothing_opened() { tail -n 1 "$OUT.results" | awk -F'|' '{ n = 1; r = ($1 == 0 && $7 !~ /^nfqws: /) } END { exit !(n && r) }'; }
     # что не открылось у последнего прогона: "youtube.com:x28 ..." (для журнала)
     last_fail() { tail -n 1 "$OUT.results" | cut -d'|' -f7 | cut -c1-200; }
+    # Хоть один контрольный напрямую по HTTP (порт 80 не закрывают, nfqws сканера между прогонами не запущен):
+    # ya.ru любым ответом (Google бывает закрыт целиком — белые списки), Google — 204 (в волну по HTTP отвечает).
+    # Адреса — уже найденные ($TMP/ips): DoH мог упасть вместе со связью
+    net_alive() {
+        for _h in ya.ru www.google.com; do
+            _ip=$(awk -v h="$_h" '$1 == h { print $2; exit }' "$TMP/ips")
+            _u="http://$_h/"; [ "$_h" = www.google.com ] && _u="http://$_h/generate_204"
+            _c=$(curl -s -o /dev/null -m 5 --interface "$WAN" ${_ip:+--resolve $_h:80:$_ip} -w '%{http_code}' "$_u" 2>/dev/null)
+            case "$_h:$_c" in
+                ya.ru:|ya.ru:000) ;;
+                ya.ru:*|*:204) return 0 ;;
+            esac
+        done
+        return 1
+    }
     # Волна ТСПУ на Google: HTTPS ко всем его адресам молчит и без обхода, HTTP
     # отвечает — стратегия ни при чём. 03.11 08:01 сторож в волну счёл её
     # сломанной, подбор (Google ожил к концу) заменил рабочую стратегию YOTA и
@@ -926,9 +976,9 @@ if [ "$MODE" = "check" ]; then
         # Google закрыт и по HTTP, как и другие чужие сети, а ya.ru открыт — белый список.
         # Метку волны не ставим: подсказка «смените адрес» тут не поможет (11.11: 0 из 37)
         if [ "$_g443" = 000 ] && wl_closed "$_g80"; then
-            event "автопроверка: оператор открывает только свои сайты (белый список) — стратегию не трогаю ($(last_fail))"
-            wd_last "белый список, отложил"
-            st state=done stage="готово" msg="белый список оператора — стратегию не трогаю"
+            event "автопроверка: оператор открывает только свои сайты (белые списки) — стратегию не трогаю ($(last_fail))"
+            wd_last "белые списки, отложил"
+            st state=done stage="готово" msg="белые списки оператора — стратегию не трогаю"
             exit 0
         fi
         [ "$_g443" = 000 ] && [ "$_g80" = 204 ] || return 0
@@ -958,7 +1008,10 @@ if [ "$MODE" = "check" ]; then
     fi
     # 16:21 21.10: все сайты разом "не открылись", подбор выбрал стратегию
     # хуже прежней. Связь пропала — не меняем ничего; иначе перепроверка через минуту.
-    if nothing_opened; then
+    # «ничего, даже контрольные» — связь, только если и напрямую молчат: стратегия, что ломает весь HTTPS, роняет и
+    # контрольные (они идут через неё) — 18.11 Redmi 4X: z_attacker с подбора («1 из 10») так держалась 15 ч,
+    # а сеть была жива (пинг, HTTP, DNS)
+    if nothing_opened && ! net_alive; then
         event "автопроверка: не открылось вообще ничего, даже контрольные — похоже, связь; стратегию не трогаю"
         wd_last "нет связи, отложил"
         st state=done stage="готово" msg="нет связи — проверка отложена"
@@ -975,7 +1028,10 @@ if [ "$MODE" = "check" ]; then
         st state=done stage="готово" msg="кратковременный сбой — стратегия работает"
         exit 0
     fi
-    if nothing_opened; then
+    # «ничего, даже контрольные» — связь, только если и напрямую молчат: стратегия, что ломает весь HTTPS, роняет и
+    # контрольные (они идут через неё) — 18.11 Redmi 4X: z_attacker с подбора («1 из 10») так держалась 15 ч,
+    # а сеть была жива (пинг, HTTP, DNS)
+    if nothing_opened && ! net_alive; then
         event "автопроверка: не открылось вообще ничего, даже контрольные — похоже, связь; стратегию не трогаю"
         wd_last "нет связи, отложил"
         st state=done stage="готово" msg="нет связи — проверка отложена"
@@ -987,21 +1043,7 @@ if [ "$MODE" = "check" ]; then
     # рабочую стратегию YOTA. Вывод, не замер (результаты прогона перезаписаны): контрольные
     # открывались через раз, поэтому не сработало «ничего не открылось». Перед заменой —
     # 3 проверки через 5 с, первая неудачная — сеть нестабильна, через 15 мин заново.
-    # Проверка — хоть один контрольный по HTTP (порт 80 не закрывают): ya.ru любым ответом
-    # (Google бывает закрыт целиком — белые списки), Google — 204 (в волну по HTTP отвечает).
-    # Адреса — уже найденные ($TMP/ips): DoH мог упасть вместе со связью
-    net_alive() {
-        for _h in ya.ru www.google.com; do
-            _ip=$(awk -v h="$_h" '$1 == h { print $2; exit }' "$TMP/ips")
-            _u="http://$_h/"; [ "$_h" = www.google.com ] && _u="http://$_h/generate_204"
-            _c=$(curl -s -o /dev/null -m 5 --interface "$WAN" ${_ip:+--resolve $_h:80:$_ip} -w '%{http_code}' "$_u" 2>/dev/null)
-            case "$_h:$_c" in
-                ya.ru:|ya.ru:000) ;;
-                ya.ru:*|*:204) return 0 ;;
-            esac
-        done
-        return 1
-    }
+    # Проверка — net_alive (выше)
     _nf=0
     for _i in 1 2 3; do
         net_alive || { _nf=$_i; break; }
@@ -1026,7 +1068,12 @@ if [ "$MODE" = "check" ]; then
         [ -n "$_c" ] && [ "$_c" != 000 ] && _do=$((_do + 1))
         [ "$_df" -ge 3 ] && break
     done
-    if [ "$_df" -gt 0 ] && [ "$_do" = "$_df" ]; then
+    # Но если через стратегию не открылись и контрольные (ya.ru, google.com — без блокировок), она сама ломает
+    # сайты: «напрямую открыты» тогда значит «стратегия вредна», и её надо менять (18.11 Redmi 4X за раздачей 13T:
+    # z_attacker не открывала ничего, сторож оставлял её — «блокировки нет»)
+    _brk=0
+    case " $(last_fail) " in *" ya.ru:"*|*" google.com:"*|*" www.google.com:"*) _brk=1 ;; esac
+    if [ "$_brk" = 0 ] && [ "$_df" -gt 0 ] && [ "$_do" = "$_df" ]; then
         event "автопроверка: стратегия не открывает ($(last_fail)), но напрямую сайты открыты — блокировки нет, не меняю"
         wd_last "работает (напрямую открыто)"
         st state=done stage="готово" msg="сайты открыты напрямую — блокировки нет"
