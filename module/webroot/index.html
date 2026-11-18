@@ -148,6 +148,11 @@ h2 { font-size: 17px; font-weight: 650; letter-spacing: -.005em; color: var(--te
 /* уточнение к строке выше: с отступом и только пока та включена */
 .row.sub { padding-left: 32px; background-position: 32px 0; background-size: calc(100% - 32px) 1px; }
 .row.sub.off { display: none; }
+/* шапка вкладки: главный выключатель, как плитки WARP и Opera */
+.card.master { margin-top: 14px; }
+.card.master .row { padding: 16px; gap: 14px; }
+.card.master .dot.big { margin: 0 2px; }
+.card.master .t { font-weight: 650; font-size: 17px; }
 .row.col > .head { display: flex; align-items: center; gap: 12px; }   /* заголовок + кнопка справа, итог ниже */
 /* строка с кнопкой справа: на узком экране или при крупном шрифте кнопка уходит
    под текст, а не сжимает его в столбик по слогу */
@@ -174,10 +179,10 @@ textarea { resize: vertical; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo
 /* блоком, не flex: текст без обёртки во flex не сжимается, и длинный домен/ошибка вылезали по ширине */
 .st-line { margin-top: 6px; overflow-wrap: anywhere; }
 .st-line > .dot { margin-right: 8px; vertical-align: -1px; }
-details.off, #upList.off, .gm-off { opacity: .45; pointer-events: none; }
+details.off, #upList.off, #geoList.off, .gm-off { opacity: .45; pointer-events: none; }
 .row.fold { cursor: pointer; } .row.fold .chev { padding: 0 10px; opacity: .6; }
 /* в тёмной теме серый текст на .45 почти сливался с карточкой */
-:root[data-theme="dark"] .row.off, :root[data-theme="dark"] details.off, :root[data-theme="dark"] #upList.off, :root[data-theme="dark"] .gm-off { opacity: .55; }
+:root[data-theme="dark"] .row.off, :root[data-theme="dark"] details.off, :root[data-theme="dark"] #upList.off, :root[data-theme="dark"] #geoList.off, :root[data-theme="dark"] .gm-off { opacity: .55; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 select:disabled { opacity: .6; }
 .inline { display: flex; flex-wrap: wrap; gap: 0 8px; align-items: flex-start; }
@@ -504,9 +509,15 @@ details > summary::after { border-color: currentColor; }
 </section>
 
 <section class="tab" data-tab="bypass">
+<div class="card master">
+  <div class="row">
+    <span class="dot big" data-mdot="ZAPRET_ENABLE"></span>
+    <div class="txt"><div class="t">Обход блокировок</div><div class="s" data-msub="ZAPRET_ENABLE"></div></div>
+    <label class="sw"><input type="checkbox" data-key="ZAPRET_ENABLE" aria-label="Обход блокировок"><span></span></label>
+  </div>
+</div>
 <h2>Стратегия</h2>
 <div class="card">
-  <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
   <div class="tip" id="pickTip" data-nfqws1>Для лучшей работы подберите стратегию под свою сеть, отдельно для YouTube и Discord: кнопки в «Подборе стратегии» выше.</div>
   <div class="row col" data-dep="ZAPRET_ENABLE" id="zEngRow">
     <div class="txt"><div class="t">Движок обхода</div>
@@ -628,7 +639,6 @@ details > summary::after { border-color: currentColor; }
 
 <h2>Подбор стратегии</h2>
 <div class="card">
-  <div class="offnote" data-offnote="ZAPRET_ENABLE" role="button">Обход блокировок выключен — включается на Главной.</div>
   <div class="pad">
   <div class="s muted" style="font-size:13px;margin-top:2px">Ищет рабочую стратегию для этой сети по сайтам ниже, в фоне. При сбое автопроверка запускает его сама.</div>
   <textarea id="scSites" rows="3" aria-label="Сайты для подбора" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
@@ -679,7 +689,7 @@ details > summary::after { border-color: currentColor; }
       <div id="zalt"></div>
       <div class="btn-row fill mt8">
         <button class="btn small" id="zaltRun">Проверить сайты сейчас</button>
-        <button class="btn small" id="zaltClear">Сбросить</button>
+        <button class="btn small bad" id="zaltClear">Сбросить</button>
       </div>
     </div>
   </details>
@@ -696,7 +706,7 @@ details > summary::after { border-color: currentColor; }
           <option value="5">5</option><option value="7">7</option><option value="10">10</option>
         </select>
       </div>
-      <div class="mt8"><button class="btn small" id="zautoClear">Очистить автосписок</button></div>
+      <div class="mt8"><button class="btn small bad" id="zautoClear">Очистить автосписок</button></div>
     </div>
     <div class="row col">
       <div class="txt"><div class="t">Встроенный список: <span id="zdefN">0</span></div></div>
@@ -734,28 +744,18 @@ details > summary::after { border-color: currentColor; }
 
 <h2>QUIC</h2>
 <div class="card">
-  <div class="row">
-    <div class="txt"><div class="t">QUIC у YouTube и Google Play</div>
-      <div class="s">YouTube (и Music, ReVanced, Morphe, NewPipe) и Google Play идут по HTTPS, где работает повтор зависших соединений. Только без VPN.</div></div>
-    <label class="sw"><input type="checkbox" data-key="QUIC_BLOCK_YT"><span></span></label>
+  <div class="row col">
+    <div class="txt"><div class="t">YouTube и Google Play</div><div class="s" id="quicYtSub"></div></div>
+    <div class="seg" id="quicYt" role="radiogroup" aria-label="QUIC: YouTube и Google Play" style="margin-top:10px"><button data-q="off" role="radio">Как есть</button><button data-q="block" role="radio">Закрыть</button><button data-q="fake" role="radio">Пробивать</button></div>
+    <input type="checkbox" data-key="QUIC_BLOCK_YT" hidden><input type="checkbox" data-key="QUIC_YT_FAKE" hidden>
   </div>
-  <div class="row" data-dep="QUIC_BLOCK_YT">
-    <div class="txt"><div class="t">Подделка вместо закрытия</div>
-      <div class="s">QUIC пробивается обходом: перемотка быстрее, но повтор зависших соединений не работает. AdGuard закрыл бы QUIC, поэтому эти приложения идут мимо него — реклама в YouTube может вернуться.</div></div>
-    <label class="sw"><input type="checkbox" data-key="QUIC_YT_FAKE"><span></span></label>
-  </div>
-  <div class="row" data-dep="ZAPRET_ENABLE" data-depoff="ZAPRET_QUIC_FAKE">
-    <div class="txt"><div class="t">Без QUIC на раздаче</div>
-      <div class="s">Браузеры раздачи идут по HTTPS, где работает обход. Только без VPN. Пока включена подделка ниже, не действует (если ядро её не умеет — действует закрытие).</div></div>
-    <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_BLOCK"><span></span></label>
-  </div>
-  <div class="row" data-dep="ZAPRET_ENABLE">
-    <div class="txt"><div class="t">Подделка QUIC на раздаче</div>
-      <div class="s">QUIC раздачи пробивается обходом: YouTube и Play на устройствах быстрее перематывают.</div></div>
-    <label class="sw"><input type="checkbox" data-key="ZAPRET_QUIC_FAKE"><span></span></label>
+  <div class="row col" data-dep="ZAPRET_ENABLE">
+    <div class="txt"><div class="t">Раздача</div><div class="s" id="quicTethSub"></div></div>
+    <div class="seg" id="quicTeth" role="radiogroup" aria-label="QUIC: Раздача" style="margin-top:10px"><button data-q="off" role="radio">Как есть</button><button data-q="block" role="radio">Закрыть</button><button data-q="fake" role="radio">Пробивать</button></div>
+    <input type="checkbox" data-key="ZAPRET_QUIC_BLOCK" hidden><input type="checkbox" data-key="ZAPRET_QUIC_FAKE" hidden>
   </div>
   <div class="row col">
-    <div class="txt"><div class="t">Без QUIC</div>
+    <div class="txt"><div class="t">Приложения без QUIC</div>
       <div class="s">Идут по HTTPS, где работает обход. Помогает, если оператор режет QUIC.</div></div>
     <div class="chips" id="quicChips"></div>
     <div class="mt8"><button class="btn small" id="quicAdd">Добавить приложение</button></div>
@@ -781,15 +781,21 @@ details > summary::after { border-color: currentColor; }
   <div class="row wrap">
     <div class="txt"><div class="t">Сбросить настройки вкладки</div>
       <div class="s">Вернёт умолчания «Обход» после «Применить». Свой список сайтов, конфиги WARP и стратегии сетей не трогаются.</div></div>
-    <button class="btn small" data-tabreset="bypass">Сбросить</button>
+    <button class="btn small bad" data-tabreset="bypass">Сбросить</button>
   </div>
 </div>
 </section>
 
 <section class="tab" data-tab="net">
+<div class="card master">
+  <div class="row">
+    <span class="dot big" data-mdot="DNSPROXY_ENABLE"></span>
+    <div class="txt"><div class="t">Зашифрованный DNS</div><div class="s" data-msub="DNSPROXY_ENABLE"></div></div>
+    <label class="sw"><input type="checkbox" data-key="DNSPROXY_ENABLE" aria-label="Зашифрованный DNS"><span></span></label>
+  </div>
+</div>
 <h2>Серверы</h2>
 <div class="card">
-  <div class="offnote" data-offnote="DNSPROXY_ENABLE" role="button">Зашифрованный DNS выключен — включается на Главной.</div>
   <div class="row col" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Какие DNS спрашивать</div>
       <div class="s" id="geoModeSub"></div></div>
@@ -821,13 +827,12 @@ details > summary::after { border-color: currentColor; }
 
 <h2>Гео-DoH</h2>
 <div class="card">
-  <div class="offnote" data-offnote="DNSPROXY_ENABLE" role="button">Зашифрованный DNS выключен — включается на Главной.</div>
-  <div class="row col">
+  <div class="row col" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Серверы гео-DoH</div>
       <div class="s">Для ChatGPT, Gemini, Claude и других сервисов, закрытых для России: отдают адреса своих прокси. По порядку; молчат все — через основной DNS.</div></div>
   </div>
-  <div id="geoList" data-gm="off"></div>
-  <div class="row col" data-gm="off">
+  <div id="geoList" data-dep="DNSPROXY_ENABLE" data-gm="off"></div>
+  <div class="row col" data-dep="DNSPROXY_ENABLE" data-gm="off">
     <div class="inline" style="margin-top:-10px"><input type="text" id="geoIn" list="dnsKnownGeo" placeholder="https://сервер/dns-query" aria-label="Новый гео-DoH" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="geoAdd">Добавить</button></div>
     <div class="err" id="geoErr" style="display:none"></div>
   </div>
@@ -840,12 +845,12 @@ details > summary::after { border-color: currentColor; }
     </div>
     <div class="kv" id="geoChkOut" style="display:none"></div>
   </div>
-  <div class="row" data-gm="off" data-gm2="all">
+  <div class="row" data-dep="DNSPROXY_ENABLE" data-gm="off" data-gm2="all">
     <div class="txt"><div class="t">Без гео-DoH — не давать адреса</div>
       <div class="s">Молчат все гео-DoH — сервисы гео-списка ждут без адреса. Выключено — получат настоящие: из России не откроются, а приложения запомнят их ещё на несколько минут.</div></div>
     <label class="sw"><input type="checkbox" data-key="DNS_GEO_STRICT"><span></span></label>
   </div>
-  <div class="row col" data-gm="off" data-gm2="all">
+  <div class="row col" data-dep="DNSPROXY_ENABLE" data-gm="off" data-gm2="all">
     <div class="txt"><div class="t">Свои имена для гео-DoH</div>
       <div class="s">Домены через пробел, с поддоменами — к гео-списку модуля (около 80 сервисов: ИИ, Spotify, Notion, DeepL, JetBrains …).</div></div>
     <input type="text" data-key="DNS_GEO_DOMAINS" placeholder="example.com" autocapitalize="off" autocorrect="off" spellcheck="false">
@@ -934,7 +939,7 @@ details > summary::after { border-color: currentColor; }
   <div class="row wrap">
     <div class="txt"><div class="t">Сбросить настройки вкладки</div>
       <div class="s">Вернёт умолчания «DNS» после «Применить». Свой список сайтов, конфиги WARP и стратегии сетей не трогаются.</div></div>
-    <button class="btn small" data-tabreset="net">Сбросить</button>
+    <button class="btn small bad" data-tabreset="net">Сбросить</button>
   </div>
 </div>
 </section>
@@ -1022,7 +1027,7 @@ details > summary::after { border-color: currentColor; }
   <div class="row wrap">
     <div class="txt"><div class="t">Сбросить настройки вкладки</div>
       <div class="s">Вернёт умолчания «Выходы» после «Применить»: что идёт в WARP и Opera, их настройки. Выключатели WARP и Opera и конфиги WARP не трогаются.</div></div>
-    <button class="btn small" data-tabreset="warp">Сбросить</button>
+    <button class="btn small bad" data-tabreset="warp">Сбросить</button>
   </div>
 </div>
 </section>
@@ -1076,7 +1081,7 @@ details > summary::after { border-color: currentColor; }
   <div class="row wrap">
     <div class="txt"><div class="t">Перезапустить модуль</div>
       <div class="s">Как после перезагрузки телефона: правила снимаются и ставятся заново. Интернет и раздача прервутся на 10–20 секунд, видео может остановиться.</div></div>
-    <button class="btn small" id="daemonRestart">Перезапустить</button>
+    <button class="btn small bad" id="daemonRestart">Перезапустить</button>
   </div>
   <div class="row">
     <div class="txt"><div class="t">Состояние в описании модуля</div>
@@ -1106,7 +1111,7 @@ details > summary::after { border-color: currentColor; }
   <div class="row wrap">
     <div class="txt"><div class="t">Сбросить все настройки</div>
       <div class="s">Вернёт умолчания после «Применить». Свой список сайтов, конфиги WARP и стратегии сетей не трогаются.</div></div>
-    <button class="btn small" id="resetAll">Сбросить</button>
+    <button class="btn small bad" id="resetAll">Сбросить</button>
   </div>
 </div>
 
@@ -1794,7 +1799,11 @@ function renderDeps() {
   // data-dep2 — вторая нужная настройка (обе включены — строка действует)
   $$('[data-dep]').forEach((row) => { row.classList.toggle('off', CUR[row.dataset.dep] !== '1' || (!!row.dataset.dep2 && CUR[row.dataset.dep2] !== '1') || (!!row.dataset.depoff && CUR[row.dataset.depoff] === '1')); });
   renderFakeSni();
-  // главный выключатель — только на Главной; во вкладках подсказка, если он выключен
+  // главный выключатель — на Главной и в шапке своей вкладки (у WARP и Opera — только во вкладке)
+  // шапка вкладки: точка и подпись по состоянию главного выключателя
+  $$('[data-mdot]').forEach((d) => { d.className = 'dot big' + (CUR[d.dataset.mdot] === '1' ? ' green' : ''); });
+  $$('[data-msub]').forEach((d) => { d.textContent = CUR[d.dataset.msub] === '1' ? MASTER_SUB[d.dataset.msub] : 'Выключен — настройки ниже не действуют.'; });
+  renderQuic();
   $$('[data-offnote]').forEach((n) => { n.hidden = CUR[n.dataset.offnote] === '1'; });
   // nfqws2: стратегии, подбор и сторож — только у nfqws1, у nfqws2 свой перебор приёмов
   $$('[data-nfqws1]').forEach((el) => { el.style.display = CUR.ZAPRET_ENGINE === 'nfqws2' ? 'none' : ''; });
@@ -1815,6 +1824,39 @@ function renderDeps() {
   $('#zStratSub').textContent = pn ? 'Используется в сетях без своей стратегии.'
     : 'Метод обхода DPI.';
 }
+
+const MASTER_SUB = {
+  ZAPRET_ENABLE: 'Открывает YouTube, Discord и другие заблокированные сайты без VPN.',
+  DNSPROXY_ENABLE: 'Оператор не подменит ответы, сервисы с блокировкой по стране откроются.' };
+// QUIC: три положения на две настройки. Телефон: подделка — только вместе с закрытием (как в демоне);
+// раздача: подделка главнее закрытия, закрытие — запасное, если ядро подделку не умеет (по умолчанию оба 1)
+const QUIC_SEG = {
+  quicYt: { b: 'QUIC_BLOCK_YT', f: 'QUIC_YT_FAKE', fakeNeedsBlock: true, sub: {
+    off: 'Модуль QUIC этих приложений не трогает.',
+    block: 'YouTube (и Music, ReVanced, Morphe, NewPipe) и Google Play идут по HTTPS, где работает повтор зависших соединений. Только без VPN.',
+    fake: 'QUIC пробивается обходом: перемотка быстрее, но повтор зависших соединений не работает. AdGuard закрыл бы QUIC, поэтому эти приложения идут мимо него — реклама в YouTube может вернуться.' } },
+  quicTeth: { b: 'ZAPRET_QUIC_BLOCK', f: 'ZAPRET_QUIC_FAKE', fakeNeedsBlock: false, sub: {
+    off: 'Модуль QUIC раздачи не трогает.',
+    block: 'Браузеры раздачи идут по HTTPS, где работает обход. Только без VPN.',
+    fake: 'QUIC раздачи пробивается обходом: YouTube и Play на устройствах быстрее перематывают.' } } };
+function quicMode(q) {
+  if (CUR[q.f] === '1' && (!q.fakeNeedsBlock || CUR[q.b] === '1')) return 'fake';
+  return CUR[q.b] === '1' ? 'block' : 'off';
+}
+function renderQuic() {
+  Object.keys(QUIC_SEG).forEach((id) => {
+    const q = QUIC_SEG[id], m = quicMode(q);
+    $$('#' + id + ' button').forEach((b) => { const on = b.dataset.q === m; b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false'); });
+    let t = q.sub[m];
+    if (id === 'quicTeth' && m === 'fake' && CUR[q.b] === '1') t += ' Если ядро так не умеет — QUIC закрывается.';
+    $('#' + id + 'Sub').textContent = t;
+  });
+}
+Object.keys(QUIC_SEG).forEach((id) => $('#' + id).addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b || b.disabled) return;
+  const q = QUIC_SEG[id], m = b.dataset.q;
+  setCur(q.b, m === 'off' ? '0' : '1'); setCur(q.f, m === 'fake' ? '1' : '0');
+}));
 
 function changedKeys() { return KEYS.filter((k) => (CUR[k] || '') !== (saved(k) || '')); }
 const normList = (t) => t.toLowerCase().split(/[\s,;]+/).filter(Boolean).join('\n');
@@ -2147,9 +2189,9 @@ const TAB_NAMES = { net: 'DNS', bypass: 'Обход', warp: 'Выходы' };
 $$('[data-tabreset]').forEach((b) => b.addEventListener('click', () => {
   if (busy) { toast('Подождите — применяются настройки'); return; }
   const t = b.dataset.tabreset, sec = $('.tab[data-tab="' + t + '"]');
-  // выключатели WARP и Opera стоят на этой же вкладке — сброс их не трогает, как главные выключатели обхода и DNS
+  // главные выключатели (WARP, Opera, обход, DNS) стоят на этой же вкладке — сброс их не трогает
   const keys = Array.from(new Set(Array.from(sec.querySelectorAll('[data-key]')).map((e) => e.dataset.key).concat(TAB_KEYS_EXTRA[t] || [])))
-    .filter((k) => KEYS.includes(k) && k !== 'WARP_ENABLE' && k !== 'OPERA_ENABLE');
+    .filter((k) => KEYS.includes(k) && !['WARP_ENABLE', 'OPERA_ENABLE', 'ZAPRET_ENABLE', 'DNSPROXY_ENABLE'].includes(k));
   if (!confirm('Вернуть настройки вкладки «' + TAB_NAMES[t] + '» к значениям по умолчанию?')) return;
   keys.forEach((k) => { CUR[k] = DEF[k] || ''; }); fakeOwnPick = false;
   renderForm(); if (t === 'warp') loadWarp();
