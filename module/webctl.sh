@@ -209,7 +209,7 @@ case "$1" in
         {
             echo "# VPN Tether — настройки, $(date '+%d.%m.%Y %H:%M')"
             sed -n 's/^version=/# модуль: /p' "$MODDIR/module.prop"
-            echo "# Импорт: WebUI -> Сервис -> «Импорт». Чего нет в файле — вернётся к умолчанию."
+            echo "# Импорт: WebUI -> Сервис -> «Импорт настроек». Чего нет в файле — вернётся к умолчанию."
             sh "$MODDIR/webctl.sh" conf | awk '
                 /^D / { k = substr($0, 3); sub(/=.*/, "", k); d[k] = 1; next }
                 /^U / { l = substr($0, 3); k = l; sub(/=.*/, "", k)
