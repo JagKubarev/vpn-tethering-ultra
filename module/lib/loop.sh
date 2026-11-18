@@ -87,6 +87,9 @@ handle_change() {
         # «трёх промахов» (warp_reconcile). «Плохие» конфиги, пул и пауза
         # прошлой сети к этой не относятся
         WARP_CHECK_TS=0; WARP_NETCHG=1; WARP_BAD=""; WARP_EP_FULL=0; WARP_RETRY_TS=0; WARP_TG_TRIES=0; WARP_TG_YTW=0; WARP_TG_HOLD=0
+        # та же wlan0, другая сеть (19.11, Redmi: Domru4 -> TP-Link): route_id не меняется, и проверка гео-DoH
+        # без отметки шла через 21 с, на медленной новой сети признала живой гео молчащим. Отметка — минута тишины
+        dns_route_changed
         flush_conntrack
         $ip route flush cache 2>/dev/null || true
         ndc resolver flushdefaultif 2>/dev/null || true

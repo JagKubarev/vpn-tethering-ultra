@@ -441,7 +441,9 @@ dnsproxy_start() {
         direct-doh|vpn-geo)
             if [ "$DNS_GEO_OFF" != 1 ]; then
                 # новый — проверка ИИ (dns_geo_check) на ближайшем проходе, а не через 10 мин от прежнего
-                [ -n "$DNS_GEO_ACT" ] || { DNS_GEO_ACT=$(echo $DNS_GEO_UPSTREAMS | awk '{ print $1 }'); DNS_GEO_AI_LAST=0; DNS_GEO_FAILS=0; }
+                # и «выбран сейчас»: первые 10 мин — смена только после 3 провалов (dns_geo_check); без отметки при
+                # запуске хватало одного (19.11, Redmi и MT6580 на медленной сети)
+                [ -n "$DNS_GEO_ACT" ] || { DNS_GEO_ACT=$(echo $DNS_GEO_UPSTREAMS | awk '{ print $1 }'); DNS_GEO_AI_LAST=0; DNS_GEO_FAILS=0; DNS_GEO_SINCE=$(date +%s); }
                 u=$(dns_geo_names)
                 if [ -n "$DNS_GEO_ACT" ] && [ -n "$u" ] && [ "$ups" != "$DNS_GEO_ACT" ]; then
                     printf '[/%s/]%s\n' "$u" "$DNS_GEO_ACT" > "$DNS_GEO_FILE"
