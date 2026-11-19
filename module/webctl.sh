@@ -654,11 +654,21 @@ case "$1" in
         wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
         [ -n "$wan" ] || { echo "ERR не знаю интерфейс оператора — модуль ещё не видел сеть"; exit 1; }
         ip -4 addr show "$wan" 2>/dev/null | grep -q "inet " || { echo "ERR у $wan нет адреса — сеть только что сменилась? Повторите через полминуты"; exit 1; }
-        case "$(uname -m)" in aarch64|arm64) nq="$MODDIR/bin/nfqws-arm64" ;; *) nq="$MODDIR/bin/nfqws-arm" ;; esac
-        [ -x "$nq" ] || { echo "ERR нет nfqws"; exit 1; }
+        # движок — тот, что работает (статус демона), как у ytspeed: с 19.11 и здесь, раньше всегда nfqws1 со
+        # своей стратегией — «с обходом» показывало не тот обход, что на деле
+        eng=$(sed -n 's/^zapret_engine=//p' "$STATUS_FILE" 2>/dev/null)
+        # обход выключен — в статусе пусто: движок из настроек, как у scan.sh (иначе «с обходом» мерил бы nfqws1)
+        [ -n "$eng" ] || eng=$(sh "$MODDIR/service.sh" --get ZAPRET_ENGINE 2>/dev/null)
+        if [ "$eng" = nfqws2 ]; then
+            case "$(uname -m)" in aarch64|arm64) nq="$MODDIR/bin/nfqws2-arm64" ;; *) nq="$MODDIR/bin/nfqws2-arm" ;; esac
+        else
+            case "$(uname -m)" in aarch64|arm64) nq="$MODDIR/bin/nfqws-arm64" ;; *) nq="$MODDIR/bin/nfqws-arm" ;; esac
+        fi
+        [ -x "$nq" ] || { echo "ERR нет $([ "$eng" = nfqws2 ] && echo nfqws2 || echo nfqws)"; exit 1; }
         CA=/apex/com.android.conscrypt/cacerts
         [ -d "$CA" ] || CA=/system/etc/security/cacerts
         Q=202
+        RULE_IN=""
         # свои соединения (root, кроме dnsproxy) — по биту connmark из OUTPUT, как у scan.sh: владелец в POSTROUTING
         # на части ядер совпадает со всеми пакетами (17.11 MT6580, ядро 3.18) — забрали бы весь трафик
         RULE_MK="-o $wan -m owner --uid-owner 0 ! --gid-owner 3999 -j CONNMARK --set-xmark 0x08000000/0x08000000"
@@ -666,6 +676,7 @@ case "$1" in
         st_cleanup() {
             [ -n "$nqpid" ] && kill "$nqpid" 2>/dev/null
             iptables -w 2 -t mangle -D POSTROUTING $RULE_NFQ 2>/dev/null
+            [ -n "$RULE_IN" ] && iptables -w 2 -t mangle -D PREROUTING $RULE_IN 2>/dev/null
             iptables -w 2 -t mangle -D VPN_ZAPRET -m connmark --mark 0x08000000/0x08000000 -j RETURN 2>/dev/null
             iptables -w 2 -t mangle -D OUTPUT $RULE_MK 2>/dev/null
             iptables -w 2 -t nat -D OUTPUT -m owner --uid-owner 0 -p tcp -j RETURN 2>/dev/null
@@ -713,10 +724,29 @@ case "$1" in
         nk=$(cur_net); nl=${nk#*"|"}; nk=${nk%%"|"*}
         # группа 3998 (ZAPRET_GID): основной zapret пропускает её пакеты, даже
         # если наше uid-0 исключение в VPN_ZAPRET пропадёт при пересборке.
-        # full — оба профиля (своя стратегия YouTube для его доменов)
-        "$nq" --qnum=$Q --uid=0:3998 --bind-fix4 $(sh "$MODDIR/service.sh" --zapret-strategy "$nk" "$nl" full) >/dev/null 2>&1 &
-        nqpid=$!
-        sleep 0.7
+        if [ "$eng" = nfqws2 ]; then
+            # стратегия сети и сборка — как у подбора и ytspeed (zapret2_scan_args, со своими профилями стратегии);
+            # ответы — в ту же очередь: по SYN-ACK nfqws2 считает autottl
+            s2=$(sh "$MODDIR/service.sh" --zapret2-strategy "$nk" "$nl" 2>/dev/null)
+            [ -n "$s2" ] && [ -f "$MODDIR/zapret2/strategies/$s2.conf" ] || { echo "zapret 000 0 nfqws"; exit 0; }
+            echo "strat $s2"
+            a2=$(ZAPRET2_DIR="$MODDIR/zapret2"; ZAPRET2_FAKE_SNI=$(sh "$MODDIR/service.sh" --get ZAPRET2_FAKE_SNI 2>/dev/null); . "$MODDIR/lib/zapret.sh"; zapret2_scan_args "$s2" "$Q")
+            RULE_IN="-i $wan -s $ip -p tcp --sport 443 -m connbytes --connbytes-dir=reply --connbytes-mode=packets --connbytes 1:3 -j NFQUEUE --queue-num $Q --queue-bypass"
+            [ -n "$CB_OUT" ] || RULE_IN="-i $wan -s $ip -p tcp --sport 443 --tcp-flags SYN,ACK SYN,ACK -j NFQUEUE --queue-num $Q --queue-bypass"
+            iptables -w 2 -t mangle -I PREROUTING 1 $RULE_IN
+            set -f
+            "$nq" $a2 >/dev/null 2>&1 &
+            nqpid=$!
+            set +f
+            # Lua и подделки грузятся дольше nfqws1: до привязки к очереди пакеты шли бы мимо (--queue-bypass)
+            i=0
+            while [ $i -lt 30 ] && kill -0 "$nqpid" 2>/dev/null && ! grep -q "^ *$Q " /proc/net/netfilter/nfnetlink_queue 2>/dev/null; do sleep 0.1; i=$((i + 1)); done
+        else
+            # full — оба профиля (своя стратегия YouTube для его доменов)
+            "$nq" --qnum=$Q --uid=0:3998 --bind-fix4 $(sh "$MODDIR/service.sh" --zapret-strategy "$nk" "$nl" full) >/dev/null 2>&1 &
+            nqpid=$!
+            sleep 0.7
+        fi
         if kill -0 "$nqpid" 2>/dev/null; then echo "zapret $(one)"; else echo "zapret 000 0 nfqws"; fi
         ;;
 
@@ -733,6 +763,8 @@ case "$1" in
         # движок — тот, что работает (статус демона): у nfqws2 своя стратегия сети, а мерить nfqws1
         # с его стратегией значило показывать скорость того, что сейчас не используется (15.11)
         eng=$(sed -n 's/^zapret_engine=//p' "$STATUS_FILE" 2>/dev/null)
+        # обход выключен — в статусе пусто: движок из настроек, как у scan.sh (иначе «с обходом» мерил бы nfqws1)
+        [ -n "$eng" ] || eng=$(sh "$MODDIR/service.sh" --get ZAPRET_ENGINE 2>/dev/null)
         if [ "$eng" = nfqws2 ]; then
             case "$(uname -m)" in aarch64|arm64) nq="$MODDIR/bin/nfqws2-arm64" ;; *) nq="$MODDIR/bin/nfqws2-arm" ;; esac
         else

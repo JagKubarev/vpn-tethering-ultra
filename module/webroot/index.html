@@ -2834,7 +2834,7 @@ $('#stBtn').addEventListener('click', async () => {
     out.split('\n').forEach((l) => { const i = l.indexOf(' '); if (i > 0) o[l.slice(0, i)] = l.slice(i + 1); });
     // обрыв после ~16 КБ — HTTP-ответ был, но сайт не открывается
     const kind = stKind(o), dOk = stOk(o.direct) && !/^Тип: обрыв/.test(kind), zOk = stOk(o.zapret);
-    res.innerHTML = stLine('Без обхода', o.direct) + stLine('С обходом', o.zapret) +
+    res.innerHTML = stLine('Без обхода', o.direct) + stLine('С обходом' + (o.strat ? ' (' + esc(z2Label(o.strat)) + ')' : ''), o.zapret) +
       (kind ? '<div class="st-line"><span class="dot amber"></span>' + kind + '</div>' : '') +
       '<div class="muted mt8" style="font-size:13px">' + (dOk ? 'Сайт и так открывается, обход не нужен.'
         : zOk ? 'Обход помогает. В режиме «из списка» добавьте сайт в «Свои сайты», если его нет во встроенном списке.'
@@ -3382,7 +3382,7 @@ function mockExec(cmd) {
   if (a === 'zscan-stop') return { errno: 0, out: 'OK' };
   if (a === 'znet2') return { errno: 0, out: 'C mobile:25011|YOTA\nN mobile:25011|MartinBacker|YOTA|подбор: открыла 9 из 9|2026-11-13 18:00\nH mobile:25011|hardcorp74|2026-11-12 10:00|подбор\nH mobile:25011|MartinBacker|2026-11-13 18:00|подбор' };
   if (/^znet2-(set|del) /.test(a)) return { errno: 0, out: 'OK YOTA' };
-  if (/^sitetest /.test(a)) return { errno: 0, out: 'ip 142.251.155.4\ndirect 000 8.001 28 0\nprobe 1 1\nzapret 200 1.02 0 18342\n' };
+  if (/^sitetest /.test(a)) return { errno: 0, out: 'ip 142.251.155.4\ndirect 000 8.001 28 0\nprobe 1 1\nstrat vt_soft_crck\nzapret 200 1.02 0 18342\n' };
   if (a === 'ytspeed') return { errno: 0, out: 'ip 64.233.161.190\ndirect 000 0 28\nzapret 200 6912000 0\n' };
   if (/^log/.test(a)) return { errno: 0, out: '[20:15:01] Toggle signal received\n[20:15:02] VPN setup complete\n' };
   return { errno: 1, out: 'ERR' };
