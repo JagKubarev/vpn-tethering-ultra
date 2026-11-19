@@ -470,7 +470,7 @@ $dip $c $2"
 # Запрос без ответа (YT_REQ_AFTER) — у любого видеосоединения, см. ниже
 yt_dead_scan() {
     [ "$YT_DEAD_STATE" = "on" ] || return 0
-    local now out k sa da ds rqh rqd rqa rqp rqb rqv rqw rqs rqc rqe rqn rqk n t keep=""
+    local now out k sa da ds rqh rqd rqa rqp rqb rqv rqw rqs rqc rqe rqn rqk rqt n t keep=""
     # не ip: локальная ip затирала бы $ip (/system/bin/ip) — адрес WAN ниже не узнавался
     now=$(date +%s)
     # малое окно: другая сеть — её список стоек; раз в 5 мин — старые записи вон
@@ -578,6 +578,11 @@ yt_dead_scan() {
                 rob = rnb ? rob0[k] : bo; rop = rnb ? rop0[k] : po
                 pay = (bo - rob) - 64 * (po - rop)
                 rtq = (rnb && rtq0[k] > 0) ? rtq0[k] : ((pay > 80) ? now : 0)
+                # Загрузка Play (gp): кусок запрашивается сразу за рукопожатием, и первый проход видит соединение уже
+                # с запросом — он уходит в «базу», и отсчёт не начинался. 19.11 YOTA: из 4–5 параллельных кусков один
+                # (рукопожатие 4,5 КБ, запрос ~930 Б) молчал 18–35 с, Play висел на 98–99% до «Отмены». От сервера
+                # только рукопожатие (меньше 8 КБ; удачные мелкие куски — 9–12 КБ) — отсчёт с первого появления
+                if (rtq == 0 && est && int(mk / 33554432) % 2 == 1 && br < 8192) rtq = now
                 rlg = rnb ? rlg0[k] : 0
                 # br > 100: от сервера были данные, не только SYN-ACK (тот случай — «застрял»)
                 # раздаче на 1 с раньше: ей RST — только на повтор запроса, а повторы всё реже
@@ -595,7 +600,7 @@ yt_dead_scan() {
                     if (!inr) rql--
                 }
                 if (rq > 0 && !rlg && rtq > 0 && now - rtq >= rql && br > 100) {
-                    print "REQ", dst, now - rtq, pay, br, (int(mk / 536870912) % 2 == 1) ? "warp" : "direct", (src == wip) ? "phone" : "tether", sp, src, nd
+                    print "REQ", dst, now - rtq, pay, br, (int(mk / 536870912) % 2 == 1) ? "warp" : "direct", (src == wip) ? "phone" : "tether", sp, src, nd, (int(mk / 33554432) % 2 == 1) ? "play" : "yt"
                     rlg = 1
                 }
                 # когда от сервера в последний раз пришли данные (не только пустые пакеты — их шлёт и он в ответ
@@ -713,9 +718,11 @@ yt_dead_scan() {
     # «запрос ушёл, ответа нет» (YT_REQ_AFTER): соединение телефона напрямую — рвём, плеер сразу
     # откроет новое (15.11: 16 таких за 7 мин, зависание шортса в 12:49:45 — запрос ~12 КБ к фронту
     # 173.194.165.4). Раздачу ss не порвёт — ей RST на повтор запроса; через WARP — только журнал
-    for rqh in $(printf '%s\n' "$out" | awk '$1 == "REQ" { print $2 "_" $3 "_" $4 "_" $5 "_" $6 "_" $7 "_" $8 "_" $9 "_" $10 }'); do
+    for rqh in $(printf '%s\n' "$out" | awk '$1 == "REQ" { print $2 "_" $3 "_" $4 "_" $5 "_" $6 "_" $7 "_" $8 "_" $9 "_" $10 "_" $11 }'); do
         rqd=${rqh%%_*}; rqh=${rqh#*_}; rqa=${rqh%%_*}; rqh=${rqh#*_}; rqp=${rqh%%_*}; rqh=${rqh#*_}; rqb=${rqh%%_*}; rqh=${rqh#*_}
-        rqv=${rqh%%_*}; rqh=${rqh#*_}; rqw=${rqh%%_*}; rqh=${rqh#*_}; rqs=${rqh%%_*}; rqh=${rqh#*_}; rqc=${rqh%%_*}; rqn=${rqh#*_}
+        rqv=${rqh%%_*}; rqh=${rqh#*_}; rqw=${rqh%%_*}; rqh=${rqh#*_}; rqs=${rqh%%_*}; rqh=${rqh#*_}; rqc=${rqh%%_*}; rqh=${rqh#*_}; rqn=${rqh%%_*}
+        # в журнал — «Play:» у загрузок Play (метка gvt1), иначе «YouTube:»
+        rqt="YouTube"; [ "${rqh#*_}" = play ] && rqt="Play"
         case "$rqd$rqs$rqc" in *[!0-9.]*|'') continue ;; esac
         # от сервера ни байта данных — это «принял ClientHello и молчит»: и в малое окно (yt_ramp_hit, два раза за
         # YT_RETRY_WIN — стойке). Иначе такие соединения рвались здесь за 2 с, а «принял и молчит» (HIT, 3 с), который
@@ -724,7 +731,7 @@ yt_dead_scan() {
         if [ "$rqv" = direct ] && [ "$rqw" = phone ] && [ -n "$rqs" ]; then
             ss -K -tn dst "$rqd" dport = :443 sport = :"$rqs" >/dev/null 2>&1
             YT_REQ_KILLS=$((YT_REQ_KILLS + 1))
-            log "YouTube: $rqd — запрос без ответа ${rqa}с (~${rqp} Б после последних данных сервера, от сервера $rqb Б) — рву соединение"
+            log "$rqt: $rqd — запрос без ответа ${rqa}с (~${rqp} Б после последних данных сервера, от сервера $rqb Б) — рву соединение"
         elif [ "$rqv" = direct ] && [ "$rqw" = tether ] && [ -n "$rqs" ]; then
             # раздача: от сервера ни байта, даже ACK — клиент повторит запрос и на повтор получит RST
             # (правило на одно соединение, 20 с, снимает yt_retry_hits — как у застрявших)
@@ -732,10 +739,10 @@ yt_dead_scan() {
                 YT_RETRY_RJ="$YT_RETRY_RJ
 $(($now + 20)) $rqc $rqs $rqd"
                 YT_REQ_KILLS=$((YT_REQ_KILLS + 1))
-                log "YouTube: $rqd — запрос клиента раздачи $rqc без ответа ${rqa}с (~${rqp} Б, от сервера $rqb Б) — RST на его повтор"
+                log "$rqt: $rqd — запрос клиента раздачи $rqc без ответа ${rqa}с (~${rqp} Б, от сервера $rqb Б) — RST на его повтор"
             }
         else
-            log "YouTube: наблюдение: $rqd — запрос без ответа ${rqa}с (~${rqp} Б после последних данных сервера, от сервера $rqb Б, $rqv, $rqw)"
+            log "$rqt: наблюдение: $rqd — запрос без ответа ${rqa}с (~${rqp} Б после последних данных сервера, от сервера $rqb Б, $rqv, $rqw)"
         fi
     done
     # простаивающие видеосоединения телефона (YT_POKE): по пустому ACK в каждое — одним вызовом vtpoke. Интерфейс —
