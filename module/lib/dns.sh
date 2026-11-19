@@ -1004,6 +1004,41 @@ dns_doh_alive() {
 # Основной DoH отвечает? (первый из DNS_UPSTREAMS)
 dns_primary_alive() { set -- $DNS_UPSTREAMS; dns_doh_alive "$1"; }
 
+# Гео-DoH отвечает? Не example.com, а имя из гео-списка (по кругу, раз в минуту другое), и живой — только если в
+# ответе есть записи (ANCOUNT, байты 6–7 заголовка DNS > 0). 19.11 YOTA ~17:25–17:31 fuckingspeedtest отдавал
+# example.com и chatgpt.com, а Gemini, Grok, Spotify, Notion, JetBrains молчали — для «example.com и любой ответ
+# HTTP» он был жив. По размеру ответа не судить: NXDOMAIN с SOA тоже длиннее запроса. Запросы готовые (A, без
+# EDNS, base64url): gemini.google.com, open.spotify.com, www.notion.so, grok.com, chatgpt.com. Ответ не 200
+# (geohide по HTTP/1.1 — 503, а через dnsproxy работает) — записи так не проверить: жив, как у dns_doh_alive any.
+# dns_geo_alive <url> [сдвиг] — сдвиг: другое имя для повторной проверки в ту же минуту
+DNS_GEO_PROBES="AAABAAABAAAAAAAABmdlbWluaQZnb29nbGUDY29tAAABAAE AAABAAABAAAAAAAABG9wZW4Hc3BvdGlmeQNjb20AAAEAAQ AAABAAABAAAAAAAAA3d3dwZub3Rpb24Cc28AAAEAAQ AAABAAABAAAAAAAABGdyb2sDY29tAAABAAE AAABAAABAAAAAAAAB2NoYXRncHQDY29tAAABAAE"
+dns_geo_alive() {
+    local u="$1" k="${2:-0}" p code n r
+    case "$u" in https://*) ;; *) return 1 ;; esac
+    command -v curl >/dev/null 2>&1 || return 1
+    set -- $DNS_GEO_PROBES
+    n=$(( ($(date +%s) / 60 + k) % $# + 1 )); eval "p=\${$n}"
+    case "$u" in *\?*) u="$u&" ;; *) u="$u?" ;; esac
+    u="${u}dns=$p"
+    local ca=/apex/com.android.conscrypt/cacerts
+    [ -d "$ca" ] || ca=/system/etc/security/cacerts
+    # ответ и код HTTP (-w — в конце, 3 цифры) одним потоком байтов через od, без файла в /data/local/tmp
+    if [ "$DNSPROXY_SU_G" = "1" ]; then
+        r=$($SUG_CMD "$DNSPROXY_GID" -c "$CURL_BIN -s -m 4 --no-alpn --capath $ca -H 'accept: application/dns-message' -w '%{http_code}' '$u' | od -An -tu1 -v" 2>/dev/null)
+    else
+        r=$(curl -s -m 4 --no-alpn --capath $ca -H 'accept: application/dns-message' -w '%{http_code}' "$u" 2>/dev/null | od -An -tu1 -v 2>/dev/null)
+    fi
+    set -- $r
+    [ $# -ge 3 ] || return 1
+    eval "code=\$(( (\${$(($# - 2))} - 48) * 100 + (\${$(($# - 1))} - 48) * 10 + \${$#} - 48 ))"
+    case "$code" in
+        # заголовок DNS 12 байт + 3 цифры кода; записей в ответе (ANCOUNT) — байты 7 и 8
+        200) [ $# -ge 15 ] && [ $(( $7 * 256 + $8 )) -gt 0 ] ;;
+        0) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
 # ============================================================================
 # Гео-DoH (17.11): имена гео-списка (dns/geo.txt + DNS_GEO_DOMAINS) dnsproxy спрашивает у одного гео-DoH —
 # DNS_GEO_ACT, первого живого из DNS_GEO_UPSTREAMS, — остальные у основного (dnsproxy_start, строка
@@ -1013,8 +1048,8 @@ dns_geo_names() {   # -> имена через «/»
     { [ -f "$DNS_GEO_LIST" ] && grep -v '^#' "$DNS_GEO_LIST"; for u in $DNS_GEO_DOMAINS; do echo "$u"; done; } | \
         awk 'NF && !s[$1]++ { printf "%s%s", (n++ ? "/" : ""), $1 }'
 }
-# Первый живой DoH по порядку (как dns_try_alt: curl-ом параллельно, до ~5 с; кого ждать дольше — первый
-# уже ответивший). dns_first_alive "<кроме, через пробел>" <адреса...> -> адрес или пусто
+# Первый живой гео-DoH по порядку (dns_geo_alive: записи в ответе на имя из гео-списка), как dns_try_alt: curl-ом
+# параллельно, до ~5 с; кого ждать дольше — первый уже ответивший. dns_first_alive "<кроме, через пробел>" <адреса...> -> адрес или пусто
 dns_first_alive() {
     local skip="$1" c i st ok="" t0 pids="" d="/data/local/tmp/vpn_tether_geo.$$"
     shift
@@ -1024,7 +1059,7 @@ dns_first_alive() {
     for c in "$@"; do
         i=$((i + 1)); case " $skip " in *" $c "*) continue ;; esac
         # вывод — мимо: иначе $(...) ждал бы и недождавшиеся curl
-        ( dns_doh_alive "$c" any && : > "$d.$i.y" || : > "$d.$i.n" ) >/dev/null 2>&1 &
+        ( dns_geo_alive "$c" && : > "$d.$i.y" || : > "$d.$i.n" ) >/dev/null 2>&1 &
         pids="$pids $!"
     done
     t0=$(uptime_ms)
@@ -1114,7 +1149,7 @@ dns_geo_check() {
         [ -n "$ok" ] || return 0
         log "DNS: гео-DoH $(dns_hosts_of $ok) отвечает — гео-имена снова через него"
     # не ответил — сразу вторая проверка: одна медленная секунда — не повод (как у основного)
-    elif dns_doh_alive "$DNS_GEO_ACT" any || dns_doh_alive "$DNS_GEO_ACT" any; then
+    elif dns_geo_alive "$DNS_GEO_ACT" || dns_geo_alive "$DNS_GEO_ACT" 1; then
         DNS_GEO_FAILS=0
         if [ $((now - DNS_GEO_AI_LAST)) -ge 600 ]; then
             DNS_GEO_AI_LAST=$now
@@ -1127,7 +1162,7 @@ dns_geo_check() {
         fi
         if [ -z "$why" ]; then
             case " $bad " in *" $first "*) return 0 ;; esac
-            [ "$DNS_GEO_ACT" != "$first" ] && [ $((now - DNS_GEO_SINCE)) -ge 1800 ] && dns_doh_alive "$first" any || return 0
+            [ "$DNS_GEO_ACT" != "$first" ] && [ $((now - DNS_GEO_SINCE)) -ge 1800 ] && dns_geo_alive "$first" || return 0
             ok="$first"
             log "DNS: первый гео-DoH $(dns_hosts_of $first) снова отвечает — гео-имена обратно через него"
         fi
