@@ -646,11 +646,11 @@ details > summary::after { border-color: currentColor; }
   <div class="s muted" style="font-size:13px;margin-top:2px">Ищет рабочую стратегию для этой сети по сайтам ниже, в фоне. При сбое автопроверка запускает его сама.</div>
   <textarea id="scSites" rows="3" aria-label="Сайты для подбора" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
   <div class="btn-row eq mt8">
-    <button class="btn" id="scQuick">Быстрый · ~2 мин</button>
-    <button class="btn" id="scFull">Полный · ~7 мин</button>
+    <button class="btn" id="scQuick"><span data-nfqws1>Быстрый · ~2 мин</span><span data-nfqws2>Подобрать стратегию · ~3 мин</span></button>
+    <button class="btn" id="scFull" data-nfqws1>Полный · ~7 мин</button>
     <button class="btn" id="scStop" style="display:none">Остановить</button>
   </div>
-  <div class="s muted" style="font-size:13px;margin-top:10px" data-nfqws2>У nfqws2 подбор пробует все стратегии, быстрый и полный одинаковы. YouTube и Discord отдельно не подбираются.</div>
+  <div class="s muted" style="font-size:13px;margin-top:10px" data-nfqws2>У nfqws2 подбор пробует все стратегии: около 3 минут, на старых телефонах дольше. YouTube и Discord отдельно не подбираются.</div>
   <div data-nfqws1>
   <div class="s muted" style="font-size:13px;margin-top:10px">YouTube и Discord часто лучше работают со своей стратегией: подберите и примените лучшую из таблицы. Общая не меняется, замер — до 110 МБ.</div>
   <div class="btn-row eq mt8">

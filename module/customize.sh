@@ -103,7 +103,7 @@ DNSPROXY_ENABLE=1
 #DNS_PHONE=1
 
 # Какой DoH-сервер использовать (можно несколько через пробел)
-#DNS_UPSTREAMS=https://dns.zapret.moe/dns-query
+#DNS_UPSTREAMS=https://dns.google/dns-query
 
 # Закрыть QUIC (HTTP/3) приложениям — они пойдут по обычному
 # HTTPS. Помогает, когда оператор/ТСПУ режет QUIC и у приложения
@@ -114,7 +114,7 @@ DNSPROXY_ENABLE=1
 # Для трафика мимо VPN. Удобнее настраивать в WebUI модуля.
 #ZAPRET_ENABLE=1
 #ZAPRET_MODE=all
-#ZAPRET_STRATEGY=fakeddisorder
+#ZAPRET2_STRATEGY=vt_soft_crck
 
 # --- Защита -------------------------------------------------
 # Выбран режим VPN, а VPN не подключён:
