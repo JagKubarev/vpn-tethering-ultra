@@ -775,8 +775,9 @@ DNS_FALLBACKS="https://cloudflare-dns.com/dns-query https://dns.quad9.net/dns-qu
 # мёртвые: magicdns/magicinfo, wlrus, tamaev, geohide, comss (без прокси). Ожили commonnet и geodema (без Gemini)
 # 19.11 (Kubarev): первым semqka — 8 из 8 за ~0,46 с, а fuckingspeedtest отвечал за 1–2 с, утром 5 раз уходил на запасной,
 # в 17:25 перестал отдавать адреса части имён. В конце cf.dns-ai.ru — вход DNS-AI через Cloudflare (переживёт блок адреса
-# сервера): 5 из 8 (ChatGPT, Grok, DeepL; Gemini и Claude медленно; Spotify/JetBrains без прокси, Notion — нет)
-DNS_GEO_UPSTREAMS="https://dns.semqka.xyz/dns-query https://doh.fuckingspeedtest.com/dns-query https://dns.commonnet.work/dns-query https://not-a-dns.quic.best/dns-query https://w.quic.best/dns-query https://sync.bezmezhau.com/dns-query https://dns.geodema.love/dns-query https://dns.dagami.ru/dns-query https://dns.zapret.moe/dns-query https://dns.keyoneday.ru/dns-query https://cf.dns-ai.ru/dns-query"
+# сервера): 5 из 8 (ChatGPT, Grok, DeepL; Gemini и Claude медленно; Spotify/JetBrains без прокси, Notion — нет).
+# Перед ним d.webshiftvpn.ru — 8 из 8 через прокси 31.31.207.68 (DE), но медленно: 1–2 с, Gemini и Notion ~3 с
+DNS_GEO_UPSTREAMS="https://dns.semqka.xyz/dns-query https://doh.fuckingspeedtest.com/dns-query https://dns.commonnet.work/dns-query https://not-a-dns.quic.best/dns-query https://w.quic.best/dns-query https://sync.bezmezhau.com/dns-query https://dns.geodema.love/dns-query https://dns.dagami.ru/dns-query https://dns.zapret.moe/dns-query https://dns.keyoneday.ru/dns-query https://d.webshiftvpn.ru/dns-query https://cf.dns-ai.ru/dns-query"
 # Свои имена для гео-DoH (домены через пробел, с поддоменами) — к списку модуля dns/geo.txt
 DNS_GEO_DOMAINS=""
 # Молчат все гео-DoH — сервисам гео-списка адреса не давать (1), а не настоящие адреса через основной (0). Им
