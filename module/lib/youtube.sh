@@ -89,7 +89,7 @@ yt_match_build() {   # zapret_caps зовёт снова, если ядро бе
     # gvt1 было «Google не видео», молчащая стойка уходила в мёртвые фронты — 15 мин RST на SYN вместо малого окна
     # (18.11 ночью: 74.125.11.35, стойка загрузки из redirector.gvt1.com), и Play на ней висел
     # Только стойки (имя rr…---sn-…): фронт redirector.gvt1.com — обычный фронт Google, молчит — ему отказ фронта, а
-    # не малое окно на 12 ч всей его /28 (там и другие сервисы Google). И свой бит YT_PLAY_CTMARK — загрузки Play не
+    # не малое окно на 2 суток всей его /28 (там и другие сервисы Google). И свой бит YT_PLAY_CTMARK — загрузки Play не
     # зовут сторожа «сломалась стратегия» (yt_retry_hits): молчащая стойка Play — не признак (ревью 18.11)
     YT_MARK_OUT_G="! -o tun+ -m owner ! --uid-owner 0 $GVT_MATCH -m string --string ---sn- --algo bm -j CONNMARK --set-xmark $YT_PLAY_XMARK"
     YT_MARK_FWD_G="! -o tun+ $GVT_MATCH -m string --string ---sn- --algo bm -j CONNMARK --set-xmark $YT_PLAY_XMARK"
@@ -291,16 +291,19 @@ yt_ramp_chain() {
         $iptables -t mangle -A "$CHAIN_YT_RAMP" -d "$n" -j NFQUEUE --queue-num "$ZAPRET_QNUM" --queue-bypass 2>/dev/null
     done
 }
-# список текущей сети (YT_RAMP_RUN) из YT_RAMP_FILE, записи старше 12 ч — вон; поменялся — цепочка
+# список текущей сети (YT_RAMP_RUN) из YT_RAMP_FILE — записи моложе YT_RAMP_HOURS; из файла удаляю старше
+# недели (или срока, если он длиннее): укоротили срок на пробу и вернули — стойки не узнавать заново; поменялся — цепочка
 # заново, а файл nfqws2 перечитывает сам
 yt_ramp_sync() {   # now
     local k="${NET_KEY:--}"
     YT_RAMP_KEY="$k"; YT_RAMP_TS=$1
+    local ttl=$((${YT_RAMP_HOURS:-48} * 3600)) keep=604800
+    [ "$ttl" -gt "$keep" ] && keep=$ttl
     if [ -f "$YT_RAMP_FILE" ]; then
-        awk -F'|' -v now="$1" 'NF == 3 && now - $3 < 43200' "$YT_RAMP_FILE" > "$YT_RAMP_FILE.new" 2>/dev/null
+        awk -F'|' -v now="$1" -v ttl="$keep" 'NF == 3 && now - $3 < ttl' "$YT_RAMP_FILE" > "$YT_RAMP_FILE.new" 2>/dev/null
         if cmp -s "$YT_RAMP_FILE.new" "$YT_RAMP_FILE"; then rm -f "$YT_RAMP_FILE.new"; else chmod 600 "$YT_RAMP_FILE.new"; mv -f "$YT_RAMP_FILE.new" "$YT_RAMP_FILE"; fi
     fi
-    { echo 0.0.0.0/32; K="$k" awk -F'|' '$1 == ENVIRON["K"] { print $2 }' "$YT_RAMP_FILE" 2>/dev/null | sort -u; } > "$YT_RAMP_RUN.new"
+    { echo 0.0.0.0/32; K="$k" awk -F'|' -v now="$1" -v ttl="$ttl" '$1 == ENVIRON["K"] && now - $3 < ttl { print $2 }' "$YT_RAMP_FILE" 2>/dev/null | sort -u; } > "$YT_RAMP_RUN.new"
     YT_RAMP_N=$(( $(wc -l < "$YT_RAMP_RUN.new") - 1 ))
     if cmp -s "$YT_RAMP_RUN.new" "$YT_RAMP_RUN"; then rm -f "$YT_RAMP_RUN.new"; return 0; fi
     mv -f "$YT_RAMP_RUN.new" "$YT_RAMP_RUN"
@@ -373,7 +376,7 @@ $((now + 300)) $src $sp $dip"
 }
 # Сервер напрямую принял ClientHello и молчит («dead», yt_retry_hits; только соединения с пометкой
 # googlevideo.com — без неё у раздачи в счёт шли бы любые сети Google, вплоть до DoH 8.8.8.8). Второй раз
-# за YT_RETRY_WIN у того же адреса — его стойку (/28: YOTA режет стойками, 29–30.10) в список сети на 12 ч,
+# за YT_RETRY_WIN у того же адреса — его стойку (/28: YOTA режет стойками, 29–30.10) в список сети на YT_RAMP_HOURS (2 суток),
 # не больше 128 на сеть (32 на YOTA набиралось за час — вытеснялись ещё закрытые). Стойка уже в списке
 # (дольше YT_RETRY_WIN) и снова дважды молчит — малое окно ей не помогает: запись не продлеваем, в журнал
 yt_ramp_hit() {   # адрес now
@@ -399,14 +402,14 @@ $1 $2"
         [ $(($2 - ${e:-0})) -le "$YT_RETRY_WIN" ] && return 0
         case " $YT_RAMP_BAD " in *" $net "*) ;; *)
             YT_RAMP_BAD="$YT_RAMP_BAD $net"
-            log "YouTube: $1 — стойка $net молчит и с малым окном — запись не продлеваю (снимется через 12 ч после добавления)" ;;
+            log "YouTube: $1 — стойка $net молчит и с малым окном — запись не продлеваю (снимется через ${YT_RAMP_HOURS:-48} ч после добавления)" ;;
         esac
         return 0
     fi
     { K="$k" N="$net" awk -F'|' '!($1 == ENVIRON["K"] && $2 == ENVIRON["N"])' "$YT_RAMP_FILE" 2>/dev/null; echo "$k|$net|$2"; } | \
         K="$k" awk -F'|' '$1 != ENVIRON["K"] { print; next } { l[++n] = $0 } END { for (i = (n > 128 ? n - 127 : 1); i <= n; i++) print l[i] }' > "$YT_RAMP_FILE.new" && \
         chmod 600 "$YT_RAMP_FILE.new" && mv -f "$YT_RAMP_FILE.new" "$YT_RAMP_FILE"
-    log "YouTube: $1 — сервер дважды принял ClientHello и молчит: стойке $net малое окно на 12 ч (wssize_ramp)"
+    log "YouTube: $1 — сервер дважды принял ClientHello и молчит: стойке $net малое окно на ${YT_RAMP_HOURS:-48} ч (wssize_ramp)"
     yt_ramp_sync "$2"
 }
 

@@ -953,6 +953,8 @@ zapret2_rules() {   # таблица: правила очереди nfqws2 в у
     zapret2_rule "$t" "$CHAIN_ZAPRET_IN" tcp sports "$ZAPRET2_TP" "" $ci $q
 }
 
+# режим, которым на деле работает nfqws1 (zapret_args): запасным движком — всегда list
+zapret1_mode() { [ "$ZAPRET_ENGINE" = nfqws1 ] && echo "$ZAPRET_MODE" || echo "list (запасной движок)"; }
 zapret_args() {
     [ "$ZAPRET_ENGINE_EFF" = nfqws2 ] && { zapret2_args; return 0; }
     local a="--qnum=$ZAPRET_QNUM --uid=0:$ZAPRET_GID --bind-fix4 --bind-fix6" ex="" g alt rup="" rux="" q dp=""
@@ -968,7 +970,9 @@ zapret_args() {
         [ -s "$ZAPRET_RU_RUN" ] && rup="--filter-tcp=443 $ex --hostlist=$ZAPRET_RU_RUN $(zapret_strategy_args "$ZAPRET_DIR" "$ZAPRET_EFF_STRATEGY" "$ZAPRET_EFF_ARGS") --new "
     fi
     g="--filter-tcp=443 $ex $rux"
-    if [ "$ZAPRET_MODE" = "list" ]; then
+    # nfqws1 запасным (nfqws2 не запустился / его нет) — по спискам, как до умолчания all (19.11): на таких
+    # ядрах слабые телефоны, а all на nfqws1 не меряли. «Все сайты» — только если nfqws1 выбран руками
+    if [ "$ZAPRET_MODE" = "list" ] || [ "$ZAPRET_ENGINE" != nfqws1 ]; then
         g="$g --hostlist=$ZAPRET_LIST_DEFAULT"
         # пустой список не передаём: не полагаемся на то, как nfqws его трактует
         grep -q '[a-z0-9]' "$ZAPRET_LIST_USER" 2>/dev/null && g="$g --hostlist=$ZAPRET_LIST_USER"
@@ -1120,9 +1124,9 @@ zapret_start() {
         ZAPRET_ALT_N=$(zapret_alt_count "$1")
         [ "$ZAPRET_ALT_N" -gt 0 ] && log "zapret: своя стратегия у $ZAPRET_ALT_N сайтов (их основная не открывала)"
         if [ "$ZAPRET_NET_SRC" = "net" ] || [ "$ZAPRET_NET_SRC" = "label" ]; then
-            log "zapret: nfqws запущен (pid $pid, стратегия сети «$NET_LABEL»$([ "$ZAPRET_NET_SRC" = label ] && echo " — взята у сети с тем же названием, своей у $NET_KEY нет"): $ZAPRET_EFF_STRATEGY${ZAPRET_EFF_ARGS:+ [$ZAPRET_EFF_ARGS]}${ZAPRET_EFF_YT:+, YouTube: [$ZAPRET_EFF_YT]}, режим $ZAPRET_MODE)"
+            log "zapret: nfqws запущен (pid $pid, стратегия сети «$NET_LABEL»$([ "$ZAPRET_NET_SRC" = label ] && echo " — взята у сети с тем же названием, своей у $NET_KEY нет"): $ZAPRET_EFF_STRATEGY${ZAPRET_EFF_ARGS:+ [$ZAPRET_EFF_ARGS]}${ZAPRET_EFF_YT:+, YouTube: [$ZAPRET_EFF_YT]}, режим $(zapret1_mode))"
         else
-            log "zapret: nfqws запущен (pid $pid, стратегия $ZAPRET_EFF_STRATEGY — общая${NET_LABEL:+, для «$NET_LABEL» своей нет}, режим $ZAPRET_MODE)"
+            log "zapret: nfqws запущен (pid $pid, стратегия $ZAPRET_EFF_STRATEGY — общая${NET_LABEL:+, для «$NET_LABEL» своей нет}, режим $(zapret1_mode))"
         fi
         return 0
     fi

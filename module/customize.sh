@@ -113,7 +113,7 @@ DNSPROXY_ENABLE=1
 # --- Обход блокировок (zapret) --------------------------------
 # Для трафика мимо VPN. Удобнее настраивать в WebUI модуля.
 #ZAPRET_ENABLE=1
-#ZAPRET_MODE=list
+#ZAPRET_MODE=all
 #ZAPRET_STRATEGY=fakeddisorder
 
 # --- Защита -------------------------------------------------

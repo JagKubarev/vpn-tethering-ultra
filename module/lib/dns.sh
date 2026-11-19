@@ -1135,8 +1135,13 @@ dns_geo_check() {
         # молчит и DNS оператора — молчит связь, а не гео-DoH: основная проверка (DNS_NONET) могла ещё не заметить
         # провал, а эта успела бы перебрать весь список и выключить гео-DoH (ревью 18.11)
         dns_operator_dead && return 0
-        DNS_GEO_FAILS=$((DNS_GEO_FAILS + 1))
+        # «подряд» — не дальше 10 мин: проверки только при запросах DNS, и неудачи утром и вечером — не пара
+        [ $((now - DNS_GEO_FAIL_TS)) -ge 600 ] && DNS_GEO_FAILS=0
+        DNS_GEO_FAILS=$((DNS_GEO_FAILS + 1)); DNS_GEO_FAIL_TS=$now
         [ $((now - DNS_GEO_SINCE)) -lt 600 ] && [ "$DNS_GEO_FAILS" -lt 3 ] && return 0
+        # и позже — не по одной неудаче: 19.11 YOTA fuckingspeedtest иногда отвечает дольше 4 с, и за утро гео
+        # 5 раз уходил на запасной и через 30 мин возвращался (каждый раз перезапуск dnsproxy и пустой кэш)
+        [ "$DNS_GEO_FAILS" -lt 2 ] && return 0
         why="не отвечает"
     fi
     if [ -n "$why" ]; then

@@ -238,6 +238,8 @@ reload_config() {
     USER_CONF_NOTE=""
     load_user_conf
     conf_apply_overrides
+    # срок малого окна (YT_RAMP_HOURS) мог смениться — список стоек пересчитать на ближайшем такте, а не через 5 мин
+    YT_RAMP_TS=0
     DNSPROXY_BIN="$DNSPROXY_BIN_FOUND"
     [ "$DNSPROXY_ENABLE" = "1" ] || DNSPROXY_BIN=""
     _conf_grp_sig s_dns1 $CONF_GRP_DNS
