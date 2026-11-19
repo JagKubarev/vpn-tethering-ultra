@@ -37,8 +37,8 @@ STATUS_FILE="$MODDIR/status"
 ZSCAN=/data/local/tmp/vpn_tether_zscan
 GEN_LOCK=/data/local/tmp/vpn_tether_warpgen.lock
 API=https://api.cloudflareclient.com/v0i1909051800
-case "$(uname -m)" in aarch64|arm64) AWG="$MODDIR/bin/awg-arm64"; NQ="$MODDIR/bin/nfqws-arm64" ;;
-                     *) AWG="$MODDIR/bin/awg-arm"; NQ="$MODDIR/bin/nfqws-arm" ;; esac
+case "$(uname -m)" in aarch64|arm64) AWG="$MODDIR/bin/awg-arm64"; NQ="$MODDIR/bin/nfqws-arm64"; NQ2="$MODDIR/bin/nfqws2-arm64" ;;
+                     *) AWG="$MODDIR/bin/awg-arm"; NQ="$MODDIR/bin/nfqws-arm"; NQ2="$MODDIR/bin/nfqws2-arm" ;; esac
 CA=/apex/com.android.conscrypt/cacerts
 [ -d "$CA" ] || CA=/system/etc/security/cacerts
 B64=base64
@@ -109,8 +109,10 @@ free_name() {
 }
 
 # --- доступ к API Cloudflare -------------------------------------------------
-# api.cloudflareclient.com у ТСПУ режется по имени. Мимо VPN — свой nfqws с
-# текущей стратегией сети на curl от root (как sitetest в webctl.sh); при VPN
+# api.cloudflareclient.com у ТСПУ режется по имени. Мимо VPN — свой nfqws2 с приёмом DoH через обход
+# (DNS_VIA_ZAPRET: 2 нулевые подделки с плохим ack + разрез посередине имени; 19.11 YOTA: API 6/6, без
+# обхода 0/9) — от стратегии сети не зависит; нет nfqws2 или не запустился (старое ядро) — nfqws1 с
+# текущей стратегией сети, как раньше. Всё — на curl от root (как sitetest в webctl.sh); при VPN
 # правило -o <WAN> не совпадёт, и запрос просто уйдёт в туннель. В обоих
 # случаях — мимо прокси AdGuard (подменяет сертификаты).
 Q=204   # 202 — sitetest, 203 — scan.sh
@@ -123,12 +125,31 @@ bypass_on() {
     iptables -w 2 -t mangle -I OUTPUT 1 $RULE_MK 2>/dev/null
     iptables -w 2 -t mangle -I VPN_ZAPRET 1 -m connmark --mark 0x08000000/0x08000000 -j RETURN 2>/dev/null
     wan=$(sed -n 's/^wan=//p' "$STATUS_FILE" 2>/dev/null)
-    [ -n "$wan" ] && [ -x "$NQ" ] || return 0
+    [ -n "$wan" ] && { [ -x "$NQ2" ] || [ -x "$NQ" ]; } || return 0
     # ядро без connbytes (zapret_caps демона) — без него
     CB_OUT="-m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:40"   # как у демона (ZAPRET_CB_OUT)
     grep -q '^cb=0' /data/local/tmp/vpn_tether_zcaps 2>/dev/null && CB_OUT=""
     RULE_NFQ="-o $wan -m connmark --mark 0x08000000/0x08000000 -p tcp --dport 443 $CB_OUT -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num $Q --queue-bypass"
     iptables -w 2 -t mangle -I POSTROUTING 1 $RULE_NFQ
+    local L="$MODDIR/zapret2/lua" QF=/proc/net/netfilter/nfnetlink_queue i=0
+    # демон откатился на nfqws1 (nfqws2 на этом ядре не работает, статус zapret_engine) — сразу nfqws1, как ytspeed в webctl
+    if [ -x "$NQ2" ] && [ -f "$L/zapret-antidpi.lua" ] && ! grep -q '^zapret_engine=nfqws1$' "$STATUS_FILE" 2>/dev/null; then
+        # приём — как у DoH через обход (zapret2_args в lib/zapret.sh, DNS_VIA_ZAPRET): менять вместе
+        "$NQ2" --qnum=$Q --uid=0:3998 --bind-fix4 --lua-init=@$L/zapret-lib.lua --lua-init=@$L/zapret-antidpi.lua \
+            --filter-tcp=443 --filter-l7=tls --payload=tls_client_hello \
+            --lua-desync=fake:blob=0x00000000:tcp_ack=-66000:tcp_ts_up:repeats=2 --lua-desync=multisplit:pos=midsld >/dev/null 2>&1 &
+        NQPID=$!
+        # готов — когда занял очередь: до неё пакеты идут мимо (--queue-bypass), а запрос к API не повторяется.
+        # 19.11: 13T ~50 мс, Redmi 4X ~100–170; ждём до 3 с (MT6580 под нагрузкой)
+        if [ -r "$QF" ]; then
+            while ! grep -q "^ *$Q " "$QF" 2>/dev/null && kill -0 "$NQPID" 2>/dev/null && [ $i -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
+        else
+            sleep 0.7
+        fi
+        kill -0 "$NQPID" 2>/dev/null && { [ ! -r "$QF" ] || grep -q "^ *$Q " "$QF" 2>/dev/null; } && return 0
+        kill "$NQPID" 2>/dev/null; NQPID=""
+    fi
+    [ -x "$NQ" ] || return 0
     nk=$(sh "$MODDIR/zapret/netid.sh" "$wan" 2>/dev/null | head -1); nl=${nk#*"|"}; nk=${nk%%"|"*}
     "$NQ" --qnum=$Q --uid=0:3998 --bind-fix4 $(sh "$MODDIR/service.sh" --zapret-strategy "$nk" "$nl" full) >/dev/null 2>&1 &
     NQPID=$!

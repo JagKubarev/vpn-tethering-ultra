@@ -829,6 +829,7 @@ zapret2_args() {
     if [ "$DNS_VIA_ZAPRET" = "1" ]; then
         dt=$(zapret_doh_targets)
         dn=${dt%%"|"*}; dt=${dt#*"|"}; di=${dt%%"|"*}; dt=${dt#*"|"}; dpp=${dt%%"|"*}; dx=${dt#*"|"}
+        # тот же приём — у регистрации WARP (bypass_on в warp/warp.sh): менять вместе
         dd="--payload=tls_client_hello --lua-desync=fake:blob=0x00000000:tcp_ack=-66000:tcp_ts_up:repeats=2 --lua-desync=multisplit:pos=midsld"
         [ -n "$dx" ] && _z2p "--filter-tcp=$dpp --hostlist-domains=$dx"
         [ -n "$dn" ] && _z2p "--filter-tcp=$dpp --filter-l7=tls $ex --hostlist-domains=$dn $dd"
