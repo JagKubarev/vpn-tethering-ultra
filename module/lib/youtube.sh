@@ -524,7 +524,7 @@ yt_dead_scan() {
     # пустой ACK телефону — только если есть vtpoke и он не отказал (иначе обрыв простоя, как раньше)
     # (после сбоя — снова в другой сети или через 5 мин: при смене сети интерфейс бывает на миг не тот)
     [ -n "$VTPOKE_BIN" ] && { [ "${YT_POKE_FAIL:-0}" -eq 0 ] || [ "${NET_KEY:--}" != "$YT_POKE_FAIL_NET" ] || [ $((now - YT_POKE_FAIL)) -ge 300 ]; } && pk="${YT_POKE:-0}"
-    out=$($CONNTRACK_BIN -L -p tcp --dport 443 2>/dev/null | awk -v now="$now" -v after="$da" -v sa="$sa" -v hs="$YT_HS_MAX" -v sf="$YT_SEEN_FILE" -v rf="$YT_SEEN_FILE.req" -v rq="$rqe" -v gr="$YT_GRANGES" -v wip="$wip" -v zp="$ZAPRET_PHONE" -v ik="$YT_IDLE_KILL" -v cte="$YT_CT_EST" -v rr="$rrf" -v pk="$pk" -v pm="$YT_POKE_MAX" -v pt="$YT_POKE_NT" '
+    out=$($CONNTRACK_BIN -L -p tcp --dport 443 2>/dev/null | awk -v now="$now" -v after="$da" -v sa="$sa" -v hs="$YT_HS_MAX" -v sf="$YT_SEEN_FILE" -v rf="$YT_SEEN_FILE.req" -v rq="$rqe" -v gr="$YT_GRANGES" -v wip="$wip" -v zp="$ZAPRET_PHONE" -v ik="$YT_IDLE_KILL" -v cte="$YT_CT_EST" -v rr="$rrf" -v pk="$pk" -v pm="$YT_POKE_MAX" -v pt="$YT_POKE_NT" -v ps="${YT_PLAY_STALL:-0}" '
         FILENAME == gr { gs[++ng] = $1; ge[ng] = $2; next }
         FILENAME == sf { seen[$1] = $2; rep[$1] = $4; next }
         FILENAME == rf { rbr[$1] = $2; rob0[$1] = $3; rop0[$1] = $4; rtq0[$1] = $5; rlg0[$1] = $6; ldt0[$1] = $7; lpr0[$1] = $8; lpk0[$1] = $9; next }
@@ -608,6 +608,12 @@ yt_dead_scan() {
                 ldt = (k in ldt0 && ldt0[k] > 0) ? ldt0[k] : now
                 if ((k in rbr) && br - rbr[k] > 60 * (pr - lpr0[k])) ldt = now
                 lpk = (k in lpk0) ? lpk0[k] + 0 : 0
+                # Загрузка Play (gp) замолчала посреди куска (YT_PLAY_STALL): от сервера больше 8 КБ, потом ps с ни байта
+                # данных. Только телефону напрямую (ss -K): раздаче RST нужен повтор клиента, а тот молча ждёт
+                if (ps > 0 && est && !rlg && int(mk / 33554432) % 2 == 1 && br >= 8192 && src == wip && int(mk / 536870912) % 2 == 0 && now - ldt >= ps) {
+                    print "PSTALL", dst, now - ldt, br, sp
+                    rlg = 1
+                }
                 nr[k] = br " " rob " " rop " " rtq " " rlg " " ldt " " pr " " lpk
             }
             # видео идёт: сумма байт от видеосерверов (больше рукопожатия) — сигнал сторожу только
@@ -693,7 +699,7 @@ yt_dead_scan() {
     # в офисном и гостевом Wi-Fi), пинг не проходит никогда — без этого зависания там не рвались бы вовсе
     rqa=$(cat "/sys/class/net/$LAST_WAN_IFACE/statistics/rx_bytes" 2>/dev/null); rqa=${rqa:-0}
     rqp=$((rqa - ${YT_WAN_RX:-0})); YT_WAN_RX=$rqa
-    if [ "$rqp" -lt 2048 ] && printf '%s\n' "$out" | grep -q -e '^REQ ' -e '^HIT ' -e '^FRONT ' -e '^IDLE ' && command -v ping >/dev/null 2>&1; then
+    if [ "$rqp" -lt 2048 ] && printf '%s\n' "$out" | grep -q -e '^REQ ' -e '^HIT ' -e '^FRONT ' -e '^IDLE ' -e '^PSTALL ' && command -v ping >/dev/null 2>&1; then
         rqh="$LAST_WAN_IFACE"
         $ip -4 addr show "$rqh" 2>/dev/null | grep -q "inet $wip/" || rqh="v4-$LAST_WAN_IFACE"
         if $TIMEOUT_CMD ping -c 1 -W 1 -I "$rqh" 77.88.8.8 >/dev/null 2>&1; then
@@ -705,12 +711,13 @@ yt_dead_scan() {
             # пометку «уже обработано» (rlg в .req, d в seen) awk уже записал — снимаем у отложенных, иначе соединение,
             # что так и висит после возврата связи, не порвалось бы никогда (ревью 17.11)
             rqk=$(printf '%s\n' "$out" | awk -v w="$wip" '$1 == "REQ" { printf " %s:%s>%s", $9, $8, $2 }
-                $1 == "HIT" { printf " %s:%s>%s", $4, $5, $3 } $1 == "FRONT" { printf " %s:%s>%s", w, $3, $2 }')
+                $1 == "HIT" { printf " %s:%s>%s", $4, $5, $3 } $1 == "FRONT" { printf " %s:%s>%s", w, $3, $2 }
+                $1 == "PSTALL" { printf " %s:%s>%s", w, $5, $2 }')
             if [ -n "$rqk" ]; then
                 awk -v ks="$rqk " 'index(ks, " " $1 " ") { $4 = 0 } { print }' "$YT_SEEN_FILE" > "$YT_SEEN_FILE.new" 2>/dev/null && mv -f "$YT_SEEN_FILE.new" "$YT_SEEN_FILE"
                 awk -v ks="$rqk " 'index(ks, " " $1 " ") { $6 = 0 } { print }' "$YT_SEEN_FILE.req" > "$YT_SEEN_FILE.req.new" 2>/dev/null && mv -f "$YT_SEEN_FILE.req.new" "$YT_SEEN_FILE.req"
             fi
-            out=$(printf '%s\n' "$out" | grep -v -e '^REQ ' -e '^HIT ' -e '^FRONT ' -e '^IDLE ')
+            out=$(printf '%s\n' "$out" | grep -v -e '^REQ ' -e '^HIT ' -e '^FRONT ' -e '^IDLE ' -e '^PSTALL ')
         fi
     fi
     # трафик идёт (больше 2 КБ за проход) — связь жива, даже если пинг до этого не проходил
@@ -731,7 +738,12 @@ yt_dead_scan() {
         if [ "$rqv" = direct ] && [ "$rqw" = phone ] && [ -n "$rqs" ]; then
             ss -K -tn dst "$rqd" dport = :443 sport = :"$rqs" >/dev/null 2>&1
             YT_REQ_KILLS=$((YT_REQ_KILLS + 1))
-            log "$rqt: $rqd — запрос без ответа ${rqa}с (~${rqp} Б после последних данных сервера, от сервера $rqb Б) — рву соединение"
+            # Play: запрос сразу за рукопожатием (отсчёт с появления соединения) — «~0 Б после данных» читалось бы как «запроса не было»
+            if [ "$rqt" = Play ] && [ "${rqp#-}" -le 80 ] 2>/dev/null; then
+                log "Play: $rqd — запрос сразу за рукопожатием без ответа ${rqa}с (от сервера $rqb Б) — рву соединение"
+            else
+                log "$rqt: $rqd — запрос без ответа ${rqa}с (~${rqp} Б после последних данных сервера, от сервера $rqb Б) — рву соединение"
+            fi
         elif [ "$rqv" = direct ] && [ "$rqw" = tether ] && [ -n "$rqs" ]; then
             # раздача: от сервера ни байта, даже ACK — клиент повторит запрос и на повтор получит RST
             # (правило на одно соединение, 20 с, снимает yt_retry_hits — как у застрявших)
@@ -744,6 +756,14 @@ $(($now + 20)) $rqc $rqs $rqd"
         else
             log "$rqt: наблюдение: $rqd — запрос без ответа ${rqa}с (~${rqp} Б после последних данных сервера, от сервера $rqb Б, $rqv, $rqw)"
         fi
+    done
+    # загрузка Play замолчала посреди куска (PSTALL, YT_PLAY_STALL): рвём — Play откроет новое и докачает с того же места
+    for rqh in $(printf '%s\n' "$out" | awk '$1 == "PSTALL" { print $2 "_" $3 "_" $4 "_" $5 }'); do
+        rqd=${rqh%%_*}; rqh=${rqh#*_}; rqa=${rqh%%_*}; rqh=${rqh#*_}; rqb=${rqh%%_*}; rqs=${rqh#*_}
+        case "$rqd$rqa$rqb$rqs" in *[!0-9.]*|'') continue ;; esac
+        ss -K -tn dst "$rqd" dport = :443 sport = :"$rqs" >/dev/null 2>&1
+        YT_REQ_KILLS=$((YT_REQ_KILLS + 1))
+        log "Play: $rqd — кусок замолчал на середине (${rqa} с без данных, скачано $((rqb / 1024)) КБ) — рву, Play докачает"
     done
     # простаивающие видеосоединения телефона (YT_POKE): по пустому ACK в каждое — одним вызовом vtpoke. Интерфейс —
     # тот, где адрес WAN (в сети с CLAT IPv4 у v4-<WAN>)

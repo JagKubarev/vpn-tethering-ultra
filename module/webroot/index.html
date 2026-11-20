@@ -1414,7 +1414,7 @@ function renderStatus(s) {
     if (s.ggc === 'on') h += kvRow('YouTube', 'мимо кэша оператора', 'green');
     if (s.yt_dead === 'on') {
       const k = (+s.yt_retry_kills || 0) + (+s.yt_retry_rsts || 0), q = +s.yt_req_kills || 0;
-      h += kvRow('Зависшие соединения видео и загрузок Play', 'порвано: ' + k + ' · запросов без ответа: ' + q +
+      h += kvRow('Зависшие соединения видео и загрузок Play', 'порвано: ' + k + ' · запросов и кусков Play без ответа: ' + q +
         (+s.yt_ramp > 0 ? ' · малое окно: ' + esc(s.yt_ramp) + ' групп адресов' : '') +
         (+s.yt_front > 0 ? ' · отказ мёртвым серверам: ' + esc(s.yt_front) : '') +
         (+s.yt_pokes > 0 ? ' · пустых ACK при простое: ' + esc(s.yt_pokes) : '') +
