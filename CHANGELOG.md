@@ -2061,7 +2061,7 @@
   себя как в 3.26.0. В ~минуту между сменой сети и распознаванием Opera успевает 2–5 пустых запусков, WARP —
   забраковать конфиг.
 
-### 3.27.0 (19.11) — nfqws2, гео-DoH по списку, YouTube и Play на YOTA
+### 3.27.0 (20.11) — nfqws2, гео-DoH по списку, YouTube и Play на YOTA
 Ветки `nfqws2-engine` и `webui-labels`, 43 коммита; проверено test18–test23 на 13T (YOTA, KernelSU),
 Redmi 4X (Android 9, Magisk, ядро без connbytes) и MT6580 (Android 8.1, Magisk 25.2).
 - **Обход — nfqws2 (zapret2) по умолчанию**, nfqws1 запасной: не запустился nfqws2 — откат сам. 35 стратегий
