@@ -6,5 +6,9 @@ Lua-скрипты — zapret2, bol-van (github.com/bol-van/zapret2), MIT; custo
 (нужен alt13 и eduncey ради hostfakesplit_alt). Бинарники — сборка nfqws2-android под Android
 (NDK r27d). Стратегии — из nfqws-menu (rndnaame) и других проектов, указанных в meta.tsv; взяты все,
 кроме smart и турецких tr_*, вместе с подделками и списками, на которые они ссылаются (13.11.2026).
+20.11.2026 из nfqws2-android v3.1.1 добавлены 34 стратегии kinlay0 (github.com/kinlay0/zapret2-discord-youtube-strats,
+MIT; сборка Flowseal 1.10.4 для zapret2: alt14–16, circular, exp1–5, k0_*, legacy*, double_fake* и др.; дефисы в именах заменены на _, как у прочих) и general
+(Flowseal), обновлена alt11 (фикс Discord), с 11 подделками, на которые они ссылаются; smart и tr_* — нет. В exp2 убрана лишняя запятая в
+`--filter-tcp=80,443,` (у авторов с ней nfqws2 не запускается).
 Кроме lua/vpn-tether.lua — он свой (VPN Tether, GPL-3.0, как модуль): обманки fool_nots и
 fool_nots_ack для соединений без метки времени TCP (Windows-клиенты раздачи), 12.11.2026.

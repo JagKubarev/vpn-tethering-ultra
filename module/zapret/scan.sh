@@ -1134,8 +1134,8 @@ if [ "$MODE" = "check" ]; then
 fi
 
 if [ "$ENG" = nfqws2 ] && { [ "$MODE" = quick ] || [ "$MODE" = full ]; }; then
-    # Стратегий nfqws2 немного (35), и каждая сама перебирает приёмы — пробуем все: по времени
-    # как быстрый подбор nfqws1. Текущая сети — первой
+    # Каждая стратегия nfqws2 сама перебирает приёмы — пробуем все (70): ~6 мин на 13T (20.11), на слабых
+    # телефонах дольше. Текущая сети — первой
     [ -n "$CUR" ] || CUR="z2:$(sh "$MODDIR/service.sh" --zapret2-strategy "${NETID%%"|"*}" "${NETID#*"|"}" 2>/dev/null)"
     z2_list "${CUR#z2:}" > "$TMP/z2list"
     S_total=$((S_done + $(wc -l < "$TMP/z2list")))

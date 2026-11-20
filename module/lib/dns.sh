@@ -443,7 +443,14 @@ dnsproxy_start() {
                 # новый — проверка ИИ (dns_geo_check) на ближайшем проходе, а не через 10 мин от прежнего
                 # и «выбран сейчас»: первые 10 мин — смена только после 3 провалов (dns_geo_check); без отметки при
                 # запуске хватало одного (19.11, Redmi и MT6580 на медленной сети)
-                [ -n "$DNS_GEO_ACT" ] || { DNS_GEO_ACT=$(echo $DNS_GEO_UPSTREAMS | awk '{ print $1 }'); DNS_GEO_AI_LAST=0; DNS_GEO_FAILS=0; DNS_GEO_SINCE=$(date +%s); }
+                # после перезапуска — выбор прошлого (dns_geo_load), а не первый по списку: 20.11 13T semqka молчала с
+                # 16:40, перезапуск в 17:05 снова взял её, и до 17:09 (3 провала) гео-имена без адресов
+                # Восстановленный уже работал до перезапуска — правило «3 провала в первые 10 мин» (оно для только что
+                # выбранного) не для него: 20.11 мёртвый восстановленный держался 3 мин 22 с. Ему — как выбранному 10 мин назад
+                if [ -z "$DNS_GEO_ACT" ]; then
+                    DNS_GEO_SINCE=$(date +%s); DNS_GEO_AI_LAST=0; DNS_GEO_FAILS=0
+                    if dns_geo_load; then DNS_GEO_SINCE=$((DNS_GEO_SINCE - 600)); else DNS_GEO_ACT=$(echo $DNS_GEO_UPSTREAMS | awk '{ print $1 }'); fi
+                fi
                 u=$(dns_geo_names)
                 if [ -n "$DNS_GEO_ACT" ] && [ -n "$u" ] && [ "$ups" != "$DNS_GEO_ACT" ]; then
                     printf '[/%s/]%s\n' "$u" "$DNS_GEO_ACT" > "$DNS_GEO_FILE"
@@ -755,7 +762,74 @@ dns_degrade() {
             fi ;;
     esac
     [ "$PHONE_DNS_ON" = "1" ] && phone_dns_rules_off
+    dns_geo_block_on
     phone_status_refresh
+}
+
+# Откат на обычный DNS снимает перехват целиком — и гео-имена шли к оператору: приложения запоминали настоящие
+# адреса, и после возврата DoH ИИ ещё «недоступен в регионе» (20.11 13T: 16:55:34–16:56:49). При DNS_GEO_STRICT —
+# как при молчащих гео-DoH (127.0.0.1:9 в dnsproxy_start): запрос гео-имени на порт 53 отбиваем (ICMP «порт
+# закрыт» — клиенту сразу «нет адреса»). Телефону (OUTPUT, там же запросы dnsmasq раздачи к оператору) и раздаче
+# со своим DNS (FORWARD). Имена — как DNS их пишет (длина, метка: |07|chatgpt|03|com|00|), с поддоменами. ~200
+# правил — одним iptables-restore. Через VPN не нужно: там DNS туннеля (dns_geo_block_sync снимет)
+dns_geo_block_need() {
+    [ "$DNS_GEO_STRICT" = 1 ] && [ -n "$DNS_GEO_UPSTREAMS" ] && [ "$DNS_DEGRADED" = 1 ] || return 1
+    # раздача на dnsproxy без VPN — или DNS телефона (точка выключена: DNS_STATE пуст, перехват — только телефона)
+    case "$DNS_STATE" in dnsproxy*) [ "$DNS_STATE_MODE" != vpn ] && return 0 ;; esac
+    [ "$PHONE_DNS_ON" = 1 ]
+}
+dns_geo_block_rules() {   # правила одним текстом, для iptables-restore
+    dns_geo_names | tr '/' '\n' | tr 'A-Z' 'a-z' | sed 's/^[*.]*//' | grep -E '^[a-z0-9-]+(\.[a-z0-9-]+)+$' | \
+        awk -v c="$CHAIN_GEO_DNS" '{ k = split($0, l, "."); s = ""; for (i = 1; i <= k; i++) s = s sprintf("|%02x|", length(l[i])) l[i]
+            printf "-A %s -m string --algo bm --icase --hex-string \"%s|00|\" -j REJECT\n", c, s }'
+}
+dns_geo_block_on() {
+    local t r c p n=0
+    dns_geo_block_need || return 0
+    [ "$DNS_GEO_BLOCK" = 1 ] && $iptables -C OUTPUT -p udp --dport 53 -j "$CHAIN_GEO_DNS" 2>/dev/null && return 0
+    # конвейером, без файла: в /data/local/tmp пишет и shell (adb) — подложенная ссылка, и root переписал бы чужой файл
+    r=$(dns_geo_block_rules); [ -n "$r" ] || return 0
+    for t in "$iptables" "$ip6tables"; do
+        [ -n "$t" ] || continue
+        printf '*filter\n:%s - [0:0]\n%s\nCOMMIT\n' "$CHAIN_GEO_DNS" "$r" | ${t%% *}-restore -w 2 --noflush 2>/dev/null || \
+            printf '*filter\n:%s - [0:0]\n%s\nCOMMIT\n' "$CHAIN_GEO_DNS" "$r" | ${t%% *}-restore --noflush 2>/dev/null || continue
+        for c in OUTPUT FORWARD; do
+            for p in udp tcp; do
+                $t -C $c -p $p --dport 53 -j "$CHAIN_GEO_DNS" 2>/dev/null || $t -I $c 1 -p $p --dport 53 -j "$CHAIN_GEO_DNS" 2>/dev/null
+            done
+        done
+        [ "$t" = "$iptables" ] && n=$(printf '%s\n' "$r" | grep -c '^-A')
+    done
+    [ "$n" -gt 0 ] 2>/dev/null && DNS_GEO_BLOCK=1
+    # в журнал — раз за откат: пересборка (cleanup_all_rules) снимает отбой и ставит заново
+    [ "$DNS_GEO_BLOCK_SAID" = 1 ] && return 0
+    DNS_GEO_BLOCK_SAID=1
+    if [ "$DNS_GEO_BLOCK" = 1 ]; then
+        log "DNS: гео-имена ($n) оператору не отдаю — пока DoH не оживёт, сервисам гео-списка «нет адреса» (DNS_GEO_STRICT)"
+    else
+        log "WARNING: DNS: не поставил отбой гео-имён (нет string в ядре?) — пока DNS обычный, гео-имена идут оператору"
+    fi
+}
+dns_geo_block_off() {
+    local t c p k
+    for t in "$iptables" "$ip6tables"; do
+        [ -n "$t" ] || continue
+        $t -L "$CHAIN_GEO_DNS" -n >/dev/null 2>&1 || continue
+        for c in OUTPUT FORWARD; do
+            for p in udp tcp; do
+                k=0; while [ $k -lt 8 ] && $t -D $c -p $p --dport 53 -j "$CHAIN_GEO_DNS" 2>/dev/null; do k=$((k + 1)); done
+            done
+        done
+        $t -F "$CHAIN_GEO_DNS" 2>/dev/null; $t -X "$CHAIN_GEO_DNS" 2>/dev/null
+    done
+    DNS_GEO_BLOCK=0
+}
+# отбой — только пока идёт откат без VPN: DoH ожил (dns_restore), DNS сброшен, режим VPN — снять
+dns_geo_block_sync() {
+    dns_geo_block_need && return 0
+    DNS_GEO_BLOCK_SAID=0
+    [ "$DNS_GEO_BLOCK" = 1 ] && dns_geo_block_off
+    return 0
 }
 
 # Маршрут root сменился (VPN поднялся/пропал, сменился WAN). Если мы в откате,
@@ -765,7 +839,7 @@ dns_degrade() {
 dns_route_changed() {
     DNS_ROUTE_CHANGED_TS=$(date +%s)
     # прокси, молчащий с одной сети, бывает жив с другой: «плохие для ИИ» — заново, и проверка ИИ — сразу (ревью 17.11)
-    DNS_GEO_BAD=""; DNS_GEO_AI_LAST=0
+    DNS_GEO_BAD=""; DNS_GEO_AI_LAST=0; [ -n "$DNS_GEO_ACT" ] && dns_geo_save
     [ "$DNS_DEGRADED" = "1" ] && DNS_FAST_RECHECK=1
 }
 
@@ -789,6 +863,7 @@ dns_restore() {
     log "DoH-апстрим снова отвечает — DNS обратно через dnsproxy"
     case "$DNS_STATE" in dnsproxy*) dns_redirect_to_proxy $DNS_STATE_IFACES ;; esac
     [ "$PHONE_DNS_ON" = "1" ] && phone_dns_rules_on
+    dns_geo_block_sync
     phone_status_refresh
 }
 
@@ -1157,7 +1232,7 @@ dns_geo_check() {
             if [ "$r" = 1 ]; then
                 why="отвечает, но ИИ через него не открываются (chatgpt.com)"; ai=1
                 case " $bad " in *" $DNS_GEO_ACT "*) was=1 ;; esac
-                DNS_GEO_BAD="$DNS_GEO_BAD $DNS_GEO_ACT|$now"; bad="$bad $DNS_GEO_ACT"
+                DNS_GEO_BAD="$DNS_GEO_BAD $DNS_GEO_ACT|$now"; bad="$bad $DNS_GEO_ACT"; dns_geo_save
             fi
         fi
         if [ -z "$why" ]; then
@@ -1190,16 +1265,33 @@ dns_geo_check() {
             return 0
         else
             log "WARNING: DNS: гео-DoH $(dns_hosts_of $DNS_GEO_ACT) $why, других живых нет — $([ "$DNS_GEO_STRICT" = 1 ] && echo "сервисам гео-списка (ИИ и др.) адресов не даю, пока гео-DoH не оживёт" || echo "гео-имена (ИИ и др.) пока через основной, настоящими адресами")"
-            DNS_GEO_OFF=1; DNS_GEO_ACT=""; DNS_GEO_FAILS=0; rm -f "$DNS_GEO_FILE"
+            DNS_GEO_OFF=1; DNS_GEO_ACT=""; DNS_GEO_FAILS=0; rm -f "$DNS_GEO_FILE"; dns_geo_save
             dnsproxy_restart "гео-DoH" quiet
             phone_status_refresh
             return 0
         fi
     fi
     # новому — проверка ИИ на ближайшей проверке
-    DNS_GEO_OFF=0; DNS_GEO_ACT="$ok"; DNS_GEO_SINCE=$now; DNS_GEO_FAILS=0; DNS_GEO_AI_LAST=0
+    DNS_GEO_OFF=0; DNS_GEO_ACT="$ok"; DNS_GEO_SINCE=$now; DNS_GEO_FAILS=0; DNS_GEO_AI_LAST=0; dns_geo_save
     dnsproxy_restart "гео-DoH" quiet
     phone_status_refresh
+}
+# Выбор гео-DoH и «не открывали ИИ» (DNS_GEO_BAD, у каждого время — час и так) — в файл: перезапуск демона брал
+# первый по списку и забывал плохие (20.11: commonnet в 16:51 «ИИ не открываются», в 17:09 после перезапуска снова
+# он). Строки: список DNS_GEO_UPSTREAMS, выбранный, плохие. Список поменяли (порядок в WebUI) — файл не в счёт
+dns_geo_save() {
+    printf '%s\n%s\n%s\n' "$(echo $DNS_GEO_UPSTREAMS)" "$DNS_GEO_ACT" "$(echo $DNS_GEO_BAD)" > "$DNS_GEO_STATE_FILE" 2>/dev/null
+}
+dns_geo_load() {
+    local l="" a="" b=""
+    [ -s "$DNS_GEO_STATE_FILE" ] || return 1
+    { read -r l; read -r a; read -r b; } < "$DNS_GEO_STATE_FILE" 2>/dev/null
+    [ "$l" = "$(echo $DNS_GEO_UPSTREAMS)" ] || return 1
+    DNS_GEO_BAD="$b"
+    # выбранный — из списка и не из плохих (у плохого срок мог выйти — тогда снова можно). 0 — восстановлен
+    case " $DNS_GEO_UPSTREAMS " in *" $a "*) ;; *) return 1 ;; esac
+    case " $b " in *" $a|"*) return 1 ;; esac
+    DNS_GEO_ACT="$a"
 }
 
 dns_alt_recheck() {
@@ -1237,6 +1329,7 @@ dns_wan_gone() {
 }
 dns_health() {
     local now period sz
+    dns_geo_block_sync
     case "$DNS_STATE" in dnsproxy*) ;; *) [ "$PHONE_DNS_ON" = "1" ] || { DNS_DEGRADED=0; return 0; } ;; esac
     dnsproxy_alive || return 0
     dnsproxy_log_rotate

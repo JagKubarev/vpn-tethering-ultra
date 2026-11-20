@@ -270,6 +270,8 @@ yt_front_sync() {   # now
     # мёртв он на прямом пути (замер — по соединениям через WAN): через VPN и WARP — не трогаем
     $iptables -A "$CHAIN_YT_FRONT" -o tun+ -j RETURN 2>/dev/null
     $iptables -A "$CHAIN_YT_FRONT" -o warp+ -j RETURN 2>/dev/null
+    # проверки модуля (connmark 0x08000000 ставится в mangle OUTPUT — до этой цепочки) видят сеть как есть, без нашего RST
+    $iptables -A "$CHAIN_YT_FRONT" -m connmark --mark 0x08000000/0x08000000 -j RETURN 2>/dev/null
     YT_FRONT_N=0
     for fa in $(printf '%s\n' "$YT_FRONT_LIST" | awk -v k="$k" '$1 == k { print $2 }'); do
         $iptables -A "$CHAIN_YT_FRONT" -d "$fa" -p tcp -j REJECT --reject-with tcp-reset 2>/dev/null && YT_FRONT_N=$((YT_FRONT_N + 1))
@@ -665,6 +667,10 @@ yt_dead_scan() {
             if (!yt && src == wip) {
                 # пометку видео телефону ставит правило только при ZAPRET_PHONE=1 — иначе «без пометки» и видео
                 if (zp != "1" || int(mk / 536870912) % 2 == 1) next
+                # проверки самого модуля (бит 0x08000000: подбор, «Проверить сайт», замер YouTube, регистрация WARP)
+                # нарочно пробуют и неработающие приёмы — их молчание не признак. 20.11 подбор из 70 стратегий
+                # отправил так в отказ 3 фронта youtube.com/i.ytimg.com, и дальше все стратегии упирались в наш RST
+                if (int(mk / 134217728) % 2 == 1) next
                 # от сервера ни байта данных: не больше 4 пакетов, все пустые (ответ на SYN, подтверждения;
                 # у пустого до 60 байт). У выгрузки, долгого запроса, возобновлённой сессии сервер успел
                 # прислать хоть что-то (ServerHello) — их не берём (ревью 15.11: бэкап Фото на слабой сети

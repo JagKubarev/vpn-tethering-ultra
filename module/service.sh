@@ -1589,6 +1589,7 @@ DNSPROXY_LOG="/data/local/tmp/vpn_tether_dnsproxy.log"
 DNS_GEO_LIST="$MODULE_DIR/dns/geo.txt"                # гео-список модуля (tools/geo/build_geo.py)
 DNS_GEO_FILE="/data/local/tmp/vpn_tether_geo.ups"     # строка «[/имена/]гео-DoH» для dnsproxy
 DNS_GEO_FB_FILE="/data/local/tmp/vpn_tether_geo_fb.ups"  # запасные (-f) + та же строка — при DNS_GEO_STRICT
+DNS_GEO_STATE_FILE="/data/adb/vpn_tether_geo_state"  # выбор гео-DoH и «плохие» — переживают перезапуск демона
 
 # --- zapret / nfqws ---
 case "$(uname -m 2>/dev/null)" in
@@ -1728,6 +1729,9 @@ ZAPRET_NET_DIRTY=0     # 1 = пересобрать аргументы nfqws с�
 ZAPRET_NET_BAD=""      # ключ, про битую запись которого уже написали в лог
 CHAIN_DNSP="VPN_TETHER_DNSP"
 CHAIN_PHONE_DNS="VPN_PHONE_DNS"
+CHAIN_GEO_DNS="VPN_GEO_DNS"   # filter OUTPUT/FORWARD: при откате на обычный DNS гео-имена — не оператору (dns_geo_block_on)
+DNS_GEO_BLOCK=0        # 1 = CHAIN_GEO_DNS стоит
+DNS_GEO_BLOCK_SAID=0   # 1 = про отбой этого отката уже написали в журнал
 CHAIN_QUIC="VPN_QUIC_BLOCK"
 PHONE_DNS_ON=0         # 1 = DNS телефона сейчас перенаправлен в dnsproxy
 PHONE_DNS_RETRY=0      # пропустить N итераций после неудачного старта
