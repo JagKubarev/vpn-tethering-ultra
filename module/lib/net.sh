@@ -188,22 +188,30 @@ netd_default_iface() {
 }
 
 # Интерфейсы, на которых висит DHCP-сервер (раздача без аплинка тоже видна)
+# Зовут внутри $(get_tether_discovery) — переменные подоболочки не живут, поэтому кэш и отметка «ss падает» в файлах
+# (прежний кэш в переменных не работал: ss -lun шёл на каждом проходе цикла)
 dhcp_server_ifaces() {
-    # раз в ~3 вызова: точку доступа и USB netd и так показывает в ip rule,
-    # это — запасной признак для раздач без правила netd
-    DHCP_IFACES_TICK=$((DHCP_IFACES_TICK + 1))
-    if [ "$DHCP_IFACES_TICK" -lt 3 ] && [ -n "$DHCP_IFACES_CACHE" ]; then
-        echo "$DHCP_IFACES_CACHE"
-        return
+    local now c t out rc
+    # раз в ~6 с: точку доступа и USB netd и так показывает в ip rule, это — запасной признак для раздач без правила netd
+    now=$(date +%s)
+    c=$(cat "$DHCP_IFACES_FILE" 2>/dev/null); t=${c%%"|"*}
+    case "$t" in ''|*[!0-9]*) t=0 ;; esac
+    if [ $((now - t)) -ge 0 ] && [ $((now - t)) -lt 6 ]; then echo "${c#*"|"}"; return 0; fi
+    c=""
+    # ss — ради привязки к интерфейсу (0.0.0.0%wlan2:67): /proc/net/udp и netstat её не показывают. На части прошивок
+    # ss -lun падает (issue #27, LineageOS 17.1: SIGSEGV в dgram_show_line, каждый вызов — аварийный дамп): упал —
+    # до перезапуска демона не зовём ($$ — PID демона и в подоболочке), раздачу видно по правилам netd
+    if [ "$(cat "$SS_UDP_BAD_FILE" 2>/dev/null)" != "$$" ]; then
+        out=$(ss -lun 2>/dev/null); rc=$?
+        if [ "$rc" -ge 128 ]; then
+            echo "$$" > "$SS_UDP_BAD_FILE"
+            log "WARNING: ss -lun падает на этой прошивке (код $rc) — раздачу ищу только по правилам netd, без запасного признака по DHCP"
+        else
+            c=$(printf '%s\n' "$out" | grep -oE '%[A-Za-z0-9_.-]+:67([^0-9]|$)' | sed -E 's/^%//; s/:67.*//' | sort -u | tr '\n' ' ')
+        fi
     fi
-    DHCP_IFACES_TICK=0
-    DHCP_IFACES_CACHE=$(_dhcp_server_ifaces_live | tr '\n' ' ')
-    [ -n "$DHCP_IFACES_CACHE" ] || DHCP_IFACES_CACHE=" "
-    echo "$DHCP_IFACES_CACHE"
-}
-_dhcp_server_ifaces_live() {
-    ss -lun 2>/dev/null | grep -oE '%[A-Za-z0-9_.-]+:67([^0-9]|$)' | \
-        sed -E 's/^%//; s/:67.*//' | sort -u
+    printf '%s|%s\n' "$now" "$c" > "$DHCP_IFACES_FILE" 2>/dev/null
+    echo "$c"
 }
 
 has_private_ip4() {

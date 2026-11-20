@@ -308,7 +308,7 @@ uptime_ms() {
 # слушает ли кто UDP-порт. ss нет на Android 8 (MT6580): рабочий dnsproxy считался
 # не поднявшимся и убивался по кругу
 udp_listening() {   # порт
-    ss -lun 2>/dev/null | grep -qE "[:.]$1[[:space:]]" && return 0
+    # только /proc: ss -lun на части прошивок падает (issue #27); слушающий сокет — локальный порт и пустой удалённый
     grep -qE ":$(printf '%04X' "$1") 0+:0000 " /proc/net/udp /proc/net/udp6 2>/dev/null
 }
 
