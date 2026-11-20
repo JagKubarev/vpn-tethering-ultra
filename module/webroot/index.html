@@ -2944,11 +2944,13 @@ function scAggregate(text, blockedN) {
     if (f[0] === 'S') { sp[f[2]] = Math.min(+f[1], f[2] in sp ? sp[f[2]] : Infinity); return; }
     if (f.length < 6) return;
     const a = f[4], ok = +f[0], ns = +f[1], brk = +f[2], ms = +f[3];
-    const r = by[a] || (by[a] = { a, runs: 0, minOk: 1e9, maxBrk: 0, ms: 0, ns, det: '' });
-    r.runs++; r.minOk = Math.min(r.minOk, ok); r.maxBrk = Math.max(r.maxBrk, brk); r.ms += ms; r.det = f[6] || r.det;
+    const r = by[a] || (by[a] = { a, runs: 0, minOk: 1e9, maxBrk: 0, mss: [], ns, det: '' });
+    r.runs++; r.minOk = Math.min(r.minOk, ok); r.maxBrk = Math.max(r.maxBrk, brk); r.mss.push(ms); r.det = f[6] || r.det;
   });
   return Object.values(by).map((r) => {
-    r.ms = Math.round(r.ms / r.runs);
+    // медиана, а не среднее: 20.11 на 13T один прогон vt_soft_crck за 1201 мс (при 630 и 684) поставил её ниже nzapret
+    const m = r.mss.sort((x, y) => x - y), h = m.length >> 1;
+    r.ms = Math.round(m.length % 2 ? m[h] : (m[h - 1] + m[h]) / 2);
     r.open = Math.max(0, r.minOk - (r.ns - blockedN));   // из заблокированных
     r.sp = sp[r.a];
     return r;
