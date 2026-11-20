@@ -15,7 +15,7 @@
 [![Android](https://img.shields.io/badge/Android-arm64%20%7C%20armv7-3ddc84?logo=android&logoColor=white)](#совместимость)
 
 [Скачать](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest) ·
-[Приложение (APK)](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest/download/VPN_Tether.apk) ·
+[Приложение (APK)](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest) ·
 [Telegram](https://t.me/kubarev_mods) ·
 [Чат](https://t.me/+LyVq9jqT-802MGIy) ·
 [4PDA](https://4pda.to/forum/index.php?showtopic=1097835) ·
@@ -113,7 +113,7 @@
    В списке модулей он называется **VPN Tether** (с 3.26.0; id `vpn-to-hotspot-usb` прежний).
 3. Включите раздачу Wi-Fi или USB как обычно. Режим переключается кнопкой **Action** у модуля,
    настройки — в **WebUI**. В KernelSU и APatch WebUI открывается из менеджера, в Magisk —
-   через приложение **VPN Tether** ([скачать APK](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest/download/VPN_Tether.apk) — лежит в каждом релизе, Android 8.0+;
+   через приложение **VPN Tether** ([скачать APK](https://github.com/JagKubarev/vpn-tethering-ultra/releases/latest) — `VPN_Tether_*.apk` в каждом релизе, Android 8.0+;
    подробнее — [app/README.md](app/README.md)). Оно же открывает WebUI и на KernelSU без менеджера.
 
 При первой установке создаётся `/data/adb/vpn_tether.conf` с закомментированными примерами.
@@ -195,6 +195,18 @@ su -c 'iptables -m connbytes -h'   # должна быть справка, а н
 
 **VPN-клиент маршрутизирует по доменам (fakeip), а через раздачу сайты не открываются.**
 Оставьте `DNS_VPN=dnat` (по умолчанию): тогда DNS раздачи идёт в DNS самого VPN-клиента.
+
+**Через VPN у Android-устройств раздачи интернет есть, а Windows пишет «Нет подключения к интернету», сайты — `ERR_ADDRESS_UNREACHABLE`.**
+Некоторые подписки (Incy, Happ, Lacc) включают FakeIP из диапазона `240.0.0.0/4`: на любое имя DNS
+VPN-клиента отвечает адресом вида `240.0.0.140`. Android туда ходит, а Windows считает такие адреса
+недопустимыми и пакеты не отправляет ([#23](https://github.com/JagKubarev/vpn-tethering-ultra/issues/23)).
+Проверить на ноутбуке: `nslookup ya.ru` показывает `240.x.x.x`. Что делать, любое одно:
+- в VPN-клиенте сменить диапазон FakeIP на `198.18.0.0/15` или выключить FakeIP, если это доступно;
+- в модуле: вкладка DNS → «DNS раздачи при VPN» → «DoH через туннель» → «Применить». Клиенты раздачи
+  получат настоящие адреса (маршрутизация по доменам у VPN-клиента для них перестанет действовать).
+
+После смены DNS на ноутбуке выполните `ipconfig /flushdns` и переподключитесь к точке: иначе Windows
+ещё несколько минут держит прежние ответы и итог проверки интернета.
 
 **Слетят ли настройки при обновлении?**
 Нет. Конфиг, свои списки сайтов и стратегии сетей лежат в `/data/adb/` вне папки модуля.
