@@ -784,16 +784,19 @@ dns_geo_block_rules() {   # правила одним текстом, для ipt
             printf "-A %s -m string --algo bm --icase --hex-string \"%s|00|\" -j REJECT\n", c, s }'
 }
 dns_geo_block_on() {
-    local t r c p n=0
+    local t r c p n=0 cs=OUTPUT
     dns_geo_block_need || return 0
     [ "$DNS_GEO_BLOCK" = 1 ] && $iptables -C OUTPUT -p udp --dport 53 -j "$CHAIN_GEO_DNS" 2>/dev/null && return 0
+    # раздаче (FORWARD) — только когда она напрямую на dnsproxy: в режиме VPN её DNS идёт к DNS туннеля (DNAT), а
+    # отбой в окно, пока DNS телефона ещё не снят (VPN поднялся, второй замер), отнял бы у клиентов гео-сервисы (ревью)
+    case "$DNS_STATE" in dnsproxy*) [ "$DNS_STATE_MODE" != vpn ] && cs="OUTPUT FORWARD" ;; esac
     # конвейером, без файла: в /data/local/tmp пишет и shell (adb) — подложенная ссылка, и root переписал бы чужой файл
     r=$(dns_geo_block_rules); [ -n "$r" ] || return 0
     for t in "$iptables" "$ip6tables"; do
         [ -n "$t" ] || continue
         printf '*filter\n:%s - [0:0]\n%s\nCOMMIT\n' "$CHAIN_GEO_DNS" "$r" | ${t%% *}-restore -w 2 --noflush 2>/dev/null || \
             printf '*filter\n:%s - [0:0]\n%s\nCOMMIT\n' "$CHAIN_GEO_DNS" "$r" | ${t%% *}-restore --noflush 2>/dev/null || continue
-        for c in OUTPUT FORWARD; do
+        for c in $cs; do
             for p in udp tcp; do
                 $t -C $c -p $p --dport 53 -j "$CHAIN_GEO_DNS" 2>/dev/null || $t -I $c 1 -p $p --dport 53 -j "$CHAIN_GEO_DNS" 2>/dev/null
             done
@@ -1289,6 +1292,8 @@ dns_geo_load() {
     [ "$l" = "$(echo $DNS_GEO_UPSTREAMS)" ] || return 1
     DNS_GEO_BAD="$b"
     # выбранный — из списка и не из плохих (у плохого срок мог выйти — тогда снова можно). 0 — восстановлен
+    # пустой (все гео-DoH молчали) — не «восстановлен»: иначе гео-строки нет, а dns_geo_check без неё не проверяет (ревью)
+    [ -n "$a" ] || return 1
     case " $DNS_GEO_UPSTREAMS " in *" $a "*) ;; *) return 1 ;; esac
     case " $b " in *" $a|"*) return 1 ;; esac
     DNS_GEO_ACT="$a"
