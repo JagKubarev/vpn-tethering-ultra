@@ -1209,18 +1209,27 @@ warp_chain_reconcile() {
             # netd мог перетряхнуть правила
             $ip rule show 2>/dev/null | grep -q "^$WARP_CH_MARK_PREF:" || \
                 $ip rule add fwmark $WARP_MARK/$WARP_MARK lookup $WARP_CH_TABLE pref $WARP_CH_MARK_PREF 2>/dev/null
+            # WARP сам не отвечает (нет сети, метро) — цепочке внутри него ответить нечем: проба ничего не скажет и стоила
+            # бы до 14 с цикла демона; промах не считаем, следующая — через 10 с (ревью 25.11)
+            if [ "$WARP_NONET" = 1 ] || [ "${WARP_FAILS:-0}" -gt 0 ]; then
+                WARP_CH_CHECK_TS=$(( $(date +%s) - WARP_CHECK_SECS + 10 ))
+                return 0
+            fi
+            # «через 10 с» — от конца проверок (как у WARP): проба без ответа сама ~14 с, и от now следующая шла бы сразу
             if warp_chain_probe; then
                 [ $WARP_CH_FAILS -gt 0 ] || [ "$WARP_CH_NONET" = 1 ] && log "WARP: свой сервер после WARP ($WARP_CHAIN) снова отвечает"
                 WARP_CH_FAILS=0; WARP_CH_NONET=0
-            elif [ "$WARP_NONET" = 1 ] || ! warp_uplink; then
+            elif [ "$ZAPRET_WL" != 1 ] && ! warp_uplink; then
                 # молчит и связь мимо туннеля (метро) — сервер не виноват: промах не считаем, проверяем чаще; как у WARP.
-                # 25.11 в метро цепочка дошла до 2/3 только из-за обрывов, при длинном — ушла бы в паузу до 30 мин
-                WARP_CH_CHECK_TS=$((now - WARP_CHECK_SECS + 10))
+                # 25.11 в метро цепочка дошла до 2/3 только из-за обрывов, при длинном — ушла бы в паузу до 30 мин.
+                # Белый список (ZAPRET_WL): warp_uplink всегда «нет», а WARP жив (проверка выше) — промах считаем,
+                # иначе Telegram часами уходил бы в мёртвую цепочку вместо WARP
+                WARP_CH_CHECK_TS=$(( $(date +%s) - WARP_CHECK_SECS + 10 ))
                 [ "$WARP_CH_NONET" = 1 ] || log "WARP: свой сервер после WARP ($WARP_CHAIN) не отвечает, но и напрямую сети нет — не считаю"
                 WARP_CH_NONET=1; WARP_CH_FAILS=0
             else
                 WARP_CH_FAILS=$((WARP_CH_FAILS + 1))
-                WARP_CH_CHECK_TS=$((now - WARP_CHECK_SECS + 10))
+                WARP_CH_CHECK_TS=$(( $(date +%s) - WARP_CHECK_SECS + 10 ))
                 log "WARP: свой сервер после WARP ($WARP_CHAIN) не отвечает ($WARP_CH_FAILS/3)"
                 if [ $WARP_CH_FAILS -ge 3 ]; then warp_chain_down "не отвечает"; warp_chain_fail "не отвечал 3 проверки подряд"; fi
             fi ;;
