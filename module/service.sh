@@ -1209,8 +1209,16 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
             case "$val" in *[!a-z0-9.\ !-]*) ok=0 ;; esac
             [ ${#val} -le 2000 ] || ok=0 ;;
         QUIC_BLOCK_APPS|WARP_APPS|OPERA_APPS|ZAPRET_EXCL_APPS)
-            # имена пакетов; пусто — допустимо (выключить)
-            case "$val" in *[!A-Za-z0-9._\ ]*) ok=0 ;; esac ;;
+            # имена пакетов; пусто — допустимо (выключить); клон — pkg@N (N — пользователь)
+            case "$val" in *[!A-Za-z0-9._@\ ]*) ok=0 ;; esac
+            if [ "$ok" = "1" ]; then
+                for _w in $val; do
+                    case "$_w" in
+                        *@*@*|@*) ok=0 ;;
+                        *@*) case "${_w##*@}" in ''|*[!0-9]*) ok=0 ;; esac ;;
+                    esac
+                done
+            fi ;;
         *) ok=0 ;;
     esac
     if [ "$ok" = "1" ]; then

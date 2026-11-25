@@ -2088,6 +2088,9 @@ $('#directDoh').addEventListener('change', (e) => setCur('DNS_DIRECT', e.target.
 
 // ---------------------------------------------------------------- QUIC: приложения
 let APPS = null;   // [{pkg, label}]
+// клон приложения — «pkg@N» (пользователь N: 999 — MultiApp/клоны, иначе второе пространство, рабочий профиль)
+const appBase = (pkg) => pkg.split('@')[0];
+const cloneTag = (pkg) => { const n = pkg.split('@')[1]; return n === undefined ? '' : n === '999' ? ' (клон)' : ' (пользователь ' + n + ')'; };
 const label = (pkg) => { const a = (APPS || []).find((x) => x.pkg === pkg); return a ? a.label : pkg; };
 // один выбор приложений на три настройки: QUIC_BLOCK_APPS, WARP_APPS и ZAPRET_EXCL_APPS
 let SHEET_KEY = 'QUIC_BLOCK_APPS';
@@ -2130,13 +2133,13 @@ async function loadApps0() {
         r.out.split('\n').map((s) => s.trim()).forEach((p) => { if (p && !pkgs.includes(p)) pkgs.push(p); });
       } catch (e) { /* только пользовательские, как раньше */ }
       let info = [];
-      if (typeof ksu.getPackagesInfo === 'function') info = JSON.parse(ksu.getPackagesInfo(JSON.stringify(pkgs)));
-      list = pkgs.map((p) => { const i = info.find((x) => x.packageName === p); return { pkg: p, label: (i && i.appLabel) || p }; });
+      if (typeof ksu.getPackagesInfo === 'function') info = JSON.parse(ksu.getPackagesInfo(JSON.stringify(Array.from(new Set(pkgs.map(appBase))))));
+      list = pkgs.map((p) => { const i = info.find((x) => x.packageName === appBase(p)); return { pkg: p, label: i && i.appLabel ? i.appLabel + cloneTag(p) : p }; });
     }
   } catch (e) { list = []; }
   if (!list.length) {
     const r = await ctl('apps');
-    list = r.out.split('\n').map((s) => s.trim()).filter(Boolean).map((p) => ({ pkg: p, label: p }));
+    list = r.out.split('\n').map((s) => s.trim()).filter(Boolean).map((p) => ({ pkg: p, label: p.includes('@') ? appBase(p) + cloneTag(p) : p }));
   }
   list.sort((a, b) => a.label.localeCompare(b.label, 'ru'));
   APPS = list;
@@ -2149,7 +2152,7 @@ function renderAppList() {
   const items = (APPS || []).filter((a) => !f || a.label.toLowerCase().includes(f) || a.pkg.toLowerCase().includes(f));
   $('#appList').innerHTML = items.map((a) =>
     '<div class="app' + (sel.includes(a.pkg) ? ' sel' : '') + '" data-pkg="' + esc(a.pkg) + '">' +
-    (HAS_KSU ? '<img src="ksu://icon/' + esc(a.pkg) + '" alt="" onerror="this.outerHTML=\'<span class=ph></span>\'">' : '<span class="ph"></span>') +
+    (HAS_KSU ? '<img src="ksu://icon/' + esc(appBase(a.pkg)) + '" alt="" onerror="this.outerHTML=\'<span class=ph></span>\'">' : '<span class="ph"></span>') +
     '<div><div class="n">' + esc(a.label) + '</div>' + (a.label !== a.pkg ? '<div class="p">' + esc(a.pkg) + '</div>' : '') + '</div></div>').join('') ||
     '<div class="empty" style="padding:0 16px">Ничего не найдено</div>';
 }
@@ -3000,6 +3003,44 @@ function stratLabel(a) {
   return [mode, fool, pos && 'разрез ' + pos].concat(ex).filter(Boolean).join(' · ');
 }
 
+// Вид стратегии nfqws2 для таблицы подбора: для каких сайтов у неё свой профиль (NFQWS_ARGS_CUSTOM, webctl z2-kinds).
+// Почти у всех есть хотя бы свой профиль Google; без своих — один набор приёмов на все сайты
+let Z2KIND = null;   // имя -> [сайты со своим профилем]
+const Z2_SITE_NAMES = { google: 'Google', youtube: 'YouTube', 'youtube.com': 'YouTube', 'googlevideo.com': 'видео YouTube',
+  'x.com': 'X', 'signal.org': 'Signal', 'адреса discord': 'Discord', 'адреса twitter': 'X', 'адреса do': 'DigitalOcean',
+  'адреса cf_full': 'Cloudflare', 'адреса ovh': 'OVH', 'адреса amazon': 'Amazon', 'адреса ': 'адреса из списка блокировок' };
+function z2ProfSites(c) {
+  const out = [];
+  (' ' + c.replace(/^\s*NFQWS_ARGS_CUSTOM=/, '').replace(/"/g, ' ')).split(/\s--new(?=\s|$)/).forEach((pr) => {
+    // только профили для сайтов (TCP 80/443): Discord-голос на своих портах и UDP не в счёт
+    const ft = /--filter-tcp=(\S+)/.exec(pr);
+    if (!ft || !/(^|,)(80|443)(,|$)|-/.test(ft[1])) return;
+    const re = /--(hostlist|hostlist-domains|ipset)=(\S+)/g;
+    let m;
+    while ((m = re.exec(pr))) {
+      const v = m[1] === 'hostlist-domains' ? m[2].split(',')[0] : m[2].replace(/^.*\//, '').replace(/\.(list|txt)$/, '');
+      const k = m[1] === 'ipset' ? 'адреса ' + v.replace(/^ipset_?/, '') : v;
+      const nm = Z2_SITE_NAMES[k] || k;
+      if (!out.includes(nm)) out.push(nm);
+    }
+  });
+  return out;
+}
+async function loadZ2Kind() {
+  if (Z2KIND) return;
+  Z2KIND = {};
+  try {
+    const r = await ctlBg('z2-kinds');
+    r.out.split('\n').forEach((l) => { const i = l.indexOf('\t'); if (i > 0) Z2KIND[l.slice(0, i)] = z2ProfSites(l.slice(i + 1)); });
+  } catch (e) { /* без вида */ }
+}
+function z2KindText(a) {
+  // пусто — команда не ответила: не выдумываем «общая» всем
+  if (!/^z2:/.test(a || '') || !Z2KIND || !Object.keys(Z2KIND).length) return '';
+  const l = Z2KIND[a.slice(3)] || [];
+  return l.length ? 'общая + свои профили: ' + l.join(', ') : 'общая: один набор приёмов на все сайты';
+}
+
 function scAggregate(text, blockedN) {
   const by = {}, sp = {};
   text.split('\n').filter(Boolean).forEach((l) => {
@@ -3050,7 +3091,9 @@ async function scRefresh() {
   if (sites) prog += '<div class="muted" style="font-size:13px;margin-top:4px">Стратегии для отдельных сайтов: итог — во вкладке «Обход», раздел «Сайты для обхода».</div>';
   $('#scProg').innerHTML = prog;
 
-  const rows = sites ? [] : scAggregate(rs.out, blocked.length).slice(0, 8);
+  const rows = sites ? [] : scAggregate(rs.out, blocked.length);
+  if (rows.some((r) => /^z2:/.test(r.a))) await loadZ2Kind();
+  if (n !== scSeq) return;
   // стратегия YouTube или Discord к другим сайтам не применяется: их поломка не в счёт
   if (s.grp) rows.forEach((r) => { r.maxBrk = 0; });
   // что работает сейчас: только что применённая, иначе из статуса демона
@@ -3059,15 +3102,24 @@ async function scRefresh() {
   const curA = cu && Date.now() - cu.t < 60000 ? cu.a : st0.zapret_engine === 'nfqws2' ? 'z2:' + (st0.zapret2_strategy || '').replace(/\+$/, '')
     : s.grp ? st0['zapret_eff_' + s.grp] || st0.zapret_eff_args : st0.zapret_eff_args;
   const spText = (r) => !s.grp ? '' : r.sp === undefined ? ' · скорость не мерили' : r.sp ? ' · ' + Math.round(r.sp / 128) + ' Мбит/с' : ' · файл не скачался';
-  $('#scRes').innerHTML = rows.length ? rows.map((r, i) => {
+  const row = (r, i) => {
     const full = r.maxBrk === 0 && r.open === blocked.length && blocked.length > 0;
     const dot = r.maxBrk > 0 ? 'red' : full ? 'green' : r.open > 0 ? 'amber' : '';
     const info = r.maxBrk > 0 ? 'ломает обычные сайты' : 'открыл ' + r.open + ' из ' + blocked.length + (r.ms ? ' · ' + (r.ms / 1000).toFixed(1) + ' с' : '') + spText(r) + (r.runs > 1 ? ' · проверена ' + r.runs + '×' : '');
     return '<div class="row wrap" style="padding:10px 0;border-top:' + (i ? '1px solid var(--line)' : '0') + '">' +
       '<span class="dot ' + dot + '"></span><div class="txt"><div class="t" style="font-size:14px">' + esc(stratLabel(r.a)) + '</div>' +
+      (z2KindText(r.a) ? '<div class="s">' + esc(z2KindText(r.a)) + '</div>' : '') +
       '<div class="s">' + esc(info) + (r.det && !full ? ' · не открылись: ' + esc(r.det.replace(/:x(\d+)/g, (m, c) => c === '28' ? ' (тайм-аут)' : c === '35' ? ' (обрыв)' : ' (ошибка ' + c + ')')) : '') + '</div></div>' +
       (r.a === curA ? '<button class="btn small" disabled>Работает сейчас</button>' : r.maxBrk === 0 && r.open > 0 ? '<button class="btn small" data-apply="' + esc(r.a) + '" data-grp="' + esc(s.grp || '') + '">Применить</button>' : '') + '</div>';
-  }).join('') : '';
+  };
+  // 8 лучших сразу, остальные — в раскрывающемся списке (открытым он и остаётся при обновлении во время подбора)
+  const was = $('#scRes details'), open = !!(was && was.open);
+  $('#scRes').innerHTML = rows.length
+    ? '<div class="muted" style="font-size:13px;margin-bottom:4px">Главное — открывает ли стратегия нужные вам сайты. Время — сколько при проверке ждали ответа сайтов: это не скорость и не стабильность, и медленнее не значит хуже.</div>' +
+      rows.slice(0, 8).map(row).join('') +
+      (rows.length > 8 ? '<details' + (open ? ' open' : '') + ' style="border-top:1px solid var(--line);padding-top:8px"><summary class="muted" style="font-size:14px;cursor:pointer">Остальные стратегии (' + (rows.length - 8) + ')</summary>' +
+        rows.slice(8).map(row).join('') + '</details>' : '')
+    : '';
 
   clearTimeout(scTimer);
   if (running) scTimer = setTimeout(scRefresh, 3000);
@@ -3437,7 +3489,7 @@ function mockExec(cmd) {
   if (a === 'toggle') { M.target = M.target === 'vpn' ? 'direct' : 'vpn'; M.ack = 't' + Date.now(); return { errno: 0, out: 'OK ' + M.ack }; }
   if (a === 'apply') { M.ack = 'a' + Date.now(); return { errno: 0, out: 'OK ' + M.ack }; }
   if (a === 'ack') return { errno: 0, out: M.ack };
-  if (a === 'apps') return { errno: 0, out: 'com.avito.android\nru.ozon.app.android\norg.telegram.messenger\ncom.google.android.youtube\n' };
+  if (a === 'apps') return { errno: 0, out: 'com.avito.android\nru.ozon.app.android\norg.telegram.messenger\norg.telegram.messenger@999\ncom.google.android.youtube\n' };
   if (a === 'doh') return { errno: 0, out: 'ok 184' };
   if (a === 'warp-list') return { errno: 0, out: (M.warp || (M.warp = ['warp|engage.cloudflareclient.com:4500|gen|2026-10-26 23:41',
     'warp-2|engage.cloudflareclient.com:4500|gen|2026-10-26 23:41', 'WARP_STR1693|engage.cloudflareclient.com:4500|import|2026-10-27 00:10'])).join('\n') + '\n' };
@@ -3477,7 +3529,13 @@ function mockExec(cmd) {
     '10|10|0|980|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@G|быстрый|\n' +
     '10|10|0|1020|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=midsld --dpi-desync-fake-tls=@G|проверка|\n' +
     '7|10|0|900|--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld|быстрый| facebook.com:x35 rutracker.org:x35 linkedin.com:x35\n' +
-    '0|10|2|0|--dpi-desync=fake,multisplit --dpi-desync-autottl --dpi-desync-split-pos=1 --dpi-desync-fake-tls=@G|быстрый| ya.ru:x28 google.com:x28\n' };
+    '0|10|2|0|--dpi-desync=fake,multisplit --dpi-desync-autottl --dpi-desync-split-pos=1 --dpi-desync-fake-tls=@G|быстрый| ya.ru:x28 google.com:x28\n' +
+    ['vt_soft_crck', 'hardcorp74', 'alt', 'Uvvi2', 'MartinBacker', 'alt10', 'nzapret', 'general'].map((n, i) => (9 - (i >> 1)) + '|10|0|' + (700 + i * 90) + '|z2:' + n + '|z2|\n').join('') };
+  if (a === 'z2-kinds') return { errno: 0, out: 'vt_soft_crck\tNFQWS_ARGS_CUSTOM="--filter-tcp=443 --filter-l7=tls --hostlist-domains=googlevideo.com,gvt1.com --payload=tls_client_hello"\n' +
+    'hardcorp74\tNFQWS_ARGS_CUSTOM="--filter-tcp=443 --hostlist-domains=googlevideo.com --new --filter-tcp=443 --hostlist=$LISTS_DIR/youtube.list"\n' +
+    'alt\tNFQWS_ARGS_CUSTOM="--filter-tcp=2053,8443 --hostlist-domains=discord.media --new --filter-tcp=443 --hostlist=$LISTS_DIR/google.list --new --filter-udp=443 --ipset=$LISTS_DIR/ipset_discord.list"\n' +
+    'Uvvi2\tNFQWS_ARGS_CUSTOM=""\n' +
+    'MartinBacker\tNFQWS_ARGS_CUSTOM="--filter-tcp=443 --hostlist-domains=googlevideo.com --new --filter-tcp=80,443 --ipset=$LISTS_DIR/ipset_cf_full.list --new --filter-tcp=443 --ipset=$LISTS_DIR/ipset.list"\n' };
   if (a === 'zquick') return { errno: 0, out: '--dpi-desync=multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1\n--dpi-desync=fake,multisplit --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=1000 --dpi-desync-repeats=6 --dpi-desync-fake-tls=@G\n' };
   if (/^zscan-start /.test(a)) return { errno: 0, out: 'OK' };
   if (a === 'zscan-stop') return { errno: 0, out: 'OK' };

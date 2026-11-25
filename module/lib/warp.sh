@@ -802,13 +802,13 @@ WARP_TG_PKGS="org.telegram.messenger org.telegram.messenger.web org.telegram.mes
 warp_tg_pkgs() {   # установленные клиенты Telegram, если они идут в WARP целиком
     local p
     [ "$WARP_TELEGRAM" = "1" ] && [ "$WARP_PHONE" = "1" ] || return 0
-    for p in $WARP_TG_PKGS; do [ -d "/data/data/$p" ] && echo "$p"; done
+    pkg_with_clones $WARP_TG_PKGS
 }
 
 warp_app_uids() {
     local p u out=""
     for p in $WARP_APPS $(warp_tg_pkgs); do
-        u=$(stat -c %u "/data/data/$p" 2>/dev/null)
+        u=$(pkg_uid "$p")
         case "$u" in ''|*[!0-9]*) continue ;; esac
         [ "$u" -ge 10000 ] || continue
         case " $out " in *" $u "*) ;; *) out="$out $u" ;; esac

@@ -208,7 +208,14 @@ DNS_PHONE=1
 KILL_SWITCH_STRICT=1
 # закрыть QUIC приложению
 QUIC_BLOCK_APPS=com.example.app
+# клон приложения (MultiApp, второе пространство) — пакет@пользователь
+WARP_APPS=org.telegram.messenger@999
 ```
+
+В списках приложений (`QUIC_BLOCK_APPS`, `WARP_APPS`, `OPERA_APPS`, `ZAPRET_EXCL_APPS`)
+клон — отдельная строка «(клон)»: в конфиге `пакет@N`, где N — пользователь
+(999 — клоны OnePlus/OPPO/Xiaomi). Основное приложение и клон выбираются независимо.
+Клиенты Telegram при `WARP_TELEGRAM=1` идут в WARP вместе с клонами.
 
 ## Как устроен обход DPI
 

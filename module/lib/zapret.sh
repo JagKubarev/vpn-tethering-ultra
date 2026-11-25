@@ -24,7 +24,7 @@ quic_yt_pkgs() {   # установленные клиенты YouTube (при Q
     [ "$QUIC_BLOCK_YT" = "1" ] || return 0
     for p in $QUIC_YT_PKGS; do
         case " $QUIC_BLOCK_APPS " in *" $p "*) continue ;; esac
-        [ -d "/data/data/$p" ] && echo "$p"
+        pkg_with_clones "$p"
     done | tr '\n' ' '
 }
 
@@ -47,7 +47,7 @@ quic_fake_on() {
 quic_block_uids() {   # пакеты
     local p u out=""
     for p in $1; do
-        u=$(stat -c %u "/data/data/$p" 2>/dev/null)
+        u=$(pkg_uid "$p")
         case "$u" in ''|*[!0-9]*) continue ;; esac
         [ "$u" -ge 10000 ] && out="$out $u"
     done
@@ -156,7 +156,7 @@ quic_block_down() {
         $t -t mangle -X "$CHAIN_QUIC_FAKE" 2>/dev/null
     done
     # и RETURN от убитого демона (kill -9, обновление): его список uid потерян
-    QUIC_AG_UIDS="$QUIC_AG_UIDS $(quic_block_uids "$QUIC_YT_PKGS")"
+    QUIC_AG_UIDS="$QUIC_AG_UIDS $(quic_block_uids "$(pkg_with_clones $QUIC_YT_PKGS)")"
     quic_adguard ""
     QUIC_UIDS=""
     QUIC_FAKE_UIDS=""
@@ -303,7 +303,7 @@ zapret_kill_all() {
 zapret_vpn_uids() {
     local p u out=""
     for p in $VPN_CLIENT_PKGS $ZAPRET_EXCL_APPS; do
-        u=$(stat -c %u "/data/data/$p" 2>/dev/null)
+        u=$(pkg_uid "$p")
         case "$u" in ''|*[!0-9]*) continue ;; esac
         out="$out $u"
     done

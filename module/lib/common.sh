@@ -230,6 +230,28 @@ set_description() {
     rm -f "$f.tmp"
 }
 
+# Пакет приложения: "pkg" — основной пользователь, "pkg@N" — клон в
+# пользователе N (MultiApp, второе пространство): uid = N*100000 + appId,
+# данные в /data/user/N/pkg. uid — по владельцу папки данных.
+pkg_uid() {
+    case "$1" in
+        *@*) stat -c %u "/data/user/${1##*@}/${1%@*}" 2>/dev/null ;;
+        *) stat -c %u "/data/data/$1" 2>/dev/null ;;
+    esac
+}
+# Из списка пакетов — установленные: pkg и его клоны pkg@N
+pkg_with_clones() {
+    local p d n
+    for p in $*; do
+        [ -d "/data/data/$p" ] && echo "$p"
+        for d in /data/user/*/"$p"; do
+            [ -d "$d" ] || continue
+            n=${d#/data/user/}; n=${n%%/*}
+            [ "$n" = "0" ] || echo "$p@$n"
+        done
+    done
+}
+
 save_rule() { printf '%s\n' "$*" >> "$RULES_FILE"; }
 clear_rules_file() { rm -f "$RULES_FILE"; touch "$RULES_FILE"; }
 

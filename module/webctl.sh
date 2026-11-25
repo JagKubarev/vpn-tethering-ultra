@@ -392,6 +392,12 @@ case "$1" in
         { pm list packages -3 2>/dev/null | sed 's/^package://'
           cmd package query-activities --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 2>/dev/null | \
               sed -n 's|^ *\([A-Za-z0-9_][A-Za-z0-9_.]*\)/.*|\1|p'
+          # клоны (MultiApp 999, второе пространство, рабочий профиль): сторонние
+          # пакеты запущенных пользователей, кроме основного, — как pkg@N
+          for u in $(pm list users 2>/dev/null | sed -n 's/.*UserInfo{\([0-9]*\):.*} running.*/\1/p'); do
+              [ "$u" = "0" ] && continue
+              pm list packages -3 --user "$u" 2>/dev/null | sed -n "s/^package:\([A-Za-z0-9_.]*\)\$/\1@$u/p"
+          done
         } | sort -u
         ;;
 
@@ -643,6 +649,13 @@ case "$1" in
         cat "$ZSCAN.results" 2>/dev/null
         # замер скорости: S|КБ/с|аргументы
         sed 's/^/S|/' "$ZSCAN.speed" 2>/dev/null ;;
+    z2-kinds)
+        # для таблицы подбора: свои профили стратегий nfqws2 (NFQWS_ARGS_CUSTOM) одной строкой,
+        # «имя<TAB>текст»; нет строки — у стратегии один профиль на всё. Разбирает WebUI
+        awk 'FNR == 1 { if (on) print ""; on = 0; q = 0 }
+             /^NFQWS_ARGS_CUSTOM="/ { on = 1; n = FILENAME; sub(/.*\//, "", n); sub(/\.conf$/, "", n); printf "%s\t", n }
+             on { q += gsub(/"/, "\""); gsub(/[\t\r]/, " "); printf "%s ", $0; if (q >= 2) { on = 0; print "" } }' \
+            "$MODDIR"/zapret2/strategies/*.conf 2>/dev/null ;;
 
     sitetest)
         # Открывается ли сайт мимо VPN: без обхода и с текущей стратегией.

@@ -319,9 +319,9 @@ opera_dst6() {
 # приложения целиком; клиенты Telegram — как у WARP: их запасные узлы вне сетей Telegram
 opera_app_uids() {
     local p u out="" tg=""
-    [ "$OPERA_TELEGRAM" = "1" ] && [ "$OPERA_PHONE" = "1" ] && tg="$WARP_TG_PKGS"
+    [ "$OPERA_TELEGRAM" = "1" ] && [ "$OPERA_PHONE" = "1" ] && tg=$(pkg_with_clones $WARP_TG_PKGS)
     for p in $OPERA_APPS $tg; do
-        u=$(stat -c %u "/data/data/$p" 2>/dev/null)
+        u=$(pkg_uid "$p")
         case "$u" in ''|*[!0-9]*) continue ;; esac
         [ "$u" -ge 10000 ] || continue
         case " $out " in *" $u "*) ;; *) out="$out $u" ;; esac
