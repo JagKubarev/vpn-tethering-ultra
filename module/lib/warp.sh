@@ -1043,6 +1043,7 @@ WARP_CH_IP=""              # выход по trace
 WARP_CH_LOC=""
 WARP_CH_NOTE=""
 WARP_CH_FAILS=0
+WARP_CH_NONET=0            # не отвечал без связи (метро) — промахи не считали
 WARP_CH_RETRY_TS=0
 WARP_CH_CHECK_TS=0
 # «Если выход не работает» (WARP_STRICT): запрет для метки WARP сразу за выходом, который защищаем. Выход жив —
@@ -1095,7 +1096,7 @@ warp_chain_down() {   # [причина] — пусто: молча
     fi
     # «не поднялась» держим: иначе каждое переподключение WARP (warp_down) сбрасывало паузу, и мёртвый сервер
     # пробовался сразу после подъёма — 25.11 четыре попытки по 10 с за 2 мин (WARP переподнимался из-за Telegram)
-    WARP_CH_PID=""; WARP_CH_EP=""; WARP_CH_FAILS=0; WARP_CH_IP=""; WARP_CH_LOC=""
+    WARP_CH_PID=""; WARP_CH_EP=""; WARP_CH_FAILS=0; WARP_CH_NONET=0; WARP_CH_IP=""; WARP_CH_LOC=""
     [ "$WARP_CH_STATE" = fail ] || WARP_CH_STATE=off
 }
 
@@ -1209,8 +1210,14 @@ warp_chain_reconcile() {
             $ip rule show 2>/dev/null | grep -q "^$WARP_CH_MARK_PREF:" || \
                 $ip rule add fwmark $WARP_MARK/$WARP_MARK lookup $WARP_CH_TABLE pref $WARP_CH_MARK_PREF 2>/dev/null
             if warp_chain_probe; then
-                [ $WARP_CH_FAILS -gt 0 ] && log "WARP: свой сервер после WARP ($WARP_CHAIN) снова отвечает"
-                WARP_CH_FAILS=0
+                [ $WARP_CH_FAILS -gt 0 ] || [ "$WARP_CH_NONET" = 1 ] && log "WARP: свой сервер после WARP ($WARP_CHAIN) снова отвечает"
+                WARP_CH_FAILS=0; WARP_CH_NONET=0
+            elif [ "$WARP_NONET" = 1 ] || ! warp_uplink; then
+                # молчит и связь мимо туннеля (метро) — сервер не виноват: промах не считаем, проверяем чаще; как у WARP.
+                # 25.11 в метро цепочка дошла до 2/3 только из-за обрывов, при длинном — ушла бы в паузу до 30 мин
+                WARP_CH_CHECK_TS=$((now - WARP_CHECK_SECS + 10))
+                [ "$WARP_CH_NONET" = 1 ] || log "WARP: свой сервер после WARP ($WARP_CHAIN) не отвечает, но и напрямую сети нет — не считаю"
+                WARP_CH_NONET=1; WARP_CH_FAILS=0
             else
                 WARP_CH_FAILS=$((WARP_CH_FAILS + 1))
                 WARP_CH_CHECK_TS=$((now - WARP_CHECK_SECS + 10))
