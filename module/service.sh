@@ -1171,7 +1171,8 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
         ZAPRET2_FAKE_SNI) case "$val" in *[!a-z0-9.-]*|.*|*.) ok=0 ;; esac
             [ ${#val} -le 100 ] || ok=0 ;;
         WARP_STRICT) case "$val" in 0|1|2) ;; *) ok=0 ;; esac ;;
-        WARP_I1) case "$val" in *[!a-z0-9.-]*|.*) ok=0 ;; esac ;;   # имя готового I1, файл — warp/i1
+        WARP_I1) case "$val" in *[!a-z0-9.-]*|[.-]*|*[.-]) ok=0 ;; esac   # имя готового I1, файл — warp/i1
+            [ ${#val} -le 100 ] || ok=0 ;;
         WARP_CONF|WARP_CHAIN)  # имя конфига, как в warp/warp.sh; пусто — по порядку / выкл
             case "$val" in *[!A-Za-z0-9_.-]*|.*) ok=0 ;; esac
             [ ${#val} -le 40 ] || ok=0 ;;

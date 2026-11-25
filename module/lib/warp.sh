@@ -151,11 +151,14 @@ warp_pick() {   # первый конфиг не из «плохих»; нет �
 # .run.wg для awg (с ключом — на миг). awg не знает Address/DNS/MTU (это
 # wg-quick) — без них. AllowedIPs — весь трафик: что пускать в туннель, решают
 # наши правила, а «сплит» из генератора молча отбросил бы Telegram/Google.
-# $2 — адрес вместо Endpoint конфига (пусто — как в конфиге), $3 — I1 вместо конфига (warp_i1)
+# $2 — адрес вместо Endpoint конфига (пусто — как в конфиге), $3 — I1 вместо конфига (warp_i1); с ним
+# I2–I5 конфига (AmneziaWG 1.5 шлёт их следом, у импортированных — со своими именами) — не шлём: иначе
+# имя, по которому режут, уходило бы и после смены. У созданных модулем их нет, рукопожатию не нужны
 warp_wg_file() {   # конфиг [адрес] [I1]
     (umask 077; awk -v ep="$2" -v i1="$3" '/^[ \t]*(#|(Address|DNS|MTU|AllowedIPs|J[1-3]|Itime)[ \t]*=)/ { next }
         ep != "" && /^[ \t]*Endpoint[ \t]*=/ { print "Endpoint = " ep; next }
         i1 != "" && /^[ \t]*I1[ \t]*=/ { print "I1 = " i1; next }
+        i1 != "" && /^[ \t]*I[2-5][ \t]*=/ { next }
         { print }
         /^[ \t]*\[Peer\]/ { print "AllowedIPs = 0.0.0.0/0, ::/0" }' "$1" > "$WARP_DIR/.run.wg")
 }
@@ -304,7 +307,9 @@ warp_start() {   # имя конфига
     $ip rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     $ip -6 rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     WARP_CUR="$n"; WARP_STATE=starting; WARP_TS=$(date +%s); WARP_CHECK_TS=0; WARP_FAILS=0; WARP_NETCHG=0; WARP_TG_TS=0
-    log "WARP: запускаю $n ($(sed -n 's/^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*//p' "$f" | head -1))$([ -n "$(warp_i1)" ] && echo ", I1 с именем $WARP_I1")"
+    log "WARP: запускаю $n ($(sed -n 's/^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*//p' "$f" | head -1))$(
+        if [ -n "$(warp_i1)" ]; then echo ", I1 с именем $WARP_I1"
+        elif [ "$WARP_CF" = 1 ] && [ -n "$WARP_I1" ]; then echo ", I1 как в конфиге: нет готового I1 «$WARP_I1» (warp/i1/$WARP_I1.txt)"; fi)"
     WARP_HS=0; WARP_EP_TRIED=""; WARP_EP_SILENT=""; WARP_EP_Q=""; WARP_RU_EP=""; WARP_RU_TRY=0
     if [ "$WARP_CF" = 1 ]; then
         WARP_EP_Q=$(warp_ep_list | awk 'NR > 1' | tr '\n' ' ')

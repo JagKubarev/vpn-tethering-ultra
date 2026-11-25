@@ -1609,7 +1609,11 @@ function renderForm() {
     const k = el.dataset.key, v = CUR[k] || '';
     if (el.classList.contains('seg')) return;   // кнопки — в renderDeps
     if (el.type === 'checkbox') el.checked = v === '1';
-    else el.value = v;
+    else {
+      // I1: своё имя (свой файл в warp/i1) — отдельным пунктом, иначе выбор показал бы «Как в конфиге»
+      if (k === 'WARP_I1' && v && !Array.from(el.options).some((o) => o.value === v)) el.add(new Option(v + ' (свой файл)', v));
+      el.value = v;
+    }
   });
   $('#directDoh').checked = CUR.DNS_DIRECT !== 'plain';
   renderDnsLists();

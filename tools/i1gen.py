@@ -8,8 +8,9 @@ UDP-поток туннеля (08.11: bag.itunes.apple.com днём — 2,5 Мб
 Берём образец (module/warp/i1.txt, сейчас apteka.ru), расшифровываем, меняем имя
 и шифруем обратно. Раскладка как у образца: те же кадры CRYPTO в том же порядке
 (Chrome режет ClientHello на куски), их границы сдвигаются на разницу длин имени,
-PADDING подгоняется — размер пакета прежний. Новые DCID/SCID и random ClientHello —
-у каждого файла свои (--keep — как в образце: тогда тот же SNI даёт тот же пакет
+PADDING подгоняется — размер пакета прежний. Новые DCID/SCID, random, session id и
+ключи key_share ClientHello — у каждого файла свои (но файл один на всех пользователей
+модуля: I1 на каждую установку — только сборкой на телефоне) (--keep — как в образце: тогда тот же SNI даёт тот же пакет
 байт в байт, проверка самого генератора).
 
   python -I tools/i1gen.py show [файл]              — что внутри (имя, размер, кадры)
@@ -169,6 +170,8 @@ def build(p, fr, new_ch, pos, old_l, new_l, dcid, scid):
             body.append([1])
         else:
             a, b = f(fx[1]), f(fx[1] + len(fx[2]))
+            if b - a >= 1 << (8 * fx[4] - 2) or a >= 1 << (8 * fx[3] - 2):
+                raise SystemExit('имя длинное: кусок ClientHello не влезает в раскладку образца')
             if b > a:
                 body.append([6, a, new_ch[a:b], fx[3], fx[4]])
     enc = lambda x: (b'\x00' * x[1] if x[0] == 0 else b'\x01' if x[0] == 1 else
@@ -198,6 +201,28 @@ def build(p, fr, new_ch, pos, old_l, new_l, dcid, scid):
     return bytes(pkt) + p['tail']
 
 
+def shares(ch):
+    """-> [(смещение, длина)] ключей key_share и session id в ClientHello"""
+    out = []
+    i = 4 + 2 + 32
+    if ch[i]:
+        out.append((i + 1, ch[i]))
+    i += 1 + ch[i]
+    i += 2 + struct.unpack('>H', ch[i:i + 2])[0]
+    i += 1 + ch[i]
+    end = i + 2 + struct.unpack('>H', ch[i:i + 2])[0]
+    i += 2
+    while i < end:
+        et, el = struct.unpack('>HH', ch[i:i + 4])
+        if et == 0x33:
+            j, e2 = i + 6, i + 4 + el
+            while j < e2:
+                kl = struct.unpack('>H', ch[j + 2:j + 4])[0]
+                out.append((j + 4, kl)); j += 4 + kl
+        i += 4 + el
+    return out
+
+
 def gen(name, path, keep):
     if not re.fullmatch(r'[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+', name):
         raise SystemExit('имя: латиница, цифры, точки (xn-- для .рф)')
@@ -214,6 +239,8 @@ def gen(name, path, keep):
     dcid, scid = p['dcid'], p['scid']
     if not keep:
         new[6:38] = os.urandom(32)                     # random ClientHello
+        for at, ln in shares(bytes(new)):              # ключи key_share, session id: сервер их не читает
+            new[at:at + ln] = os.urandom(ln)
         dcid, scid = os.urandom(len(dcid)), os.urandom(len(scid))
     return build(p, fr, bytes(new), pos, old_l, len(nb), dcid, scid)
 
