@@ -1030,6 +1030,18 @@ details > summary::after { border-color: currentColor; }
       <div class="s">Только основной конфиг: замолчал — переподключается он же, на другие не переходит.</div></div>
     <label class="sw"><input type="checkbox" data-key="WARP_STICK"><span></span></label>
   </div>
+  <div class="row col" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Имя в I1</div>
+      <div class="s">I1 — поддельный QUIC-пакет перед подключением: по имени в нём оператор узнаёт туннель. Если WARP днём упирается в 2–3 Мбит/с — попробуйте другое имя. Меняется только у конфигов Cloudflare, сам конфиг не трогаю.</div></div>
+    <select data-key="WARP_I1">
+      <option value="">Как в конфиге (у созданных — apteka.ru)</option>
+      <option value="apteka.ru">apteka.ru</option>
+      <option value="max.ru">max.ru</option>
+      <option value="web.max.ru">web.max.ru</option>
+      <option value="fd.oneme.ru">fd.oneme.ru</option>
+      <option value="ya.ru">ya.ru</option>
+    </select>
+  </div>
   <details id="warpCfg">
     <summary>Конфиги</summary>
   <div id="warpList"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
@@ -1570,7 +1582,7 @@ const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAM
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_ENGINE','ZAPRET2_STRATEGY','ZAPRET2_ARGS','ZAPRET2_FAKE_SNI','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE','ZAPRET_EXCL_APPS',
   'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','DNS_VIA_ZAPRET','YT_GGC_BLOCK','YT_DEAD_FAILFAST','YT_WSSIZE_RAMP','YT_RAMP_HOURS','YT_RETRY_MAX','ZAPRET_WATCHDOG','ZAPRET_AUTOPICK','ZAPRET_WATCHDOG_MIN',
   'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','ZAPRET_AUTO_FAIL',
-  'WARP_ENABLE','WARP_CONF','WARP_CHAIN','WARP_STRICT','WARP_STICK','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_COUNTRY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
+  'WARP_ENABLE','WARP_CONF','WARP_I1','WARP_CHAIN','WARP_STRICT','WARP_STICK','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_COUNTRY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
 // интервал в минутах человеческим языком: 15 -> «15 минут», 180 -> «3 часа»
 function fmtMin(v, def) {
   const m = +v || def;
