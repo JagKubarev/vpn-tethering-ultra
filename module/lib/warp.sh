@@ -165,11 +165,13 @@ warp_wg_file() {   # конфиг [адрес] [I1]
 
 # WARP_I1: I1 конфигов Cloudflare — поддельный QUIC Initial, по имени в нём оператор опознаёт весь
 # поток туннеля (08.11: bag.itunes.apple.com днём 2,5 Мбит/с, apteka.ru 20–30). Готовые — warp/i1/<имя>.txt
-# (tools/i1gen.py). Только вместо I1 конфига, свой не добавляем; свои серверы (не Cloudflare) — как в конфиге
+# (tools/i1gen.py), собранные на телефоне (warp.sh i1gen, свои DCID и ключи) — $WARP_DIR/i1, они раньше.
+# Только вместо I1 конфига, свой не добавляем; свои серверы (не Cloudflare) — как в конфиге
 warp_i1() {
-    local v
+    local v f="$WARP_DIR/i1/$WARP_I1.txt"
     [ "$WARP_CF" = 1 ] && [ -n "$WARP_I1" ] || return 0
-    v=$(head -1 "$MODULE_DIR/warp/i1/$WARP_I1.txt" 2>/dev/null | tr -d '\r')
+    [ -f "$f" ] || f="$MODULE_DIR/warp/i1/$WARP_I1.txt"
+    v=$(head -1 "$f" 2>/dev/null | tr -d '\r')
     case "$v" in "<b 0x"*">") echo "$v" ;; esac
 }
 
@@ -309,7 +311,7 @@ warp_start() {   # имя конфига
     WARP_CUR="$n"; WARP_STATE=starting; WARP_TS=$(date +%s); WARP_CHECK_TS=0; WARP_FAILS=0; WARP_NETCHG=0; WARP_TG_TS=0
     log "WARP: запускаю $n ($(sed -n 's/^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*//p' "$f" | head -1))$(
         if [ -n "$(warp_i1)" ]; then echo ", I1 с именем $WARP_I1"
-        elif [ "$WARP_CF" = 1 ] && [ -n "$WARP_I1" ]; then echo ", I1 как в конфиге: нет готового I1 «$WARP_I1» (warp/i1/$WARP_I1.txt)"; fi)"
+        elif [ "$WARP_CF" = 1 ] && [ -n "$WARP_I1" ]; then echo ", I1 как в конфиге: нет I1 «$WARP_I1» (ни своего, ни готового)"; fi)"
     WARP_HS=0; WARP_EP_TRIED=""; WARP_EP_SILENT=""; WARP_EP_Q=""; WARP_RU_EP=""; WARP_RU_TRY=0
     if [ "$WARP_CF" = 1 ]; then
         WARP_EP_Q=$(warp_ep_list | awk 'NR > 1' | tr '\n' ' ')

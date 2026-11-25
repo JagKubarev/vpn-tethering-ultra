@@ -41,6 +41,7 @@
 #   webctl.sh zquick                  стратегии быстрого подбора (для ручного выбора)
 #   webctl.sh net-renew               коротко 2G и обратно: новая сессия и адрес у оператора
 #   webctl.sh warp-list|warp-gen [N]|warp-import ИМЯ BASE64|warp-del ИМЯ|warp-export ИМЯ|warp-save ИМЯ|warp-saveall
+#   webctl.sh warp-i1gen ИМЯ|warp-i1list|warp-i1del ИМЯ   свой I1 для WARP_I1 (имя в поддельном QUIC Initial)
 #   webctl.sh warp-stats              туннель: последнее рукопожатие и трафик (awg show)
 #   webctl.sh warp-reconnect          тот же конфиг заново (новая сессия Cloudflare)
 #                                     конфиги WARP (AmneziaWG) — см. warp/warp.sh
@@ -1397,7 +1398,7 @@ case "$1" in
         echo "OK переподключаю"
         ;;
 
-    warp-list|warp-gen|warp-import|warp-del|warp-export|warp-save|warp-saveall)
+    warp-list|warp-gen|warp-import|warp-del|warp-export|warp-save|warp-saveall|warp-i1gen|warp-i1list|warp-i1del)
         sh "$MODDIR/warp/warp.sh" "${1#warp-}" "$2" "$3" ;;
 
     *)

@@ -1041,6 +1041,8 @@ details > summary::after { border-color: currentColor; }
       <option value="fd.oneme.ru">fd.oneme.ru</option>
       <option value="ya.ru">ya.ru</option>
     </select>
+    <div class="s" style="margin-top:10px">Своё имя: модуль соберёт I1 на этом телефоне, со своим отпечатком (не как у всех). Потом «Применить».</div>
+    <div class="inline"><input type="text" id="i1In" placeholder="например ozon.ru" aria-label="Своё имя в I1" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="i1Gen">Собрать</button></div>
   </div>
   <details id="warpCfg">
     <summary>Конфиги</summary>
@@ -1610,8 +1612,8 @@ function renderForm() {
     if (el.classList.contains('seg')) return;   // кнопки — в renderDeps
     if (el.type === 'checkbox') el.checked = v === '1';
     else {
-      // I1: своё имя (свой файл в warp/i1) — отдельным пунктом, иначе выбор показал бы «Как в конфиге»
-      if (k === 'WARP_I1' && v && !Array.from(el.options).some((o) => o.value === v)) el.add(new Option(v + ' (свой файл)', v));
+      // I1: своё имя (собранное здесь или свой файл) — отдельным пунктом, иначе выбор показал бы «Как в конфиге»
+      if (k === 'WARP_I1' && v && !Array.from(el.options).some((o) => o.value === v)) el.add(new Option(v + ' (своё)', v));
       el.value = v;
     }
   });
@@ -2520,7 +2522,31 @@ async function loadWarpStats() {
 
 // "имя|endpoint|gen/import|дата" (webctl warp-list)
 let WARP_N = 0, WARP_HTML = '';
+// свои I1 (собраны на этом телефоне: warp.sh i1gen) — в выбор «Имя в I1»; готовое с тем же именем — «(своё)»
+async function loadI1() {
+  const r = await ctl('warp-i1list'), sel = $('[data-key=WARP_I1]');
+  (r.out || '').split('\n').map((x) => x.trim()).filter((x) => /^[a-z0-9.-]+$/.test(x)).forEach((n) => {
+    const o = Array.from(sel.options).find((x) => x.value === n);
+    if (!o) sel.add(new Option(n + ' (своё)', n));
+    else if (!/\(своё\)$/.test(o.text)) o.text = n + ' (своё)';
+  });
+  sel.value = CUR.WARP_I1 || '';
+}
+$('#i1Gen').addEventListener('click', async () => {
+  const n = $('#i1In').value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/?#].*$/, '');
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(n)) { toast('Имя: латиница, цифры, точки — например ozon.ru (.рф — в виде xn--…)'); return; }
+  const b = $('#i1Gen'); b.disabled = true; b.textContent = 'Собираю…';
+  try {
+    const r = await ctlBg('warp-i1gen ' + q(n));
+    if (!isOk(r)) { toast('Не собрался: ' + errText(r, 'нет ответа')); return; }
+    await loadI1();
+    setCur('WARP_I1', n); $('[data-key=WARP_I1]').value = n; $('#i1In').value = '';
+    toast('I1 с именем ' + n + ' собран — нажмите «Применить»');
+  } finally { b.disabled = false; b.textContent = 'Собрать'; }
+});
+
 async function loadWarp() {
+  loadI1();
   const r = await ctl('warp-list');
   const rows = (r.out || '').split('\n').filter((l) => l.split('|').length >= 4).map((l) => l.split('|'));
   WARP_N = rows.length;
@@ -3516,6 +3542,8 @@ function mockExec(cmd) {
   if (a === 'ack') return { errno: 0, out: M.ack };
   if (a === 'apps') return { errno: 0, out: 'com.avito.android\nru.ozon.app.android\norg.telegram.messenger\norg.telegram.messenger@999\ncom.google.android.youtube\n' };
   if (a === 'doh') return { errno: 0, out: 'ok 184' };
+  if (a === 'warp-i1list') return { errno: 0, out: (M.i1 || (M.i1 = ['apteka.ru'])).join('\n') + '\n' };
+  if (a.indexOf('warp-i1gen ') === 0) { const n = a.slice(11).replace(/'/g, ''); (M.i1 || (M.i1 = ['apteka.ru'])).push(n); return { errno: 0, out: 'OK ' + n }; }
   if (a === 'warp-list') return { errno: 0, out: (M.warp || (M.warp = ['warp|engage.cloudflareclient.com:4500|gen|2026-10-26 23:41',
     'warp-2|engage.cloudflareclient.com:4500|gen|2026-10-26 23:41', 'WARP_STR1693|engage.cloudflareclient.com:4500|import|2026-10-27 00:10'])).join('\n') + '\n' };
   if (/^warp-gen/.test(a)) { M.warp.push('warp-' + (M.warp.length + 1) + '|engage.cloudflareclient.com:4500|gen|2026-10-27 00:20'); return { errno: 0, out: 'OK warp-' + M.warp.length }; }
