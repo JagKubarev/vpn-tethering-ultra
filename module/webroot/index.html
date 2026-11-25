@@ -1041,7 +1041,7 @@ details > summary::after { border-color: currentColor; }
       <option value="fd.oneme.ru">fd.oneme.ru</option>
       <option value="ya.ru">ya.ru</option>
     </select>
-    <div class="s" style="margin-top:10px">Своё имя: модуль соберёт I1 на этом телефоне, со своим отпечатком (не как у всех). Потом «Применить».</div>
+    <div class="s" style="margin-top:10px">Своё имя: модуль соберёт I1 на этом телефоне, со своими DCID и ключами. Потом «Применить».</div>
     <div class="inline"><input type="text" id="i1In" placeholder="например ozon.ru" aria-label="Своё имя в I1" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="i1Gen">Собрать</button></div>
   </div>
   <details id="warpCfg">
@@ -2522,9 +2522,12 @@ async function loadWarpStats() {
 
 // "имя|endpoint|gen/import|дата" (webctl warp-list)
 let WARP_N = 0, WARP_HTML = '';
-// свои I1 (собраны на этом телефоне: warp.sh i1gen) — в выбор «Имя в I1»; готовое с тем же именем — «(своё)»
+// свои I1 (собраны на этом телефоне: warp.sh i1gen) — в выбор «Имя в I1»; готовое с тем же именем — «(своё)».
+// Один раз (и после сборки), в фоне: loadWarp зовут раз в 10 с, а синхронный exec морозил страницу на MT6580
+let I1_LOADED = false;
 async function loadI1() {
-  const r = await ctl('warp-i1list'), sel = $('[data-key=WARP_I1]');
+  I1_LOADED = true;
+  const r = await ctlBg('warp-i1list'), sel = $('[data-key=WARP_I1]');
   (r.out || '').split('\n').map((x) => x.trim()).filter((x) => /^[a-z0-9.-]+$/.test(x)).forEach((n) => {
     const o = Array.from(sel.options).find((x) => x.value === n);
     if (!o) sel.add(new Option(n + ' (своё)', n));
@@ -2541,12 +2544,16 @@ $('#i1Gen').addEventListener('click', async () => {
     if (!isOk(r)) { toast('Не собрался: ' + errText(r, 'нет ответа')); return; }
     await loadI1();
     setCur('WARP_I1', n); $('[data-key=WARP_I1]').value = n; $('#i1In').value = '';
-    toast('I1 с именем ' + n + ' собран — нажмите «Применить»');
+    // имя уже применено — «Применить» нечего применять (настройка та же): новый I1 подхватит переподключение
+    if (saved('WARP_I1') === n && (ST.warp === 'up' || ST.warp === 'starting')) {
+      const w = await ctlBg('warp-reconnect');
+      toast(isOk(w) ? 'Новый I1 с именем ' + n + ' собран — WARP переподключается с ним' : 'I1 собран, но переподключить WARP не вышло: ' + errText(w, 'нет ответа'));
+    } else toast('I1 с именем ' + n + ' собран — нажмите «Применить»');
   } finally { b.disabled = false; b.textContent = 'Собрать'; }
 });
 
 async function loadWarp() {
-  loadI1();
+  if (!I1_LOADED) loadI1();
   const r = await ctl('warp-list');
   const rows = (r.out || '').split('\n').filter((l) => l.split('|').length >= 4).map((l) => l.split('|'));
   WARP_N = rows.length;

@@ -296,10 +296,13 @@ case "$1" in
         case "$n" in *.*) ;; *) echo "ERR нужно имя с точкой, например max.ru"; exit 1 ;; esac
         [ ${#n} -le 100 ] || { echo "ERR имя длиннее 100 знаков"; exit 1; }
         [ -x "$NQ2" ] || { echo "ERR нет nfqws2 — собрать I1 нечем"; exit 1; }
-        src=$(head -1 "$MODDIR/warp/i1.txt" 2>/dev/null)
-        r=$("$NQ2" --intercept=0 --uid=0:3998 --lua-init="I1_NAME='$n' I1_SRC='$src'" --lua-init=@"$MODDIR/warp/i1gen.lua" 2>&1 |
-            grep -E '^(<b 0x|ERR )' | head -1)
-        case "$r" in "<b 0x"*">") ;; ERR*) echo "$r"; exit 1 ;; *) echo "ERR nfqws2 не собрал I1"; exit 1 ;; esac
+        src=$(head -1 "$MODDIR/warp/i1.txt" 2>/dev/null | tr -d '\r')
+        case "$src" in "<b 0x"*">") ;; *) echo "ERR нет образца warp/i1.txt — переустановите модуль"; exit 1 ;; esac
+        o=$("$NQ2" --intercept=0 --uid=0:3998 --lua-init="I1_NAME='$n' I1_SRC='$src'" --lua-init=@"$MODDIR/warp/i1gen.lua" 2>&1)
+        r=$(printf '%s\n' "$o" | grep -E '^(<b 0x|ERR )' | head -1)
+        # ни I1, ни нашей ошибки — nfqws2 не дошёл до скрипта: его последняя строка (на armv7 не проверяли)
+        case "$r" in "<b 0x"*">") ;; ERR*) echo "$r"; exit 1 ;;
+            *) echo "ERR nfqws2 не собрал I1: $(printf '%s\n' "$o" | grep . | tail -1 | cut -c1-120)"; exit 1 ;; esac
         mkdir -p "$WARP_DIR/i1" && printf '%s\n' "$r" > "$WARP_DIR/i1/.$n.tmp" && mv -f "$WARP_DIR/i1/.$n.tmp" "$WARP_DIR/i1/$n.txt" ||
             { echo "ERR не записался"; exit 1; }
         echo "OK $n" ;;

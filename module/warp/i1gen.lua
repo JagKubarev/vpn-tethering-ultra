@@ -1,4 +1,6 @@
 -- I1 для AmneziaWG (WARP) с любым именем — на телефоне, криптографией nfqws2 (порт tools/i1gen.py).
+-- ПАРНЫЙ с tools/i1gen.py: правка раскладки — в обоих; проверка — оба с KEEP дают warp/i1.txt байт в байт,
+-- а tshark читает имя (СВОЕГО у I1 — DCID, SCID, random и ключи; шифры, расширения, куски — как у образца).
 -- Зовёт warp/warp.sh i1gen: nfqws2 --intercept=0 выполняет скрипт и выходит, к очереди не цепляется.
 --   nfqws2 --intercept=0 --uid=0:3998 --lua-init="I1_NAME='max.ru' I1_SRC='<b 0x…>'" --lua-init=@i1gen.lua
 -- --uid=0 — как у демона: иначе nfqws2 до Lua сбрасывает root и не читает файлы в /data/adb.

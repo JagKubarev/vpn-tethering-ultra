@@ -15,7 +15,9 @@ PADDING подгоняется — размер пакета прежний. Н�
 
   python -I tools/i1gen.py show [файл]              — что внутри (имя, размер, кадры)
   python -I tools/i1gen.py gen ИМЯ [файл] [--keep]  — новый I1 в stdout
-Нужен пакет cryptography. Только для ПК: на телефоне — готовые файлы module/warp/i1/.
+Нужен пакет cryptography. ПАРНЫЙ с module/warp/i1gen.lua (тот же алгоритм на Lua nfqws2, сборка
+на телефоне — warp.sh i1gen): правка раскладки — в обоих, проверка — оба с --keep/I1_KEEP дают i1.txt
+байт в байт, tshark читает имя.
 """
 import os
 import re
