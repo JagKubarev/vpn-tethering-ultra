@@ -1016,6 +1016,20 @@ details > summary::after { border-color: currentColor; }
       <div class="s">Выключено — устройства раздачи ходят без WARP.</div></div>
     <label class="sw"><input type="checkbox" data-key="WARP_TETHER"><span></span></label>
   </div>
+  <div class="row col" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Если выход не работает</div>
+      <div class="s">Что делать с тем, что идёт в WARP, когда свой сервер или сам WARP не отвечает. Блок — приложение увидит «нет сети», а не пойдёт через оператора.</div></div>
+    <select data-key="WARP_STRICT">
+      <option value="0">Запасной путь: свой сервер → WARP → напрямую</option>
+      <option value="1">Не напрямую: WARP упал — блок</option>
+      <option value="2">Только свой сервер: он не отвечает — блок</option>
+    </select>
+  </div>
+  <div class="row" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Не менять сервер</div>
+      <div class="s">Только основной конфиг: замолчал — переподключается он же, на другие не переходит.</div></div>
+    <label class="sw"><input type="checkbox" data-key="WARP_STICK"><span></span></label>
+  </div>
   <details id="warpCfg">
     <summary>Конфиги</summary>
   <div id="warpList"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
@@ -1556,7 +1570,7 @@ const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAM
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_ENGINE','ZAPRET2_STRATEGY','ZAPRET2_ARGS','ZAPRET2_FAKE_SNI','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE','ZAPRET_EXCL_APPS',
   'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','DNS_VIA_ZAPRET','YT_GGC_BLOCK','YT_DEAD_FAILFAST','YT_WSSIZE_RAMP','YT_RAMP_HOURS','YT_RETRY_MAX','ZAPRET_WATCHDOG','ZAPRET_AUTOPICK','ZAPRET_WATCHDOG_MIN',
   'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','ZAPRET_AUTO_FAIL',
-  'WARP_ENABLE','WARP_CONF','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_COUNTRY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
+  'WARP_ENABLE','WARP_CONF','WARP_CHAIN','WARP_STRICT','WARP_STICK','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_COUNTRY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
 // интервал в минутах человеческим языком: 15 -> «15 минут», 180 -> «3 часа»
 function fmtMin(v, def) {
   const m = +v || def;
@@ -2244,7 +2258,7 @@ $('#revertBtn').addEventListener('click', () => {
 // сброс вкладки: её поля (data-key внутри) и то, что в ней рисуется списками и выбором приложений — к умолчаниям
 const TAB_KEYS_EXTRA = { net: ['DNS_DIRECT', 'DNS_UPSTREAMS', 'DNS_FALLBACKS', 'DNS_GEO_UPSTREAMS'],
   bypass: ['QUIC_BLOCK_APPS', 'ZAPRET2_FAKE_SNI', 'ZAPRET_EXCL_APPS', 'ZAPRET_WATCHDOG_MIN', 'ZAPRET_ALT_MIN'],
-  warp: ['WARP_CONF', 'WARP_GOOGLE', 'WARP_TELEGRAM', 'WARP_APPS', 'WARP_DOMAINS', 'OPERA_DOMAINS', 'OPERA_TELEGRAM', 'OPERA_GOOGLE', 'OPERA_APPS'] };
+  warp: ['WARP_CONF', 'WARP_CHAIN', 'WARP_GOOGLE', 'WARP_TELEGRAM', 'WARP_APPS', 'WARP_DOMAINS', 'OPERA_DOMAINS', 'OPERA_TELEGRAM', 'OPERA_GOOGLE', 'OPERA_APPS'] };
 const TAB_NAMES = { net: 'DNS', bypass: 'Обход', warp: 'Выходы' };
 $$('[data-tabreset]').forEach((b) => b.addEventListener('click', () => {
   if (busy) { toast('Подождите — применяются настройки'); return; }
@@ -2376,11 +2390,30 @@ function coloName(k) {
   return (v[0] ? v[0] + ', ' : '') + cn + ' (' + k + ')';
 }
 const COLO_RU = ['DME', 'LED', 'KJA'];
+// WARP не работает, а «Если выход не работает» — блок (WARP_STRICT): сказать, что это не «напрямую», а «никуда»
 function warpState(s) {
+  const r = warpState0(s);
+  if (s.warp !== 'up' && s.warp !== 'disabled' && (s.warp_block === '1' || s.warp_block === '2') && !(s.vpn_up === '1' || s.warp_note === 'поднят VPN'))
+    return Object.assign({}, r, { s: (r.s ? r.s + '. ' : '') + 'То, что идёт в WARP, пока заблокировано (не напрямую)' });
+  return r;
+}
+function warpState0(s) {
   const c = s.warp_conf ? ' · ' + s.warp_conf : '';
   switch (s.warp) {
     case 'up': {
-      const k = s.warp_colo || '', where = k ? 'Выход: ' + coloName(k) : '';
+      const k = s.warp_colo || '';
+      let where = k ? 'Выход: ' + coloName(k) : '';
+      // свой сервер после WARP (WARP_CHAIN): каскад коротко — площадка Cloudflare → страна своего сервера; адрес — в строке конфига
+      if (s.warp_chain === 'up') {
+        let cc = s.warp_chain_loc || '';
+        try { if (cc && REGION_RU) cc = REGION_RU.of(cc) || cc; } catch (e) { /* кодом */ }
+        // карточка узкая: площадка — городом без страны (Франкфурт (FRA))
+        const city = (COLO[k] || [])[0];
+        where = 'Через ' + (k ? (city ? city + ' (' + k + ')' : k) : 'Cloudflare') + ' → свой сервер' + (cc ? ', ' + cc : '');
+      } else if (s.warp_chain === 'fail') {
+        where += (where ? '. ' : '') + (s.warp_block === '2' ? 'Свой сервер после WARP не поднялся — то, что идёт в WARP, заблокировано'
+          : 'Свой сервер после WARP не поднялся — выход через WARP');
+      }
       if (s.warp_cf === '1' && COLO_RU.includes(k)) return { d: 'amber', t: 'Работает' + c, s: where + '. Через российские площадки Telegram и часть сайтов могут не открываться' };
       return { d: 'green', t: 'Работает' + c, s: where };
     }
@@ -2391,6 +2424,8 @@ function warpState(s) {
       ? { d: 'red', t: 'AmneziaWG не запустился', s: 'Повтор через минуту. Если так постоянно — отправьте логи (вкладка «Сервис»)' }
       : s.warp_note === 'нет сети'
       ? { d: '', t: 'Ждёт сеть', s: 'Мимо туннеля тоже нет ответа — тот же конфиг через 30 секунд' }
+      : CUR.WARP_STICK === '1'
+      ? { d: 'red', t: 'Не поднялся' + c, s: '«Не менять сервер»: пробую его же каждые 30 секунд' }
       : { d: 'red', t: 'Ни один конфиг не поднялся', s: 'Повтор через 5 минут. Если так постоянно — создайте новый или импортируйте конфиг с другим Endpoint' };
     case 'off':
       if (s.vpn_up === '1' || s.warp_note === 'поднят VPN') return { d: '', t: 'Пауза: включён VPN', s: 'Без VPN включится сам' };
@@ -2471,17 +2506,29 @@ async function loadWarp() {
   const rows = (r.out || '').split('\n').filter((l) => l.split('|').length >= 4).map((l) => l.split('|'));
   WARP_N = rows.length;
   const main = CUR.WARP_CONF || '', run = ST.warp === 'up' || ST.warp === 'starting' ? ST.warp_conf : '';
+  const chain = CUR.WARP_CHAIN || '';
+  // свой сервер (не Cloudflare) можно поставить после WARP: к нему — внутри туннеля Cloudflare (lib/warp.sh, WARP_CHAIN)
+  const ownSrv = (ep) => !/^(engage\.cloudflareclient\.com|162\.159\.|188\.114\.)/.test(ep || '');
+  const chainTxt = (n) => {
+    if (n !== chain) return '';
+    if (ST.warp_chain === 'up') return ' · после WARP, выход ' + esc(ST.warp_chain_ip || '?') + (ST.warp_chain_loc ? ' (' + esc(ST.warp_chain_loc) + ')' : '');
+    if (ST.warp_chain === 'fail') return ' · после WARP: ' + esc(ST.warp_chain_note || 'не поднялся') + (ST.warp_block === '2' ? ' — пока заблокировано' : ' — пока всё через WARP');
+    return ' · после WARP: ждёт WARP';
+  };
   const html = rows.length ? rows.map(([n, ep, src, dt]) =>
     // кнопки — под текстом: на телефоне три в ряд с текстом не помещаются
-    '<div class="row col"><div class="head" style="gap:8px"><span class="dot ' + (n === run ? 'green' : '') + '"></span>' +
-    '<div class="txt"><div class="t">' + esc(n) + (n === main ? '<span class="badge">основной</span>' : '') + '</div>' +
-    '<div class="s">' + esc(ep) + ' · ' + (src === 'gen' ? 'создан' : 'импорт') + ' ' + esc(dt) + (n === run ? ' · в работе' : '') + '</div>' +
+    '<div class="row col"><div class="head" style="gap:8px"><span class="dot ' + (n === run || (n === chain && ST.warp_chain === 'up') ? 'green' : '') + '"></span>' +
+    '<div class="txt"><div class="t">' + esc(n) + (n === main && n !== chain ? '<span class="badge">основной</span>' : '') +
+    (n === chain ? '<span class="badge">после WARP</span>' : '') + '</div>' +
+    '<div class="s">' + esc(ep) + ' · ' + (src === 'gen' ? 'создан' : 'импорт') + ' ' + esc(dt) + (n === run ? ' · в работе' : '') + chainTxt(n) + '</div>' +
     // блок статистики — пустым, текст ниже: счётчики меняются каждый раз, и сравнение html перерисовывало бы список
     (n === run ? '<div class="s" id="warpRunStats" style="white-space:pre-line;margin-top:6px"></div>' : '') + '</div></div>' +
     // как в WG Tunnel: переключение нажатием, в работе — тот же заново (новая сессия)
-    '<div class="btn-row fill mt8">' + (n === run
+    '<div class="btn-row fill mt8">' + (n === chain ? '' : n === run
       ? '<button class="btn small" data-wre="' + esc(n) + '" aria-label="Переподключить ' + esc(n) + '">Переподключить</button>'
       : '<button class="btn small" data-wmain="' + esc(n) + '" aria-label="Подключить ' + esc(n) + '">Подключить</button>') +
+    (ownSrv(ep) ? '<button class="btn small" data-wchain="' + esc(n) + '" aria-label="' + (n === chain ? 'Убрать ' + esc(n) + ' из цепочки' : 'Поставить ' + esc(n) + ' после WARP') + '">' +
+      (n === chain ? 'Не после WARP' : 'После WARP') + '</button>' : '') +
     '<button class="btn small" data-wsave="' + esc(n) + '" aria-label="Сохранить ' + esc(n) + ' в Загрузки">Сохранить</button>' +
     '<button class="btn small" data-wdel="' + esc(n) + '" aria-label="Удалить ' + esc(n) + '">Удалить</button></div></div>').join('')
     : '<div class="row"><div class="txt"><div class="s">Конфигов нет. Нажмите «Создать» или импортируйте свой.</div></div></div>';
@@ -2491,6 +2538,19 @@ async function loadWarp() {
 }
 $('#warpList').addEventListener('click', async (e) => {
   const b = e.target.closest && e.target.closest('button'); if (!b) return;
+  if (b.dataset.wchain) {
+    // свой сервер после WARP: сразу, без «Применить» — как «Подключить»
+    const n = b.dataset.wchain, off = (CUR.WARP_CHAIN || '') === n;
+    if (busy) { toast('Подождите — применяются настройки'); return; }
+    const r = await ctl(off ? 'unset WARP_CHAIN' : 'set WARP_CHAIN ' + q(n));
+    if (!isOk(r)) { toast(errText(r, 'Не получилось')); return; }
+    if (off) { delete USR.WARP_CHAIN; setCur('WARP_CHAIN', ''); } else { USR.WARP_CHAIN = n; setCur('WARP_CHAIN', n); }
+    const a = await ctl('apply');
+    toast(!isOk(a) ? 'Сохранено, применится после перезагрузки (' + errText(a, 'модуль не ответил') + ')'
+      : off ? 'Готово: ' + n + ' больше не после WARP' : n + ' — после WARP: к нему через Cloudflare, напрямую ни пакета. Поднимется за несколько секунд');
+    loadWarp();
+    return;
+  }
   if (b.dataset.wmain) {
     // сразу, без «Применить»: в файл и демону (как удаление основного ниже)
     const n = b.dataset.wmain;
@@ -2525,6 +2585,10 @@ $('#warpList').addEventListener('click', async (e) => {
     if (saved('WARP_CONF') === n || CUR.WARP_CONF === n) {
       // иначе следующий «Создать» с тем же именем молча стал бы основным
       await ctl('unset WARP_CONF'); delete USR.WARP_CONF; setCur('WARP_CONF', '');
+      if (!busy) ctl('apply');
+    }
+    if (saved('WARP_CHAIN') === n || CUR.WARP_CHAIN === n) {
+      await ctl('unset WARP_CHAIN'); delete USR.WARP_CHAIN; setCur('WARP_CHAIN', '');
       if (!busy) ctl('apply');
     }
     toast('Удалено' + (ST.warp_conf === n ? ' — модуль перейдёт на другой, когда этот перестанет отвечать' : ''));

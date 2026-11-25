@@ -73,7 +73,17 @@ warp_kill_strays() {
 }
 
 warp_down() {   # [причина] — пусто: молча
-    warp_routes_off
+    # свой сервер после WARP — первым: без warp0 его правила к серверу ведут в никуда (prohibit)
+    warp_chain_down "${1:+WARP снят}"
+    # выход демона — блок снять (warp_reconcile при VPN и т.п. снимает его сам, до warp_down)
+    [ "$1" = "выход" ] && warp_block_set 0
+    if [ "$WARP_BLK_LVL" -ge 1 ] 2>/dev/null; then
+        # «Если выход не работает» — не напрямую: разметку держим, то, что идёт в WARP, упрётся в запрет
+        # (таблица WARP пустая); открытые соединения закрыть — приложения сразу увидят «нет сети»
+        [ "$WARP_RT_ON" = 1 ] && warp_kill_sockets "туннель снят, блок"
+    else
+        warp_routes_off
+    fi
     $ip rule del oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     $ip -6 rule del oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     $ip route flush table $WARP_TABLE 2>/dev/null
@@ -86,19 +96,38 @@ warp_down() {   # [причина] — пусто: молча
     WARP_PID=""; WARP_CUR=""; WARP_STATE=off; WARP_FAILS=0; WARP_NONET=0; WARP_COLO_UP=""
 }
 
-# Конфиги по порядку: выбранный в WARP_CONF первым, дальше по имени
+# Конфиги по порядку: выбранный в WARP_CONF первым, дальше по имени. Свой сервер после WARP (WARP_CHAIN) — не WARP:
+# поднятый вместо Cloudflare, он шёл бы к серверу напрямую — ради чего цепочка и нужна
+# «Не менять сервер» (WARP_STICK): за какой держаться — основной (WARP_CONF), не выбран — тот, что поднимался последним
+# (ревью 25.11: без основного выключатель молча не действовал); пусто — пока ни один не поднимался, по порядку
+warp_stick_name() {
+    local n
+    [ "$WARP_STICK" = 1 ] || return 1
+    for n in "$WARP_CONF" "$WARP_LAST_UP"; do
+        [ -n "$n" ] && [ "$n" != "$WARP_CHAIN" ] && [ -f "$WARP_DIR/$n.conf" ] && { echo "$n"; return 0; }
+    done
+    return 1
+}
+
 warp_conf_names() {
     local f n
-    [ -n "$WARP_CONF" ] && [ -f "$WARP_DIR/$WARP_CONF.conf" ] && echo "$WARP_CONF"
+    if n=$(warp_stick_name); then echo "$n"; return 0; fi
+    [ -n "$WARP_CONF" ] && [ "$WARP_CONF" != "$WARP_CHAIN" ] && [ -f "$WARP_DIR/$WARP_CONF.conf" ] && echo "$WARP_CONF"
     for f in "$WARP_DIR"/*.conf; do
         [ -f "$f" ] || continue
         n=${f##*/}; n=${n%.conf}
-        [ "$n" = "$WARP_CONF" ] || echo "$n"
+        [ "$n" = "$WARP_CONF" ] || [ "$n" = "$WARP_CHAIN" ] || echo "$n"
     done
 }
 
 warp_is_bad() {
     local e now=$(date +%s)
+    # «Не менять сервер»: «плохой» не на 10 мин, а на 30 с — замолчал, его же заново; без паузы конфиг, что падает
+    # сразу (имя сервера не резолвится), перезапускался бы каждый проход цикла (ревью 25.11)
+    if [ "$1" = "$(warp_stick_name)" ]; then
+        for e in $WARP_BAD; do [ "${e%:*}" = "$1" ] && [ $((now - ${e##*:})) -lt 30 ] && return 0; done
+        return 1
+    fi
     for e in $WARP_BAD; do
         [ "${e%:*}" = "$1" ] && [ $((now - ${e##*:})) -lt $WARP_BAD_SECS ] && return 0
     done
@@ -388,7 +417,8 @@ warp_ensure() {
     [ "$(date +%s)" -lt "$WARP_ENSURE_AT" ] && return 0
     WARP_ENSURE_DONE=1
     [ -f "$WARP_DIR/.init" ] && return 0
-    ls "$WARP_DIR"/*.conf >/dev/null 2>&1 && return 0
+    # свой сервер после WARP (WARP_CHAIN) — не WARP: только он в хранилище — конфигов Cloudflare всё равно нет
+    [ -n "$(warp_conf_names)" ] && return 0
     [ "$WARP_ENSURE_BUSY" = 1 ] || log "WARP: конфигов нет — создаю 3 (первый запуск)"
     sh "$MODULE_DIR/warp/warp.sh" ensure 3 > "$WARP_RUN.ensure" 2>/dev/null < /dev/null &
     WARP_ENSURE_PID=$!
@@ -431,6 +461,16 @@ warp_reconcile() {
     fi
     # первые конфиги — только при сети (иначе регистрация падает до перезагрузки)
     [ -z "$why" ] && warp_ensure
+    # «Если выход не работает» (WARP_STRICT): блок держим, пока WARP включён и нужен — и без сети, и в паузе kill-switch
+    # (VPN выбран, но не поднят: иначе Telegram телефона шёл бы через оператора — ревью 25.11; раздачу держит guard).
+    # Выключен, поднят VPN — блок и разметку снять (через VPN всё и так идёт в туннель)
+    case "$why" in
+        ''|"нет сети"|"пауза kill-switch") warp_block_set "$WARP_STRICT" ;;
+        *) warp_block_set 0; warp_routes_off ;;
+    esac
+    # блок, а WARP ещё/уже не поднят: разметка всё равно стоит — иначе то, что идёт в WARP, ушло бы напрямую
+    # (после загрузки до первого подъёма, при переподключении, без конфигов)
+    [ "$WARP_BLK_LVL" -ge 1 ] 2>/dev/null && [ "$WARP_STATE" != up ] && warp_routes_reconcile
     if [ -n "$why" ]; then
         if [ "$WARP_STATE" != off ]; then warp_down "$why"; WARP_BAD=""; WARP_EP_FULL=0; WARP_RETRY_TS=0; fi
         warp_set_state off "$why"   # повторы отсекает WARP_PUB
@@ -452,6 +492,12 @@ warp_reconcile() {
                 if [ -z "$(warp_conf_names)" ]; then
                     [ "$WARP_NOTE" = "нет конфигов" ] || log "WARP: нет конфигов — создайте или импортируйте в WebUI"
                     warp_set_state fail "нет конфигов"
+                elif n=$(warp_stick_name); then
+                    # «Не менять сервер»: тот же через 30 с, не через 5 мин; в журнал — один раз
+                    [ "$WARP_NOTE" = "не поднялся" ] || log "WARP: $n не поднялся — «Не менять сервер»: пробую его же каждые 30 с"
+                    warp_set_state fail "не поднялся"
+                    WARP_BAD=""; WARP_EP_FULL=0; WARP_RETRY_TS=$((now + 30))
+                    return 0
                 else
                     log "WARP: ни один конфиг не поднялся — повтор через $((WARP_RETRY_SECS / 60)) мин"
                     warp_set_state fail "не поднялся"
@@ -509,6 +555,7 @@ warp_reconcile() {
                     warp_ep_next
                     return 0
                 fi
+                WARP_LAST_UP="$WARP_CUR"   # за него держится «Не менять сервер», если основной не выбран
                 log "WARP: $WARP_CUR поднят за $(( $(date +%s) - WARP_TS )) с${WARP_COLO:+ (площадка $WARP_COLO)}"
                 if [ "$WARP_CF" = 1 ] && warp_colo_ru; then
                     log "WARNING: WARP: только российская площадка Cloudflare ($WARP_COLO) — Telegram и часть сайтов через WARP могут не открываться"
@@ -554,6 +601,7 @@ warp_reconcile() {
                 warp_down; warp_set_state off ""; return 0
             fi
             warp_routes_reconcile
+            warp_chain_reconcile
             [ $((now - WARP_CHECK_TS)) -lt $WARP_CHECK_SECS ] && return 0
             WARP_CHECK_TS=$now
             if warp_probe; then
@@ -569,7 +617,10 @@ warp_reconcile() {
                 fi
                 # Telegram DC2/DC4 через эту сессию — раз в WARP_TG_SECS; мертвы при
                 # живом DC1 — переподнять (новая сессия), не больше WARP_TG_MAX подряд
-                if [ "$WARP_TELEGRAM" = 1 ] && [ "$WARP_CF" = 1 ] && [ "$now" -ge "$WARP_TG_HOLD" ] && \
+                # со своим сервером после WARP Telegram идёт через него — сессия Cloudflare ни при чём; при «только свой
+                # сервер» (блок 2) через WARP он не идёт и когда цепочка не поднята — переподключать WARP незачем
+                if [ "$WARP_TELEGRAM" = 1 ] && [ "$WARP_CF" = 1 ] && [ "$WARP_CH_STATE" != up ] && [ "$WARP_BLK_LVL" != 2 ] && \
+                   [ "$now" -ge "$WARP_TG_HOLD" ] && \
                    [ $((now - WARP_TG_TS)) -ge $WARP_TG_SECS ]; then
                     WARP_TG_TS=$now
                     if warp_tg_dead; then
@@ -884,12 +935,13 @@ warp_routes_apply() {   # ифейсы раздачи
     $ip rule add fwmark $WARP_MARK/$WARP_MARK lookup $WARP_TABLE pref $WARP_MARK_PREF
     # NAT и FORWARD
     $iptables -t nat -N "$CHAIN_WARP_NAT" 2>/dev/null; $iptables -t nat -F "$CHAIN_WARP_NAT"
-    $iptables -t nat -A "$CHAIN_WARP_NAT" -o $WARP_IF -j MASQUERADE
+    # warp+ — и warp0, и свой сервер после WARP (warp1, WARP_CHAIN)
+    $iptables -t nat -A "$CHAIN_WARP_NAT" -o warp+ -j MASQUERADE
     $iptables -t nat -C POSTROUTING -j "$CHAIN_WARP_NAT" 2>/dev/null || $iptables -t nat -I POSTROUTING 1 -j "$CHAIN_WARP_NAT"
     $iptables -N "$CHAIN_WARP_FWD" 2>/dev/null; $iptables -F "$CHAIN_WARP_FWD"
     for i in $tif; do
-        $iptables -A "$CHAIN_WARP_FWD" -i "$i" -o $WARP_IF -j ACCEPT
-        $iptables -A "$CHAIN_WARP_FWD" -i $WARP_IF -o "$i" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+        $iptables -A "$CHAIN_WARP_FWD" -i "$i" -o warp+ -j ACCEPT
+        $iptables -A "$CHAIN_WARP_FWD" -i warp+ -o "$i" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
     done
     $iptables -C FORWARD -j "$CHAIN_WARP_FWD" 2>/dev/null || $iptables -I FORWARD 1 -j "$CHAIN_WARP_FWD"
     # MSS: туда и обратно (SYN-ACK к телефону и клиентам)
@@ -953,10 +1005,217 @@ warp_routes_reconcile() {
     # при поднятом туннеле (Telegram/Google/домены в настройках; не адреса
     # доменов — те обновляются раз в 10 мин, и не раздача/uid) — путь сменился
     # только у сетей, что добавились или ушли: их и закрываем
-    if [ "$was" != "1" ]; then warp_kill_sockets "туннель поднят"
+    if [ "$was" != "1" ]; then warp_kill_sockets "$([ "$WARP_STATE" = up ] && echo 'туннель поднят' || echo 'блок: разметка без туннеля')"
     elif [ -n "$WARP_RT_GRP" ] && [ "$grp" != "$WARP_RT_GRP" ]; then
         warp_kill_sockets "сменились группы" "$(printf '%s\n%s\n' "$old" "$new" | grep . | sort | uniq -u)"
     fi
     WARP_RT_GRP="$grp"
     return 0
+}
+
+# ============================================================================
+# Свой сервер после WARP (WARP_CHAIN, 25.11): AmneziaWG к своему серверу внутри туннеля Cloudflare. ТСПУ видит
+# только WARP, свой сервер — подключения с адресов Cloudflare: бан адреса VPS «для России» (ноябрь 2026, статья
+# zapret.moe: «через WARP работает») цепочку не задевает. Стенд 25.11 (13T, YOTA, Vultr SG): выход SG,
+# 7–8 Мбит/с против 23 у одного WARP, RTT 333 против 121 мс, к серверу напрямую 0 пакетов.
+#  - warp1: имя warp* — detect_tun_name не берёт его за VPN телефона, правила «-o warp+» те же, что у warp0;
+#  - пакеты самого warp1 к серверу — правилом «to адрес -> WARP_TABLE», за ним «to адрес prohibit»: без warp0
+#    (таблица пуста) напрямую не уходят. Правила ставятся до запуска — первый же пакет рукопожатия через WARP;
+#  - что идёт в WARP (метка WARP_MARK) — при живой цепочке правилом выше WARP_MARK_PREF в свою таблицу;
+#    цепочка не поднялась или замолчала — правило снимается, всё снова через WARP (повтор через 2 мин).
+# Только поверх Cloudflare (WARP_CF=1) и только IPv4-адрес сервера. Конфиг цепочки WARP-ом не берётся (warp_conf_names).
+# ============================================================================
+WARP_CH_IF=warp1
+WARP_CH_TABLE=3995
+WARP_CH_EP_PREF=2970       # to сервер -> WARP_TABLE (default dev warp0)
+WARP_CH_NO_PREF=2971       # to сервер -> prohibit: warp0 нет — не напрямую
+WARP_CH_OIF_PREF=2976      # oif warp1 -> WARP_CH_TABLE (проверки, привязанные к warp1)
+WARP_CH_MARK_PREF=2977     # метка WARP -> WARP_CH_TABLE, раньше WARP_MARK_PREF (2979)
+WARP_CH_MTU=1200           # MTU warp0 1280 минус заголовки WireGuard (80)
+WARP_CH_MSS=1160
+WARP_CH_RETRY=120          # не поднялась / замолчала — повтор через 2 мин, дальше пауза растёт вдвое (до 30 мин):
+WARP_CH_WAIT=120           # подъём синхронный, у мёртвого сервера ~10–15 с, и цикл демона их стоит (ревью 25.11)
+WARP_CH_STATE=off          # off | up | fail
+WARP_CH_PID=""
+WARP_CH_NAME=""            # конфиг поднятой цепочки
+WARP_CH_EP=""              # адрес сервера (IPv4), для которого стоят правила
+WARP_CH_IP=""              # выход по trace
+WARP_CH_LOC=""
+WARP_CH_NOTE=""
+WARP_CH_FAILS=0
+WARP_CH_RETRY_TS=0
+WARP_CH_CHECK_TS=0
+# «Если выход не работает» (WARP_STRICT): запрет для метки WARP сразу за выходом, который защищаем. Выход жив —
+# трафик уходит в него раньше (правило выше), упал — его таблица пуста или правило снято, и трафик упирается в
+# запрет, а не идёт дальше: 2978 — за своим сервером (2977), до WARP (2979); 2981 — за WARP (2979/2980), до netd
+WARP_BLK_PREF_CH=2978
+WARP_BLK_PREF=2981
+WARP_BLK_LVL=""            # стоит: 0 — нет, 1 — не напрямую, 2 — только свой сервер; пусто — ещё не выставляли:
+                           # первый вызов снимает запреты, оставшиеся от убитого демона (ревью 25.11)
+WARP_LAST_UP=""            # конфиг, что поднимался последним (warp_stick_name)
+
+warp_block_set() {   # 0 | 1 | 2
+    local l="${1:-0}"
+    # без своего сервера после WARP «только свой» = «не напрямую»: основной WARP и есть свой (напрямую) или Cloudflare
+    [ "$l" = 2 ] && [ -z "$WARP_CHAIN" ] && l=1
+    [ "$l" = "$WARP_BLK_LVL" ] && return 0
+    $ip rule del fwmark $WARP_MARK/$WARP_MARK prohibit pref $WARP_BLK_PREF_CH 2>/dev/null
+    $ip rule del fwmark $WARP_MARK/$WARP_MARK prohibit pref $WARP_BLK_PREF 2>/dev/null
+    [ "$l" -ge 1 ] && $ip rule add fwmark $WARP_MARK/$WARP_MARK prohibit pref $WARP_BLK_PREF 2>/dev/null
+    [ "$l" = 2 ] && $ip rule add fwmark $WARP_MARK/$WARP_MARK prohibit pref $WARP_BLK_PREF_CH 2>/dev/null
+    case "$l" in
+        0) case "$WARP_BLK_LVL" in 1|2) log "WARP: блок снят — без выхода то, что идёт в WARP, идёт напрямую" ;; esac ;;
+        1) log "WARP: блок — WARP не работает, и то, что идёт в WARP, не пускаю напрямую (WARP_STRICT=1)" ;;
+        2) log "WARP: блок — только через свой сервер ($WARP_CHAIN): не отвечает он или WARP — не пускаю (WARP_STRICT=2)" ;;
+    esac
+    WARP_BLK_LVL=$l
+    phone_status_refresh
+}
+
+warp_chain_down() {   # [причина] — пусто: молча
+    local was="$WARP_CH_STATE" k _n
+    # сначала в WARP — то, что шло через цепочку; потом процесс; правила к серверу — последними
+    $ip rule del fwmark $WARP_MARK/$WARP_MARK lookup $WARP_CH_TABLE pref $WARP_CH_MARK_PREF 2>/dev/null
+    [ -n "$WARP_CH_PID" ] && kill "$WARP_CH_PID" 2>/dev/null
+    $ip link del $WARP_CH_IF 2>/dev/null
+    $ip rule del oif $WARP_CH_IF lookup $WARP_CH_TABLE pref $WARP_CH_OIF_PREF 2>/dev/null
+    $ip route flush table $WARP_CH_TABLE 2>/dev/null
+    # по pref, а не по адресу: после убитого демона адреса прошлого запуска не знаем
+    for k in $WARP_CH_EP_PREF $WARP_CH_NO_PREF; do
+        _n=0; while [ $_n -lt 8 ] && $ip rule del pref $k 2>/dev/null; do _n=$((_n + 1)); done
+    done
+    $iptables -t mangle -D POSTROUTING -o $WARP_CH_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $WARP_CH_MSS 2>/dev/null
+    $iptables -t mangle -D PREROUTING -i $WARP_CH_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $WARP_CH_MSS 2>/dev/null
+    rm -f "$WARP_SOCK_DIR/$WARP_CH_IF.sock"
+    if [ "$was" = up ]; then
+        # имя — поднятого: при выключении в настройках WARP_CHAIN уже пуст
+        [ -n "$1" ] && log "WARP: свой сервер после WARP ($WARP_CH_NAME) снят ($1) — что шло через него, снова через WARP"
+        # соединения через warp1 после снятия молча висели бы до тайм-аута приложения (как у warp_routes_off)
+        warp_kill_sockets "свой сервер снят"
+    fi
+    # «не поднялась» держим: иначе каждое переподключение WARP (warp_down) сбрасывало паузу, и мёртвый сервер
+    # пробовался сразу после подъёма — 25.11 четыре попытки по 10 с за 2 мин (WARP переподнимался из-за Telegram)
+    WARP_CH_PID=""; WARP_CH_EP=""; WARP_CH_FAILS=0; WARP_CH_IP=""; WARP_CH_LOC=""
+    [ "$WARP_CH_STATE" = fail ] || WARP_CH_STATE=off
+}
+
+warp_chain_fail() {   # заметка — в журнал один раз, пока она та же
+    [ "$WARP_CH_NOTE" = "$1" ] || log "WARP: свой сервер после WARP ($WARP_CHAIN) — $1; что идёт в WARP, идёт через WARP, повтор через $((WARP_CH_WAIT / 60)) мин"
+    WARP_CH_STATE=fail; WARP_CH_NOTE="$1"; WARP_CH_RETRY_TS=$(( $(date +%s) + WARP_CH_WAIT ))
+    WARP_CH_WAIT=$((WARP_CH_WAIT * 2)); [ "$WARP_CH_WAIT" -gt 1800 ] && WARP_CH_WAIT=1800
+    phone_status_refresh
+}
+
+# Живость: trace Cloudflare (ip= — адрес выхода), иначе любой ответ, как у своего сервера в warp_probe
+warp_chain_probe() {
+    local cmd="$CURL_BIN -s -k -m 6 --interface $WARP_CH_IF https://1.1.1.1/cdn-cgi/trace" out a
+    if [ "$WARP_SU_G" = "1" ]; then out=$($SUG_CMD "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else out=$(eval "$cmd" 2>/dev/null); fi
+    WARP_CH_IP=$(echo "$out" | sed -n 's/^ip=//p' | head -1); WARP_CH_LOC=$(echo "$out" | sed -n 's/^loc=//p' | head -1)
+    [ -n "$WARP_CH_IP" ] && return 0
+    for a in 8.8.8.8 140.82.121.3; do
+        cmd="$CURL_BIN -s -k -m 4 -o /dev/null -w %{http_code} --interface $WARP_CH_IF https://$a/"
+        if [ "$WARP_SU_G" = "1" ]; then out=$($SUG_CMD "$DNSPROXY_GID" -c "$cmd" 2>/dev/null); else out=$(eval "$cmd" 2>/dev/null); fi
+        case "$out" in ''|000) ;; *) return 0 ;; esac
+    done
+    return 1
+}
+
+warp_chain_up() {
+    local f="$WARP_DIR/$WARP_CHAIN.conf" ep host port a mtu i=0 rc hs=0 pk
+    [ -f "$f" ] || { warp_chain_fail "нет конфига"; return 1; }
+    ep=$(sed -n 's/^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*//p' "$f" | head -1 | tr -d ' \r')
+    host=${ep%:*}; port=${ep##*:}
+    # имя — в адрес заранее: правила ставятся на адрес, а awg резолвил бы сам (и мог получить другой)
+    case "$host" in *[!0-9.]*) host=$(ping -c 1 -W 2 "$host" 2>/dev/null | sed -n '1s/^PING [^(]*(\([0-9.]*\)).*/\1/p') ;; esac
+    case "$host" in [0-9]*.[0-9]*.[0-9]*.[0-9]*) ;; *) warp_chain_fail "адрес сервера не IPv4 ($ep)"; return 1 ;; esac
+    case "$port" in ''|*[!0-9]*) warp_chain_fail "нет порта в Endpoint"; return 1 ;; esac
+    WARP_CH_EP="$host"
+    # без этих двух правил рукопожатие при упавшем WARP ушло бы к серверу напрямую — ради чего всё и делается:
+    # не встали (ip без prohibit, занят pref) — не запускаем вовсе
+    if ! $ip rule add to "$host" lookup $WARP_TABLE pref $WARP_CH_EP_PREF 2>/dev/null || \
+       ! $ip rule add to "$host" prohibit pref $WARP_CH_NO_PREF 2>/dev/null; then
+        warp_chain_down; warp_chain_fail "не встали правила «к серверу только через WARP» — не запускаю"; return 1
+    fi
+    WG_PROCESS_FOREGROUND=1 "$AWG_GO_BIN" "$WARP_CH_IF" > "$WARP_RUN.chain.log" 2>&1 < /dev/null &
+    WARP_CH_PID=$!
+    while [ $i -lt 50 ] && [ ! -S "$WARP_SOCK_DIR/$WARP_CH_IF.sock" ]; do sleep 0.1; i=$((i + 1)); done
+    if [ ! -S "$WARP_SOCK_DIR/$WARP_CH_IF.sock" ]; then warp_chain_down; warp_chain_fail "amneziawg-go не запустился"; return 1; fi
+    warp_wg_file "$f" "$host:$port"
+    "$AWG_BIN" setconf "$WARP_CH_IF" "$WARP_DIR/.run.wg" >> "$WARP_RUN.chain.log" 2>&1; rc=$?
+    rm -f "$WARP_DIR/.run.wg"
+    if [ $rc != 0 ]; then warp_chain_down; warp_chain_fail "конфиг не принят (awg setconf)"; return 1; fi
+    # keepalive: соединение через WARP к серверу держит NAT Cloudflare, без него после тишины рукопожатие заново
+    for pk in $("$AWG_BIN" show "$WARP_CH_IF" peers 2>/dev/null); do "$AWG_BIN" set "$WARP_CH_IF" peer "$pk" persistent-keepalive 25 2>/dev/null; done
+    for a in $(sed -n 's/^[[:space:]]*Address[[:space:]]*=//p' "$f" | tr ',' ' '); do
+        case "$a" in *:*) $ip -6 addr add "$a" dev $WARP_CH_IF 2>/dev/null ;; *.*) $ip addr add "$a" dev $WARP_CH_IF 2>/dev/null ;; esac
+    done
+    mtu=$(sed -n 's/^[[:space:]]*MTU[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$f" | head -1)
+    [ -n "$mtu" ] && [ "$mtu" -lt "$WARP_CH_MTU" ] || mtu=$WARP_CH_MTU
+    $ip link set $WARP_CH_IF mtu "$mtu" up 2>/dev/null
+    echo 2 > /proc/sys/net/ipv4/conf/$WARP_CH_IF/rp_filter 2>/dev/null
+    $ip route replace default dev $WARP_CH_IF table $WARP_CH_TABLE 2>/dev/null
+    $ip rule add oif $WARP_CH_IF lookup $WARP_CH_TABLE pref $WARP_CH_OIF_PREF 2>/dev/null
+    # рукопожатие — до ~10 с (стенд: сразу); пинг его будит
+    i=0
+    while [ $i -lt 10 ]; do
+        hs=$("$AWG_BIN" show "$WARP_CH_IF" latest-handshakes 2>/dev/null | awk '{ print $2; exit }')
+        [ "${hs:-0}" -gt 0 ] && break
+        ping -c 1 -W 1 -I $WARP_CH_IF 1.1.1.1 >/dev/null 2>&1; i=$((i + 1))
+    done
+    if [ "${hs:-0}" -le 0 ]; then warp_chain_down; warp_chain_fail "нет рукопожатия с $host через WARP"; return 1; fi
+    if ! warp_chain_probe; then warp_chain_down; warp_chain_fail "рукопожатие есть, трафика нет"; return 1; fi
+    $iptables -t mangle -I POSTROUTING 1 -o $WARP_CH_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $WARP_CH_MSS 2>/dev/null
+    $iptables -t mangle -I PREROUTING 1 -i $WARP_CH_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $WARP_CH_MSS 2>/dev/null
+    $ip rule add fwmark $WARP_MARK/$WARP_MARK lookup $WARP_CH_TABLE pref $WARP_CH_MARK_PREF 2>/dev/null
+    WARP_CH_STATE=up; WARP_CH_FAILS=0; WARP_CH_CHECK_TS=$(date +%s); WARP_CH_NOTE=""; WARP_CH_WAIT=$WARP_CH_RETRY; WARP_CH_NAME="$WARP_CHAIN"
+    log "WARP: после WARP — свой сервер $WARP_CHAIN ($host): выход ${WARP_CH_IP:-?}${WARP_CH_LOC:+, $WARP_CH_LOC}; напрямую к серверу ничего не идёт"
+    # что уже шло через WARP — переподключится через цепочку
+    warp_kill_sockets "свой сервер поднят"
+    phone_status_refresh
+}
+
+# Из warp_reconcile, пока WARP поднят
+warp_chain_reconcile() {
+    local now n
+    if [ -z "$WARP_CHAIN" ]; then
+        [ "$WARP_CH_STATE" = off ] || warp_chain_down "выключено"
+        WARP_CH_NOTE=""; WARP_CH_STATE=off
+        return 0
+    fi
+    # WARP поднят на своём сервере, а не на Cloudflare: цепочка «свой поверх своего» ничего не прячет —
+    # не поднимаем, но говорим почему (иначе WebUI вечно «ждёт WARP», ревью 25.11)
+    if [ "$WARP_CF" != 1 ]; then
+        [ "$WARP_CH_STATE" = up ] && warp_chain_down "WARP не Cloudflare"
+        n="только поверх WARP Cloudflare, а сейчас поднят $WARP_CUR"
+        if [ "$WARP_CH_NOTE" != "$n" ]; then
+            log "WARP: свой сервер после WARP ($WARP_CHAIN) — $n: не запускаю"
+            WARP_CH_NOTE="$n"; WARP_CH_STATE=fail; WARP_CH_RETRY_TS=0
+            phone_status_refresh
+        fi
+        return 0
+    fi
+    now=$(date +%s)
+    case "$WARP_CH_STATE" in
+        off) warp_chain_up ;;
+        fail) [ "$now" -ge "$WARP_CH_RETRY_TS" ] && warp_chain_up ;;
+        up)
+            if { [ -n "$WARP_CH_PID" ] && ! kill -0 "$WARP_CH_PID" 2>/dev/null; } || [ ! -d /sys/class/net/$WARP_CH_IF ]; then
+                warp_chain_down "туннель пропал"   # следующий проход поднимет заново
+                return 0
+            fi
+            [ $((now - WARP_CH_CHECK_TS)) -lt $WARP_CHECK_SECS ] && return 0
+            WARP_CH_CHECK_TS=$now
+            # netd мог перетряхнуть правила
+            $ip rule show 2>/dev/null | grep -q "^$WARP_CH_MARK_PREF:" || \
+                $ip rule add fwmark $WARP_MARK/$WARP_MARK lookup $WARP_CH_TABLE pref $WARP_CH_MARK_PREF 2>/dev/null
+            if warp_chain_probe; then
+                [ $WARP_CH_FAILS -gt 0 ] && log "WARP: свой сервер после WARP ($WARP_CHAIN) снова отвечает"
+                WARP_CH_FAILS=0
+            else
+                WARP_CH_FAILS=$((WARP_CH_FAILS + 1))
+                WARP_CH_CHECK_TS=$((now - WARP_CHECK_SECS + 10))
+                log "WARP: свой сервер после WARP ($WARP_CHAIN) не отвечает ($WARP_CH_FAILS/3)"
+                if [ $WARP_CH_FAILS -ge 3 ]; then warp_chain_down "не отвечает"; warp_chain_fail "не отвечал 3 проверки подряд"; fi
+            fi ;;
+    esac
 }

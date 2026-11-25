@@ -1037,6 +1037,8 @@ ZAPRET_AUTO_FAIL=3
 # телефоне не поднят; не отвечает — следующий конфиг.
 WARP_ENABLE=0
 WARP_CONF=""            # предпочтительный конфиг (имя); пусто — по порядку
+WARP_CHAIN=""           # свой сервер после WARP (имя своего конфига): AmneziaWG к нему внутри туннеля Cloudflare —
+                        # ТСПУ видит только WARP (lib/warp.sh, warp_chain_*); пусто — выкл
 # Что пускать в WARP (только по адресам самих сервисов, не общих CDN):
 WARP_GOOGLE=0           # сети Google (goog.json) — в «волны» ТСПУ
 WARP_TELEGRAM=1         # сети Telegram (заблокирован по IP)
@@ -1053,6 +1055,9 @@ OPERA_DOMAINS="!4pda.to app.4pda.to"   # домены через пробел, �
 WARP_DOMAINS=""         # домены; их адреса на Cloudflare/Akamai/Fastly/CloudFront — мимо
 WARP_PHONE=1            # группы — и для приложений телефона, не только раздачи
 WARP_TETHER=1           # группы — и для раздачи (0 — WARP только телефону)
+WARP_STRICT=0           # выход не работает: 0 — запасной путь (свой сервер -> WARP -> напрямую), 1 — не напрямую
+                        # (WARP упал — то, что идёт в WARP, блокируется), 2 — только свой сервер (WARP_CHAIN упал — тоже блок)
+WARP_STICK=0            # 1 — не менять сервер: только основной (WARP_CONF), замолчал — он же заново
 # Скрыть раздачу от оператора (3.2; раньше — модуль tether_unblock).
 #  - net.tethering.noprovisioning: Android не спрашивает оператора, можно ли
 #    раздавать (иначе оператор может не дать включить точку или оборвать);
@@ -1145,7 +1150,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_GEO_STRICT|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         DNS_VIA_ZAPRET|ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_QUIC_FAKE|QUIC_BLOCK_YT|QUIC_YT_FAKE|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|YT_WSSIZE_RAMP|ZAPRET_WATCHDOG|ZAPRET_AUTOPICK|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER)
+        OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|YT_WSSIZE_RAMP|ZAPRET_WATCHDOG|ZAPRET_AUTOPICK|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER|WARP_STICK)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
@@ -1164,7 +1169,8 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
         ZAPRET2_ARGS)    zapret2_args_valid "$val" || ok=0 ;;
         ZAPRET2_FAKE_SNI) case "$val" in *[!a-z0-9.-]*|.*|*.) ok=0 ;; esac
             [ ${#val} -le 100 ] || ok=0 ;;
-        WARP_CONF)       # имя конфига, как в warp/warp.sh; пусто — по порядку
+        WARP_STRICT) case "$val" in 0|1|2) ;; *) ok=0 ;; esac ;;
+        WARP_CONF|WARP_CHAIN)  # имя конфига, как в warp/warp.sh; пусто — по порядку / выкл
             case "$val" in *[!A-Za-z0-9_.-]*|.*) ok=0 ;; esac
             [ ${#val} -le 40 ] || ok=0 ;;
         ZAPRET_STRATEGY) zapret_strategy_valid "$val" || ok=0 ;;
@@ -1233,7 +1239,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_GEO_UPSTREAMS DNS_GEO_DOMAINS DNS_GEO_STRICT DNS_GEO_MODE DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET2_FAKE_SNI ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS DNS_VIA_ZAPRET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_WSSIZE_RAMP YT_RAMP_HOURS YT_RETRY_MAX ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_GEO_UPSTREAMS DNS_GEO_DOMAINS DNS_GEO_STRICT DNS_GEO_MODE DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET2_FAKE_SNI ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS DNS_VIA_ZAPRET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_WSSIZE_RAMP YT_RAMP_HOURS YT_RETRY_MAX ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_CHAIN WARP_STRICT WARP_STICK WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 # Убранные ключи: в старом конфиге — молча мимо, без «неизвестный ключ» (15.11)
 CONF_RETIRED="YT_DEAD_WARP YT_SLOW_RETRY"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)

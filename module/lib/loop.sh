@@ -233,7 +233,7 @@ reload_config() {
     _conf_grp_sig s_op0 $CONF_GRP_OPERA
     _conf_grp_sig s_wp0 $CONF_GRP_WARP
     _conf_grp_sig s_wr0 $CONF_GRP_WARPR
-    local s_tgw0="$WARP_ENABLE$WARP_TELEGRAM" s_api0="$OPERA_API_PROXY|$OPERA_COUNTRY"
+    local s_tgw0="$WARP_ENABLE$WARP_TELEGRAM" s_api0="$OPERA_API_PROXY|$OPERA_COUNTRY" s_wc0="$WARP_CHAIN" s_wk0="$WARP_STRICT|$WARP_STICK"
     conf_restore_defaults
     USER_CONF_NOTE=""
     load_user_conf
@@ -264,6 +264,8 @@ reload_config() {
     [ "$s_st0" != "$s_st1" ] && what="$what скрытие-раздачи"
     [ "$s_wp0" != "$s_wp1" ] && what="$what WARP"
     [ "$s_wr0" != "$s_wr1" ] && what="$what что-идёт-в-WARP"
+    [ "$s_wc0" != "$WARP_CHAIN" ] && what="$what свой-сервер-после-WARP"
+    [ "$s_wk0" != "$WARP_STRICT|$WARP_STICK" ] && what="$what блок-WARP/не-менять-сервер"
     [ "$s_api0" != "$OPERA_API_PROXY|$OPERA_COUNTRY" ] && what="$what Opera"
     log "Настройки перечитаны:${USER_CONF_NOTE:- (всё по умолчанию)}"
     log "Применяю:${what:- ничего не поменялось}$([ "$RELOAD_NEED_REBUILD" = 1 ] && echo ' — пересборка правил раздачи' || echo ' — без пересборки раздачи')"
@@ -317,6 +319,20 @@ reload_config() {
         WARP_BAD=""; WARP_EP_FULL=0; WARP_RETRY_TS=0; WARP_ENSURE_DONE=0
         warp_set_state off ""
     fi
+    if [ "$s_wc0" != "$WARP_CHAIN" ]; then
+        # свой сервер после WARP: сам WARP не трогаем — снять цепочку, сторож поднимет заново (ревью 25.11: в группе
+        # WARP кнопка «После WARP» переподключала весь туннель). Цепочкой стал конфиг, на котором сейчас поднят
+        # WARP, — его WARP-ом больше не берут: WARP заново, на Cloudflare
+        warp_chain_down "настройки"
+        WARP_CH_STATE=off; WARP_CH_NOTE=""; WARP_CH_WAIT=$WARP_CH_RETRY; WARP_CH_RETRY_TS=0
+        if [ -n "$WARP_CHAIN" ] && [ "$WARP_CUR" = "$WARP_CHAIN" ]; then
+            warp_down "конфиг стал своим сервером после WARP"; WARP_BAD=""; WARP_RETRY_TS=0; warp_set_state off ""
+        fi
+        phone_status_refresh
+    fi
+    # блок и «не менять сервер»: туннель не трогаем — правила запрета выставит сторож (warp_block_set), а «плохие»
+    # с нуля, чтобы основной при «не менять» брался сразу
+    [ "$s_wk0" != "$WARP_STRICT|$WARP_STICK" ] && WARP_BAD=""
     if [ "$s_wr0" != "$s_wr1" ]; then
         # группы: туннель не трогаем, правила пересоберёт сторож (~2с)
         WARP_RT_SIG=""; WARP_DOM_TS=0; WARP_DOM_IPS=""; WARP_APP_TS=0
