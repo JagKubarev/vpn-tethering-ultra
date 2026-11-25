@@ -22,9 +22,10 @@ QUIC_YT_PKGS="com.android.vending com.google.android.youtube com.google.android.
 quic_yt_pkgs() {   # установленные клиенты YouTube (при QUIC_BLOCK_YT=1), не из ручного списка
     local p
     [ "$QUIC_BLOCK_YT" = "1" ] || return 0
-    for p in $QUIC_YT_PKGS; do
+    # сверка с ручным списком — после клонов: основной там, а клон pkg@N — нет, ему подделка своя
+    for p in $(pkg_with_clones $QUIC_YT_PKGS); do
         case " $QUIC_BLOCK_APPS " in *" $p "*) continue ;; esac
-        pkg_with_clones "$p"
+        echo "$p"
     done | tr '\n' ' '
 }
 

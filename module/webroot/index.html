@@ -2134,7 +2134,7 @@ async function loadApps0() {
       } catch (e) { /* только пользовательские, как раньше */ }
       let info = [];
       if (typeof ksu.getPackagesInfo === 'function') info = JSON.parse(ksu.getPackagesInfo(JSON.stringify(Array.from(new Set(pkgs.map(appBase))))));
-      list = pkgs.map((p) => { const i = info.find((x) => x.packageName === appBase(p)); return { pkg: p, label: i && i.appLabel ? i.appLabel + cloneTag(p) : p }; });
+      list = pkgs.map((p) => { const i = info.find((x) => x.packageName === appBase(p)); return { pkg: p, label: (i && i.appLabel ? i.appLabel : appBase(p)) + cloneTag(p) }; });
     }
   } catch (e) { list = []; }
   if (!list.length) {
@@ -3014,7 +3014,8 @@ function z2ProfSites(c) {
   (' ' + c.replace(/^\s*NFQWS_ARGS_CUSTOM=/, '').replace(/"/g, ' ')).split(/\s--new(?=\s|$)/).forEach((pr) => {
     // только профили для сайтов (TCP 80/443): Discord-голос на своих портах и UDP не в счёт
     const ft = /--filter-tcp=(\S+)/.exec(pr);
-    if (!ft || !/(^|,)(80|443)(,|$)|-/.test(ft[1])) return;
+    const has = (port) => ft[1].split(',').some((x) => { const [a, b] = x.split('-').map(Number); return b === undefined ? a === port : a <= port && port <= b; });
+    if (!ft || !(has(80) || has(443))) return;
     const re = /--(hostlist|hostlist-domains|ipset)=(\S+)/g;
     let m;
     while ((m = re.exec(pr))) {
@@ -3026,17 +3027,25 @@ function z2ProfSites(c) {
   });
   return out;
 }
-async function loadZ2Kind() {
-  if (Z2KIND) return;
-  Z2KIND = {};
-  try {
-    const r = await ctlBg('z2-kinds');
-    r.out.split('\n').forEach((l) => { const i = l.indexOf('\t'); if (i > 0) Z2KIND[l.slice(0, i)] = z2ProfSites(l.slice(i + 1)); });
-  } catch (e) { /* без вида */ }
+// одна загрузка на все вызовы scRefresh (кнопка и таймер почти одновременно); Z2KIND — только
+// после разбора ответа, сбой или пустой ответ — снова при следующем обновлении
+let Z2KIND_P = null;
+function loadZ2Kind() {
+  if (Z2KIND) return Promise.resolve();
+  if (!Z2KIND_P) {
+    Z2KIND_P = (async () => {
+      try {
+        const r = await ctlBg('z2-kinds'), k = {};
+        r.out.split('\n').forEach((l) => { const i = l.indexOf('\t'); if (i > 0) k[l.slice(0, i)] = z2ProfSites(l.slice(i + 1)); });
+        if (Object.keys(k).length) Z2KIND = k;
+      } catch (e) { /* без вида */ }
+    })().finally(() => { Z2KIND_P = null; });
+  }
+  return Z2KIND_P;
 }
 function z2KindText(a) {
-  // пусто — команда не ответила: не выдумываем «общая» всем
-  if (!/^z2:/.test(a || '') || !Z2KIND || !Object.keys(Z2KIND).length) return '';
+  // нет ответа команды — без строки вида: не выдумываем «общая» всем
+  if (!/^z2:/.test(a || '') || !Z2KIND) return '';
   const l = Z2KIND[a.slice(3)] || [];
   return l.length ? 'общая + свои профили: ' + l.join(', ') : 'общая: один набор приёмов на все сайты';
 }

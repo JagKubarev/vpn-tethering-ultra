@@ -215,7 +215,7 @@ WARP_APPS=org.telegram.messenger@999
 В списках приложений (`QUIC_BLOCK_APPS`, `WARP_APPS`, `OPERA_APPS`, `ZAPRET_EXCL_APPS`)
 клон — отдельная строка «(клон)»: в конфиге `пакет@N`, где N — пользователь
 (999 — клоны OnePlus/OPPO/Xiaomi). Основное приложение и клон выбираются независимо.
-Клиенты Telegram при `WARP_TELEGRAM=1` идут в WARP вместе с клонами.
+Клиенты Telegram при `WARP_TELEGRAM=1` и `WARP_PHONE=1` идут в WARP вместе с клонами.
 
 ## Как устроен обход DPI
 
