@@ -349,10 +349,12 @@ case "$1" in
         ASH_STANDALONE=1 setsid "$BB" sh "$MODDIR/service.sh" </dev/null >/dev/null 2>&1 &
         n=0
         while [ $n -lt 30 ]; do sleep 1; n=$((n + 1)); [ -n "$(daemon_pid)" ] && { echo "OK"; exit 0; }; done
-        # не встал — перенаправление DNS телефона, оставленное на перезапуск, снять: иначе телефон совсем без DNS
+        # не встал — то, что оставлено на перезапуск, снять: перенаправление DNS телефона (иначе телефон совсем без DNS)
+        # и запрет WARP (warp_block_set, pref 2978/2981: иначе то, что размечено в WARP, упиралось бы в него до запуска)
         for t in /system/bin/iptables /system/bin/ip6tables; do
             n=0; while [ $n -lt 8 ] && $t -w 2 -t nat -D OUTPUT -j VPN_PHONE_DNS 2>/dev/null; do n=$((n + 1)); done
         done
+        for k in 2978 2981; do /system/bin/ip rule del pref $k 2>/dev/null; done
         echo "ERR демон не запустился — смотрите журнал"; exit 1
         ;;
     update)     # есть ли версия новее: update.json из main (тот же, что у менеджера модулей) раз в 6 ч, иначе прежний ответ.

@@ -23,8 +23,6 @@ WARP_WL_RETRY=300        # то же при белом списке операт
 WARP_STATE=off           # off | starting | up | fail
 WARP_CUR=""              # конфиг в работе
 WARP_PID=""
-WARP_RESTART_FLAG=/data/local/tmp/vpn_tether_restart   # webctl restart: блок WARP и DNS телефона на выходе не снимать
-restart_flag_fresh() { [ -n "$(find "$WARP_RESTART_FLAG" -mmin -1 2>/dev/null)" ]; }
 WARP_CH_ADDR=""          # адрес warp1 (своего сервера после WARP) — для запрета «адрес туннеля мимо туннеля»
 CHAIN_WARP_SRC=VPN_WARP_SRC
 WARP_TS=0                # когда запущен / поднялся
@@ -938,21 +936,37 @@ warp_kill_sockets() {   # причина [сети — по умолчанию �
     if [ "$WARP_PHONE" = "1" ]; then
         for m in $nets; do f="$f${f:+ or }dst $m"; done
         # shellcheck disable=SC2086
-        [ -n "$f" ] && n=$(ss -K -tn state established state syn-sent "( $f )" 2>/dev/null | awk 'NR > 1' | grep -c .)
+        if [ -n "$f" ] && [ -n "$WARP_KILL_KEEP" ]; then
+            # смена своего сервера: у приложений мимо него путь не менялся — по одному, кроме их uid
+            n=$(warp_kill_each "( $f )" "" "$WARP_KILL_KEEP")
+        elif [ -n "$f" ]; then
+            n=$(ss -K -tn state established state syn-sent "( $f )" 2>/dev/null | awk 'NR > 1' | grep -c .)
+        fi
     fi
     [ "$3" = "-" ] || k=$(warp_kill_app_sockets)
     [ "$((${n:-0} + ${k:-0}))" -gt 0 ] && log "WARP: закрыто соединений телефона к адресам из WARP: ${n:-0}$([ "${k:-0}" -gt 0 ] && echo ", приложений целиком: $k") ($1) — приложения переподключатся сразу"
     return 0
 }
 
-# Сокеты приложений целиком (uid из WARP_APP_UIDS) — по одному: ss по uid не фильтрует, но показывает его (-e).
+# Сокеты приложений целиком (uid из WARP_APP_UIDS, кроме WARP_KILL_KEEP — мимо своего сервера при его смене).
 # Печатает, сколько закрыто
 warp_kill_app_sockets() {
+    local u="" k
+    for k in $WARP_APP_UIDS; do case " $WARP_KILL_KEEP " in *" $k "*) ;; *) u="$u $k" ;; esac; done
+    [ -n "$u" ] && command -v ss >/dev/null 2>&1 || { echo 0; return 0; }
+    warp_kill_each "" "${u# }" ""
+}
+
+# Сокеты по одному: ss -K по uid не фильтрует, но показывает его (-e). Фильтр ss (пусто — все), только эти uid
+# (пусто — любые), кроме этих uid. Печатает, сколько закрыто
+warp_kill_each() {   # "фильтр" "только uid" "кроме uid"
     local l lp p a n=0
-    [ -n "$WARP_APP_UIDS" ] && command -v ss >/dev/null 2>&1 || { echo 0; return 0; }
-    # два состояния — с колонкой State: $4 свой адрес, $5 чужой
-    for l in $(ss -tne state established state syn-sent 2>/dev/null | awk -v u=" $WARP_APP_UIDS " 'NR > 1 {
-            for (i = 6; i <= NF; i++) if ($i ~ /^uid:/ && index(u, " " substr($i, 5) " ")) { print $4 "|" $5; break } }'); do
+    command -v ss >/dev/null 2>&1 || { echo 0; return 0; }
+    # два состояния — с колонкой State: $4 свой адрес, $5 чужой; фильтр — словами (ss их склеит)
+    # shellcheck disable=SC2086
+    for l in $(ss -tne state established state syn-sent $1 2>/dev/null | awk -v o=" $2 " -v x=" $3 " 'NR > 1 {
+            u = "-"; for (i = 6; i <= NF; i++) if ($i ~ /^uid:/) { u = substr($i, 5); break }
+            if ((o == "  " || index(o, " " u " ")) && !index(x, " " u " ")) print $4 "|" $5 }'); do
         lp=${l%%|*}; p=${l#*|}
         a=${p%:*}; a=${a#[}; a=${a%]}
         ss -K -tn state established state syn-sent dst "$a" dport = ":${p##*:}" sport = ":${lp##*:}" 2>/dev/null | \
@@ -1192,7 +1206,11 @@ WARP_CH_NO_PREF=2971       # to сервер -> prohibit: warp0 нет — не 
 WARP_CH_OIF_PREF=2976      # oif warp1 -> WARP_CH_TABLE (проверки, привязанные к warp1)
 WARP_CH_MARK_PREF=2977     # метка WARP -> WARP_CH_TABLE, раньше WARP_MARK_PREF (2979)
 WARP_CH_SKIP_PREF=2975     # uid из WARP_CHAIN_SKIP + метка WARP -> WARP_TABLE: мимо своего сервера, раньше 2977
-WARP_CH_SKIP_ON=""         # «set:<список>» — правила мимо своего сервера стоят для этого списка; пусто — не стоят
+WARP_CH_SKIP_ON=""         # «<список>|<uid>» — правила мимо своего сервера стоят для них; пусто — не стоят
+WARP_CH_SKIP_UIDS=""       # uid этих правил: их сокеты при смене своего сервера не трогаем (путь не менялся)
+WARP_CH_SKIP_TS=0          # uid пересчитываем раз в 30 с: переустановка меняет uid (как WARP_APP_TS)
+WARP_CH_SKIP_WARN=""       # отказ ip rule uidrange — в журнал один раз
+WARP_KILL_KEEP=""          # warp_kill_sockets: uid, чьи сокеты не трогать (на время вызова)
 WARP_CH_MTU=1200           # MTU warp0 1280 минус заголовки WireGuard (80)
 WARP_CH_MSS=1160
 WARP_CH_RETRY=120          # не поднялась / замолчала — повтор через 2 мин, дальше пауза растёт вдвое (до 30 мин):
@@ -1240,25 +1258,42 @@ warp_block_set() {   # 0 | 1 | 2
 # раньше правила цепочки (2977) и её запрета (2978): держим, пока WARP поднят и свой сервер задан, — и когда он не
 # отвечает: при WARP_STRICT=2 иначе и эти приложения упирались бы в запрет, хотя WARP жив. WARP упал — его таблица
 # пуста, и дальше как у всех: при WARP_STRICT 1/2 — запрет (2978/2981). Только IPv4 — как и правило цепочки
-warp_chain_skip_set() {   # [-] — только снять
-    local p u _n=0
-    while [ $_n -lt 64 ] && $ip rule del pref $WARP_CH_SKIP_PREF 2>/dev/null; do _n=$((_n + 1)); done
-    WARP_CH_SKIP_ON=""
-    [ "$1" = - ] && return 0
-    WARP_CH_SKIP_ON="set:$WARP_CHAIN_SKIP"
+warp_chain_skip_uids() {
+    local p u out=""
     for p in $WARP_CHAIN_SKIP; do
         u=$(pkg_uid "$p")
         case "$u" in ''|*[!0-9]*) continue ;; esac
         [ "$u" -ge 10000 ] || continue
-        $ip rule add uidrange "$u-$u" fwmark $WARP_MARK/$WARP_MARK lookup $WARP_TABLE pref $WARP_CH_SKIP_PREF 2>/dev/null
+        case " $out " in *" $u "*) ;; *) out="$out $u" ;; esac
     done
+    echo "${out# }"
+}
+warp_chain_skip_set() {   # [- — только снять | uid, уже посчитанные]
+    local u uids _n=0
+    while [ $_n -lt 64 ] && $ip rule del pref $WARP_CH_SKIP_PREF 2>/dev/null; do _n=$((_n + 1)); done
+    WARP_CH_SKIP_ON=""; WARP_CH_SKIP_UIDS=""
+    [ "$1" = - ] && return 0
+    if [ $# -gt 0 ]; then uids=$1; else uids=$(warp_chain_skip_uids); fi
+    for u in $uids; do
+        $ip rule add uidrange "$u-$u" fwmark $WARP_MARK/$WARP_MARK lookup $WARP_TABLE pref $WARP_CH_SKIP_PREF 2>/dev/null && continue
+        # ядро или ip без uidrange — список молча не действовал бы
+        [ -n "$WARP_CH_SKIP_WARN" ] || log "WARNING: WARP: правило по uid ($u) не встало — «мимо своего сервера» не работает (ip rule uidrange)"
+        WARP_CH_SKIP_WARN=1
+    done
+    WARP_CH_SKIP_ON="$WARP_CHAIN_SKIP|$uids"; WARP_CH_SKIP_UIDS="$uids"; WARP_CH_SKIP_TS=$(date +%s)
 }
 
 warp_chain_down() {   # [причина] — пусто: молча
-    local was="$WARP_CH_STATE" k _n
+    local was="$WARP_CH_STATE" k _n keep="$WARP_CH_SKIP_UIDS"
     # сначала в WARP — то, что шло через цепочку; потом процесс; правила к серверу — последними
     $ip rule del fwmark $WARP_MARK/$WARP_MARK lookup $WARP_CH_TABLE pref $WARP_CH_MARK_PREF 2>/dev/null
-    warp_chain_skip_set -
+    # мимо своего сервера: при сбое (молча — неудачный подъём, «туннель пропал», «не отвечает») правила держим — WARP
+    # жив, и при WARP_STRICT=2 эти приложения иначе на время упирались бы в запрет (26.11: ~3 с на каждый сбой);
+    # снимаем, когда свой сервер выключен, сменён или снят WARP. Пусто и правил не ставили — хвост убитого демона
+    case "$1" in
+        ''|"туннель пропал"|"не отвечает") [ -n "$WARP_CH_SKIP_ON" ] || warp_chain_skip_set - ;;
+        *) warp_chain_skip_set - ;;
+    esac
     [ -n "$WARP_CH_PID" ] && kill "$WARP_CH_PID" 2>/dev/null
     $ip link del $WARP_CH_IF 2>/dev/null
     [ -n "$WARP_CH_ADDR" ] && warp_src_guard del "$WARP_CH_ADDR"; WARP_CH_ADDR=""
@@ -1274,8 +1309,9 @@ warp_chain_down() {   # [причина] — пусто: молча
     if [ "$was" = up ]; then
         # имя — поднятого: при выключении в настройках WARP_CHAIN уже пуст
         [ -n "$1" ] && log "WARP: свой сервер после WARP ($WARP_CH_NAME) снят ($1) — что шло через него, снова через WARP"
-        # соединения через warp1 после снятия молча висели бы до тайм-аута приложения (как у warp_routes_off)
-        warp_kill_sockets "свой сервер снят"
+        # соединения через warp1 после снятия молча висели бы до тайм-аута приложения (как у warp_routes_off);
+        # приложения мимо своего сервера шли и идут через WARP — их не трогаем
+        WARP_KILL_KEEP="$keep"; warp_kill_sockets "свой сервер снят"; WARP_KILL_KEEP=""
     fi
     # «не поднялась» держим: иначе каждое переподключение WARP (warp_down) сбрасывало паузу, и мёртвый сервер
     # пробовался сразу после подъёма — 25.11 четыре попытки по 10 с за 2 мин (WARP переподнимался из-за Telegram)
@@ -1355,8 +1391,8 @@ warp_chain_up() {
     $ip rule add fwmark $WARP_MARK/$WARP_MARK lookup $WARP_CH_TABLE pref $WARP_CH_MARK_PREF 2>/dev/null
     WARP_CH_STATE=up; WARP_CH_FAILS=0; WARP_CH_CHECK_TS=$(date +%s); WARP_CH_NOTE=""; WARP_CH_WAIT=$WARP_CH_RETRY; WARP_CH_NAME="$WARP_CHAIN"
     log "WARP: после WARP — свой сервер $WARP_CHAIN ($host): выход ${WARP_CH_IP:-?}${WARP_CH_LOC:+, $WARP_CH_LOC}; напрямую к серверу ничего не идёт${WARP_CHAIN_SKIP:+; мимо него — $WARP_CHAIN_SKIP}"
-    # что уже шло через WARP — переподключится через цепочку
-    warp_kill_sockets "свой сервер поднят"
+    # что уже шло через WARP — переподключится через цепочку (кроме приложений мимо неё)
+    WARP_KILL_KEEP="$WARP_CH_SKIP_UIDS"; warp_kill_sockets "свой сервер поднят"; WARP_KILL_KEEP=""
     phone_status_refresh
 }
 
@@ -1365,6 +1401,8 @@ warp_chain_reconcile() {
     local now n
     if [ -z "$WARP_CHAIN" ]; then
         [ "$WARP_CH_STATE" = off ] || warp_chain_down "выключено"
+        # свой сервер выключили в настройках (reload уже снял цепочку и поставил off) — правила мимо него тоже
+        [ -n "$WARP_CH_SKIP_ON" ] && warp_chain_skip_set -
         WARP_CH_NOTE=""; WARP_CH_STATE=off
         return 0
     fi
@@ -1380,10 +1418,13 @@ warp_chain_reconcile() {
         fi
         return 0
     fi
-    # мимо своего сервера — и пока он не поднят или не отвечает (warp_chain_down их снимает: свой сервер выключен,
-    # WARP снят); по подписи — не трогать правила на каждом круге
-    [ "$WARP_CH_SKIP_ON" = "set:$WARP_CHAIN_SKIP" ] || warp_chain_skip_set
+    # мимо своего сервера — и пока он не поднят или не отвечает; по подписи (список и uid), чтобы не трогать правила
+    # на каждом круге; uid — раз в 30 с: переустановленное или поставленное позже приложение получает новый
     now=$(date +%s)
+    if [ -z "$WARP_CH_SKIP_ON" ] || [ "${WARP_CH_SKIP_ON%|*}" != "$WARP_CHAIN_SKIP" ] || [ $((now - WARP_CH_SKIP_TS)) -ge 30 ]; then
+        n=$(warp_chain_skip_uids); WARP_CH_SKIP_TS=$now
+        [ "$WARP_CH_SKIP_ON" = "$WARP_CHAIN_SKIP|$n" ] || warp_chain_skip_set "$n"
+    fi
     case "$WARP_CH_STATE" in
         off) warp_chain_up ;;
         fail) [ "$now" -ge "$WARP_CH_RETRY_TS" ] && warp_chain_up ;;

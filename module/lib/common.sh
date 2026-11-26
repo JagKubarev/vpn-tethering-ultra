@@ -4,6 +4,9 @@
 # Часть демона service.sh: подключается из него через ".", сам не запускается.
 # Настройки (USER CONFIG) и общие переменные — в service.sh.
 
+WARP_RESTART_FLAG=/data/local/tmp/vpn_tether_restart   # webctl restart: блок WARP и DNS телефона на выходе не снимать
+restart_flag_fresh() { [ -n "$(find "$WARP_RESTART_FLAG" -mmin -1 2>/dev/null)" ]; }   # флаг моложе минуты
+
 log() {
     local msg="$*"
     

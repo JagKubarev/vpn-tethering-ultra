@@ -1649,12 +1649,14 @@ const TG_PKGS = ['org.telegram.messenger', 'org.telegram.messenger.web', 'org.te
 function chainNotes() {
   const ch = CUR.WARP_ENABLE === '1' ? CUR.WARP_CHAIN || '' : '', skip = appKeyList('WARP_CHAIN_SKIP');
   const via = 'WARP → свой сервер ' + ch;
-  const tg = CUR.WARP_PHONE === '1' && skip.some((p) => TG_PKGS.includes(appBase(p)));
+  const ph = CUR.WARP_PHONE === '1', te = CUR.WARP_TETHER === '1';
+  const tg = ph && skip.some((p) => TG_PKGS.includes(appBase(p)));
   return {
-    grp: (k) => !ch ? '' : k === 'TELEGRAM' && tg ? 'Телефон — мимо своего сервера, раздача — через свой сервер ' + ch : via,
+    // группа Telegram: клиенты на телефоне в списке — телефон мимо, раздача (если идёт в WARP) — через свой сервер
+    grp: (k) => !ch ? '' : k === 'TELEGRAM' && tg ? 'Телефон — мимо своего сервера' + (te ? ', раздача — через свой сервер ' + ch : '') : via,
     // у приложений и сайтов строка узкая (рядом выбор выхода) — коротко
     app: (p) => !ch ? '' : skip.includes(p) ? 'мимо своего сервера' : 'через свой сервер',
-    site: () => !ch ? '' : 'через свой сервер' };
+    site: () => !ch ? '' : skip.length && ph ? 'через свой сервер, кроме приложений из списка' : 'через свой сервер' };
 }
 const segHtml = (attr, opts, cur, dis) => '<div class="seg" role="radiogroup">' + opts.map(([v, l]) =>
   '<button ' + attr + ' data-v="' + v + '" role="radio" aria-checked="' + (cur === v) + '" class="' + (cur === v ? 'on' : '') + '"' +
