@@ -12,3 +12,8 @@ MIT; сборка Flowseal 1.10.4 для zapret2: alt14–16, circular, exp1–5
 `--filter-tcp=80,443,` (у авторов с ней nfqws2 не запускается).
 Кроме lua/vpn-tether.lua — он свой (VPN Tether, GPL-3.0, как модуль): обманки fool_nots и
 fool_nots_ack для соединений без метки времени TCP (Windows-клиенты раздачи), 12.11.2026.
+
+26.11.2026 бинарники nfqws2 (bin/nfqws2-arm64, bin/nfqws2-arm) — официальная сборка zapret2 v1.0.8 (bol-van,
+github.com/bol-van/zapret2/releases/tag/v1.0.8, binaries/android-*; lua_compat_ver 6, как у прежних — Lua не менялись):
+sha256 android-arm64 3fc9311a033df370838f644c1fa864bcaab92cc145bccfabbbd7a0de346a7739
+sha256 android-arm   88491f0fc6c2b0d9e31f75a9e5ab38fcb7a3dfd46856820c0a0c884061e8e4b1
