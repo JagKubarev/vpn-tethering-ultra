@@ -299,8 +299,55 @@ zapret_kill_all() {
     rm -f "$ZAPRET_PID_FILE"
 }
 
+# appId (uid по модулю 100000 — и клоны) приложений с VpnService: запомненный «владелец VPN» остаётся в
+# исключениях, только пока его uid — VPN-клиент. 26.11 на 13T в файле были uid удалённых VPN-клиентов, которые
+# Android отдал Google Переводчику и Новостям: их ClientHello к Google шли без обхода (а прямые запросы к
+# закрытым именам Google запускают волну на YOTA, 06.11). Раз в 10 мин или по требованию (force); команда не
+# ответила или пусто — пусто, и тогда список не трогаем
+# Снимок — в файле: zapret_vpn_uids зовут через $(...), переменная из подоболочки не вернулась бы
+VPN_SVC_FILE=/data/local/tmp/vpn_tether_vpnsvc
+vpn_service_ids() {   # [force] -> appId через пробел
+    local now ts ids="" p u
+    now=$(date +%s)
+    if [ "$1" != force ] && read -r ts ids < "$VPN_SVC_FILE" 2>/dev/null && [ $((now - ts)) -lt 600 ] 2>/dev/null; then
+        echo "$ids"; return 0
+    fi
+    ids=""
+    for p in $($TIMEOUT_CMD sh -c "cmd package query-services --brief -a android.net.VpnService 2>/dev/null" | \
+               sed -n 's|^ *\([A-Za-z0-9_][A-Za-z0-9_.]*\)/.*|\1|p' | sort -u); do
+        u=$(pkg_uid "$p")
+        case "$u" in ''|*[!0-9]*) continue ;; esac
+        ids="$ids $((u % 100000))"
+    done
+    ids="${ids# }"
+    echo "$now $ids" > "$VPN_SVC_FILE"
+    echo "$ids"
+}
+# uid из ZAPRET_VPN_UIDS_FILE, у которых сейчас VPN-клиент; остальные — из файла вон (с записью в журнал)
+zapret_vpn_learned() {
+    local svc u keep="" drop="" pass
+    for pass in 1 2; do
+        # лишние по снимку — переспросить свежим: VPN-клиент мог встать после снимка
+        if [ "$pass" = 2 ]; then svc=$(vpn_service_ids force); else svc=$(vpn_service_ids); fi
+        [ -n "$svc" ] || { tr -c '0-9' ' ' < "$ZAPRET_VPN_UIDS_FILE"; return 0; }
+        keep=""; drop=""
+        for u in $(tr -c '0-9' ' ' < "$ZAPRET_VPN_UIDS_FILE"); do
+            case " $svc " in *" $((u % 100000)) "*) keep="$keep $u" ;; *) drop="$drop $u" ;; esac
+        done
+        [ -z "$drop" ] && break
+    done
+    if [ -n "$drop" ]; then
+        for u in $drop; do
+            log "zapret: uid $u больше не VPN-клиент ($(pm list packages --uid "$u" 2>/dev/null | sed -n 's/^package:\([^ ]*\).*/\1/p' | head -1 | grep . || echo 'не установлен')) — убрал из исключений обхода"
+        done
+        if [ -n "$keep" ]; then printf '%s\n' $keep > "$ZAPRET_VPN_UIDS_FILE.tmp"; else : > "$ZAPRET_VPN_UIDS_FILE.tmp"; fi
+        mv -f "$ZAPRET_VPN_UIDS_FILE.tmp" "$ZAPRET_VPN_UIDS_FILE"
+    fi
+    echo "${keep# }"
+}
+
 # uid мимо обхода: VPN-клиенты (известные пакеты + владельцы VPN, замеченные
-# раньше) и приложения из ZAPRET_EXCL_APPS
+# раньше, если они всё ещё VPN-клиенты) и приложения из ZAPRET_EXCL_APPS
 zapret_vpn_uids() {
     local p u out=""
     for p in $VPN_CLIENT_PKGS $ZAPRET_EXCL_APPS; do
@@ -308,7 +355,7 @@ zapret_vpn_uids() {
         case "$u" in ''|*[!0-9]*) continue ;; esac
         out="$out $u"
     done
-    [ -f "$ZAPRET_VPN_UIDS_FILE" ] && out="$out $(tr -c '0-9' ' ' < "$ZAPRET_VPN_UIDS_FILE")"
+    [ -f "$ZAPRET_VPN_UIDS_FILE" ] && out="$out $(zapret_vpn_learned)"
     echo $out | tr ' ' '\n' | awk '$1 ~ /^[0-9]+$/ && $1 >= 10000' | sort -un | tr '\n' ' '
 }
 

@@ -859,16 +859,79 @@ warp_dst6() {
 # ss не фильтрует: закроются и сокеты root/системы к этим адресам — они просто
 # переподключатся. Установленные и висящие на SYN (блок по IP: SYN глушится,
 # а NAT у соединения уже назначен мимо туннеля). Один ss на все сети.
-warp_kill_sockets() {   # причина [сети — по умолчанию все сети групп]
-    local f="" m n nets="${2-$(warp_dst4)}"
-    [ "$WARP_PHONE" = "1" ] || return 0
+# Приложения целиком (WARP_APPS, клиенты Telegram) ходят и мимо сетей групп (у Telegram — запасные узлы):
+# их сокеты — по uid, при любой смене пути, кроме смены групп ($3 = «-»). 26.11 на 13T: соединения Telegram,
+# открытые через голый WARP, так и шли через него после подъёма своего сервера (~80 пакетов за минуту)
+warp_kill_sockets() {   # причина [сети — по умолчанию все сети групп] [- — без приложений]
+    local f="" m n=0 k=0 nets="${2-$(warp_dst4)}"
     command -v ss >/dev/null 2>&1 || return 0
-    for m in $nets; do f="$f${f:+ or }dst $m"; done
-    [ -n "$f" ] || return 0
-    # shellcheck disable=SC2086
-    n=$(ss -K -tn state established state syn-sent "( $f )" 2>/dev/null | awk 'NR > 1' | grep -c .)
-    [ "${n:-0}" -gt 0 ] && log "WARP: закрыто соединений телефона к адресам из WARP: $n ($1) — приложения переподключатся сразу"
+    if [ "$WARP_PHONE" = "1" ]; then
+        for m in $nets; do f="$f${f:+ or }dst $m"; done
+        # shellcheck disable=SC2086
+        [ -n "$f" ] && n=$(ss -K -tn state established state syn-sent "( $f )" 2>/dev/null | awk 'NR > 1' | grep -c .)
+    fi
+    [ "$3" = "-" ] || k=$(warp_kill_app_sockets)
+    [ "$((${n:-0} + ${k:-0}))" -gt 0 ] && log "WARP: закрыто соединений телефона к адресам из WARP: ${n:-0}$([ "${k:-0}" -gt 0 ] && echo ", приложений целиком: $k") ($1) — приложения переподключатся сразу"
     return 0
+}
+
+# Сокеты приложений целиком (uid из WARP_APP_UIDS) — по одному: ss по uid не фильтрует, но показывает его (-e).
+# Печатает, сколько закрыто
+warp_kill_app_sockets() {
+    local l lp p a n=0
+    [ -n "$WARP_APP_UIDS" ] && command -v ss >/dev/null 2>&1 || { echo 0; return 0; }
+    # два состояния — с колонкой State: $4 свой адрес, $5 чужой
+    for l in $(ss -tne state established state syn-sent 2>/dev/null | awk -v u=" $WARP_APP_UIDS " 'NR > 1 {
+            for (i = 6; i <= NF; i++) if ($i ~ /^uid:/ && index(u, " " substr($i, 5) " ")) { print $4 "|" $5; break } }'); do
+        lp=${l%%|*}; p=${l#*|}
+        a=${p%:*}; a=${a#[}; a=${a%]}
+        ss -K -tn state established state syn-sent dst "$a" dport = ":${p##*:}" sport = ":${lp##*:}" 2>/dev/null | \
+            awk 'NR > 1' | grep -q . && n=$((n + 1))
+    done
+    echo $n
+}
+
+# Соединения, открытые до разметки WARP (старт демона): метка ставится только новым соединениям, и такие
+# шли бы мимо WARP, пока не закроются. Раздача и телефон к сетям групп — записи conntrack без метки WARP
+# (следующий пакет заведёт новую, уже с меткой: приложение переподключится через WARP или упрётся в блок);
+# сокеты телефона — warp_kill_sockets (и приложений целиком); «ct» — только conntrack (второй вызов на старте:
+# сокеты телефона к тому времени уже переподключились с меткой, рвать их снова незачем)
+warp_drop_unmarked() {   # причина [ct]
+    local m c n=0
+    if [ -n "$CONNTRACK_BIN" ]; then
+        for m in $(warp_dst4); do
+            c=$($CONNTRACK_BIN -D -d "$m" --mark 0/$WARP_MARK 2>&1 | sed -n 's/.* \([0-9][0-9]*\) flow entries.*/\1/p')
+            n=$((n + ${c:-0}))
+        done
+    fi
+    [ "$n" -gt 0 ] && log "WARP: сброшено соединений без разметки ($1): $n записей conntrack (раздача и телефон) — переподключатся уже через WARP"
+    [ "$2" = ct ] || warp_kill_sockets "$1"
+    return 0
+}
+
+# Старт демона (service.sh): блок и разметку WARP — сразу, а не в первом круге цикла (~15 с: сеть, DNS, обход).
+# Иначе в это окно то, что идёт в WARP, уходило оператору напрямую, а открытые тогда соединения так и оставались
+# без метки: 26.11 на 13T за перезапуск ~100 пакетов к сетям Telegram через оператора (телефон и раздача) и ещё
+# ~50 после подъёма своего сервера. Только при «Если выход не работает» = блок (WARP_STRICT 1/2): при 0 без
+# туннеля размеченное и так идёт напрямую. Вызов 1 — до настройки сети: только телефон, без адресов доменов (DNS
+# ещё нет); вызов 2 (аргумент 1) — после apply_state: раздача и домены (полная сборка, как в цикле)
+warp_start_block() {   # [1 — второй вызов]
+    [ "$WARP_ENABLE" = 1 ] && [ "$WARP_STRICT" -ge 1 ] 2>/dev/null || return 0
+    [ -n "$AWG_BIN" ] && [ -n "$AWG_GO_BIN" ] || return 0
+    vpn_up_now && return 0
+    if [ "$1" = 1 ]; then
+        [ "$WARP_RT_ON" = 1 ] || return 0
+        warp_routes_reconcile
+        warp_drop_unmarked "старт демона, раздача" ct
+        return 0
+    else
+        WARP_APP_UIDS=$(warp_app_uids); WARP_APP_TS=$(date +%s)
+        warp_block_set "$WARP_STRICT"
+        warp_routes_apply "" || return 0
+        # подпись пустая — первый же reconcile пересоберёт с раздачей и доменами; группы — как сейчас
+        WARP_RT_SIG=""; WARP_RT_DST=$(warp_dst4); WARP_RT_GRP="$WARP_GOOGLE$WARP_TELEGRAM$WARP_PHONE|$WARP_DOMAINS"
+    fi
+    warp_drop_unmarked "старт демона"
 }
 
 # Через туннель идёт видео YouTube: в conntrack есть установленные соединения с обеими
@@ -1026,7 +1089,7 @@ warp_routes_reconcile() {
     # только у сетей, что добавились или ушли: их и закрываем
     if [ "$was" != "1" ]; then warp_kill_sockets "$([ "$WARP_STATE" = up ] && echo 'туннель поднят' || echo 'блок: разметка без туннеля')"
     elif [ -n "$WARP_RT_GRP" ] && [ "$grp" != "$WARP_RT_GRP" ]; then
-        warp_kill_sockets "сменились группы" "$(printf '%s\n%s\n' "$old" "$new" | grep . | sort | uniq -u)"
+        warp_kill_sockets "сменились группы" "$(printf '%s\n%s\n' "$old" "$new" | grep . | sort | uniq -u)" -
     fi
     WARP_RT_GRP="$grp"
     return 0

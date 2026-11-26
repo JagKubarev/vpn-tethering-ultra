@@ -1924,6 +1924,7 @@ log "TUN: $TUN_NAME"
 dnsproxy_kill_strays
 warp_routes_off force      # туннель и его маршруты от убитого демона
 warp_down
+warp_start_block           # блок и разметка WARP — сразу, не через ~15 с первого круга (утечка 26.11)
 phone_dns_rules_off
 rm -f "$DNSPROXY_PID_FILE" /data/local/tmp/vpn_tether_probe.* /data/local/tmp/vpn_tether_alt.*
 # /data/local/tmp переживает перезагрузку, а tun после неё часто с тем же
@@ -1953,6 +1954,7 @@ refresh_tether_ifaces
 tether_ifaces="$TETHER_NOW"
 log "Initial: tun_idx=$tun_idx tether=[$tether_ifaces]"
 apply_state "$tun_idx" $tether_ifaces || log "ERROR: Initial apply_state failed"
+warp_start_block 1         # раздача известна, DNS есть: разметка клиентов и адреса доменов
 # Без раздачи и VPN apply_state ничего не пересобирает и статус не пишет:
 # описание оставалось «запускается» (post-fs-data.sh), status — с прошлой загрузки
 [ -n "$LAST_STATUS_MODE" ] || update_status "direct" "no-tether" "$CURRENT_NET_PROFILE"
