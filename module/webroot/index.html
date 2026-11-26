@@ -1271,16 +1271,34 @@ const HAS_KSU = typeof ksu !== 'undefined' && ksu && typeof ksu.exec === 'functi
 
 // ---------------------------------------------------------------- exec
 let cbSeq = 0;
+// Менеджер root может так и не вызвать ответ (26.11, 4PDA: Xiaomi 17T — «Добавить» у WARP не реагирует, в журнале
+// пусто): без срока кнопка висела бы заблокированной молча. Все команды через ctl короткие (долгие — ctlBg,
+// там каждый exec — короткий опрос), так что 30 с — с запасом; поздний ответ после срока — молча
+const EXEC_TIMEOUT = 30000;
+let execToastTs = 0;
 function exec(cmd) {
   if (!HAS_KSU) return Promise.resolve(mockExec(cmd));
   return new Promise((resolve) => {
     const name = 'vt_cb_' + Date.now() + '_' + (cbSeq++);
+    let done = false;
+    const tm = setTimeout(() => {
+      if (done) return;
+      done = true;
+      window[name] = () => { delete window[name]; };
+      // опрос статуса раз в 3 с — не заваливать подсказками
+      if (Date.now() - execToastTs > 20000) { execToastTs = Date.now(); toast('Менеджер root не ответил за 30 с — команда не выполнилась. Напишите в тему модуля, какой у вас менеджер root и его версия'); }
+      resolve({ errno: 124, out: 'ERR менеджер root не ответил за 30 с', err: '' });
+    }, EXEC_TIMEOUT);
     window[name] = (errno, stdout, stderr) => {
       delete window[name];
+      if (done) return;
+      done = true; clearTimeout(tm);
       resolve({ errno, out: stdout || '', err: stderr || '' });
     };
     try { ksu.exec(cmd, '{}', name); }
-    catch (e) { delete window[name]; resolve({ errno: 1, out: '', err: String(e) }); }
+    catch (e) {
+      if (!done) { done = true; clearTimeout(tm); delete window[name]; resolve({ errno: 1, out: '', err: String(e) }); }
+    }
   });
 }
 const ctl = (args) => exec(CTL + ' ' + args);
