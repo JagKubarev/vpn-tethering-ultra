@@ -1026,6 +1026,11 @@ details > summary::after { border-color: currentColor; }
     <div class="s mt8" id="wcsNote" hidden></div>
     <div class="mt8"><button class="btn small" id="wcsAdd">Добавить приложение</button></div>
   </div>
+  <div class="row" data-dep="WARP_ENABLE" data-dep2="WARP_TELEGRAM" id="wcsTgRow" hidden>
+    <div class="txt"><div class="t">Telegram мимо своего сервера</div>
+      <div class="s">Сети Telegram — в обычный WARP, и у раздачи: в браузере на ноутбуке и в клиентах там. Быстрее и короче путь. Запасные узлы Telegram (не его сети) у приложений телефона — как выбрано выше.</div></div>
+    <label class="sw"><input type="checkbox" data-key="WARP_CHAIN_SKIP_TG"><span></span></label>
+  </div>
   <div class="row col" data-dep="WARP_ENABLE">
     <div class="txt"><div class="t">Если выход не работает</div>
       <div class="s">Что делать с тем, что идёт в WARP, когда свой сервер или сам WARP не отвечает. Блок — приложение увидит «нет сети», а не пойдёт через оператора.</div></div>
@@ -1627,7 +1632,7 @@ const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAM
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_ENGINE','ZAPRET2_STRATEGY','ZAPRET2_ARGS','ZAPRET2_FAKE_SNI','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE','ZAPRET_EXCL_APPS',
   'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','DNS_VIA_ZAPRET','YT_GGC_BLOCK','YT_DEAD_FAILFAST','YT_WSSIZE_RAMP','YT_RAMP_HOURS','YT_RETRY_MAX','ZAPRET_WATCHDOG','ZAPRET_AUTOPICK','ZAPRET_WATCHDOG_MIN',
   'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','ZAPRET_AUTO_FAIL',
-  'WARP_ENABLE','WARP_CONF','WARP_I1','WARP_CHAIN','WARP_CHAIN_SKIP','WARP_STRICT','WARP_STICK','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_COUNTRY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
+  'WARP_ENABLE','WARP_CONF','WARP_I1','WARP_CHAIN','WARP_CHAIN_SKIP','WARP_CHAIN_SKIP_TG','WARP_STRICT','WARP_STICK','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_COUNTRY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
 // интервал в минутах человеческим языком: 15 -> «15 минут», 180 -> «3 часа»
 function fmtMin(v, def) {
   const m = +v || def;
@@ -1684,7 +1689,8 @@ function chainNotes() {
   const tg = ph && skip.some((p) => TG_PKGS.includes(appBase(p)));
   return {
     // группа Telegram: клиенты на телефоне в списке — телефон мимо, раздача (если идёт в WARP) — через свой сервер
-    grp: (k) => !ch ? '' : k === 'TELEGRAM' && tg ? 'Телефон — мимо своего сервера' + (te ? ', раздача — через свой сервер ' + ch : '') : via,
+    grp: (k) => !ch ? '' : k === 'TELEGRAM' && CUR.WARP_CHAIN_SKIP_TG === '1' ? 'WARP, мимо своего сервера' + (te ? ' — и у раздачи' : '')
+      : k === 'TELEGRAM' && tg ? 'Телефон — мимо своего сервера' + (te ? ', раздача — через свой сервер ' + ch : '') : via,
     // у приложений и сайтов строка узкая (рядом выбор выхода) — коротко
     app: (p) => !ch ? '' : skip.includes(p) ? 'мимо своего сервера' : 'через свой сервер',
     site: () => !ch ? '' : skip.length && ph ? 'через свой сервер, кроме приложений из списка' : 'через свой сервер' };
@@ -1946,6 +1952,7 @@ function renderDeps() {
   $$('[data-dep]').forEach((row) => { row.classList.toggle('off', CUR[row.dataset.dep] !== '1' || (!!row.dataset.dep2 && CUR[row.dataset.dep2] !== '1') || (!!row.dataset.depoff && CUR[row.dataset.depoff] === '1')); });
   renderFakeSni();
   $('#wcsRow').hidden = !CUR.WARP_CHAIN;   // без своего сервера после WARP мимо него идти нечему
+  $('#wcsTgRow').hidden = !CUR.WARP_CHAIN;
   // мимо своего сервера уходит только то, что у приложения идёт в WARP: целиком (WARP_APPS, клиенты Telegram) или по
   // группам и сайтам (WARP_PHONE); без WARP_PHONE и не целиком — правило не действует
   const wcsIdle = appKeyList('WARP_CHAIN_SKIP').filter((p) => !appKeyList('WARP_APPS').includes(p) &&
@@ -2304,7 +2311,7 @@ async function waitAck(token, sec) {
 // ошибка сохранения — с названием настройки со страницы, а не с ключом конфига
 const KEY_TITLE = { WARP_TELEGRAM: 'Telegram через WARP', OPERA_TELEGRAM: 'Telegram через Opera', WARP_GOOGLE: 'Google через WARP',
   OPERA_GOOGLE: 'Google через Opera', WARP_DOMAINS: 'Сайты через WARP', OPERA_DOMAINS: 'Сайты через Opera',
-  WARP_APPS: 'Приложения через WARP', OPERA_APPS: 'Приложения через Opera', OPERA_COUNTRY: 'Регион Opera', WARP_CHAIN_SKIP: 'Мимо своего сервера' };
+  WARP_APPS: 'Приложения через WARP', OPERA_APPS: 'Приложения через Opera', OPERA_COUNTRY: 'Регион Opera', WARP_CHAIN_SKIP: 'Мимо своего сервера', WARP_CHAIN_SKIP_TG: 'Telegram мимо своего сервера' };
 // стратегия nfqws2 из статуса: «имя» или «имя+» (свои приёмы TCP)
 function z2Name(v) {
   v = v || 'hardcorp74';

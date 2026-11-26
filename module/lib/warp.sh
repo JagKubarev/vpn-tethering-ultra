@@ -998,6 +998,23 @@ warp_drop_unmarked() {   # причина [ct] [ифейсы раздачи — 
     return 0
 }
 
+# Соединения раздачи к этим сетям — заново: путь сменился (свой сервер <-> WARP), а NAT старых записан на прежний
+# туннель, и клиент висел бы до своего тайм-аута. Печатает, сколько сброшено
+warp_drop_tether_ct() {   # сети
+    local i s m c n=0
+    if [ -n "$CONNTRACK_BIN" ]; then
+        for i in $LAST_TETHER_IFACES; do
+            s=$($ip -4 addr show dev "$i" 2>/dev/null | awk '/inet / { print $2; exit }')
+            [ -n "$s" ] || continue
+            for m in $1; do
+                c=$($CONNTRACK_BIN -D -s "$s" -d "$m" 2>&1 | sed -n 's/.* \([0-9][0-9]*\) flow entries.*/\1/p')
+                n=$((n + ${c:-0}))
+            done
+        done
+    fi
+    echo $n
+}
+
 # Старт демона (service.sh): блок и разметку WARP — сразу, а не в первом круге цикла (~15 с: сеть, DNS, обход).
 # Иначе в это окно то, что идёт в WARP, уходило оператору напрямую, а открытые тогда соединения так и оставались
 # без метки: 26.11 на 13T за перезапуск ~100 пакетов к сетям Telegram через оператора (телефон и раздача) и ещё
@@ -1206,7 +1223,7 @@ WARP_CH_NO_PREF=2971       # to сервер -> prohibit: warp0 нет — не 
 WARP_CH_OIF_PREF=2976      # oif warp1 -> WARP_CH_TABLE (проверки, привязанные к warp1)
 WARP_CH_MARK_PREF=2977     # метка WARP -> WARP_CH_TABLE, раньше WARP_MARK_PREF (2979)
 WARP_CH_SKIP_PREF=2975     # uid из WARP_CHAIN_SKIP + метка WARP -> WARP_TABLE: мимо своего сервера, раньше 2977
-WARP_CH_SKIP_ON=""         # «<список>|<uid>» — правила мимо своего сервера стоят для них; пусто — не стоят
+WARP_CH_SKIP_ON=""         # «<список>|<сети Telegram 0/1>|<uid>» — для них стоят правила мимо своего сервера; пусто — не стоят
 WARP_CH_SKIP_UIDS=""       # uid этих правил: их сокеты при смене своего сервера не трогаем (путь не менялся)
 WARP_CH_SKIP_TS=0          # uid пересчитываем раз в 30 с: переустановка меняет uid (как WARP_APP_TS)
 WARP_CH_SKIP_WARN=""       # отказ ip rule uidrange — в журнал один раз
@@ -1258,6 +1275,11 @@ warp_block_set() {   # 0 | 1 | 2
 # раньше правила цепочки (2977) и её запрета (2978): держим, пока WARP поднят и свой сервер задан, — и когда он не
 # отвечает: при WARP_STRICT=2 иначе и эти приложения упирались бы в запрет, хотя WARP жив. WARP упал — его таблица
 # пуста, и дальше как у всех: при WARP_STRICT 1/2 — запрет (2978/2981). Только IPv4 — как и правило цепочки
+# Сети Telegram мимо своего сервера (WARP_CHAIN_SKIP_TG): по адресу — и для раздачи, у которой нет uid. 26.11 вечером
+# через свой сервер 0,2–7,5 Мбит/с и ~600 мс до Telegram, через WARP — 11–18 Мбит/с и ~230 мс
+warp_chain_skip_tg() { [ "$WARP_CHAIN_SKIP_TG" = 1 ] && [ "$WARP_TELEGRAM" = 1 ] && echo 1 || echo 0; }
+warp_tg4() { tr -d '\r' < "$MODULE_DIR/warp/telegram.txt" 2>/dev/null | grep -E '^[0-9]+\.'; }
+
 warp_chain_skip_uids() {
     local p u out=""
     for p in $WARP_CHAIN_SKIP; do
@@ -1270,17 +1292,24 @@ warp_chain_skip_uids() {
 }
 warp_chain_skip_set() {   # [- — только снять | uid, уже посчитанные]
     local u uids _n=0
-    while [ $_n -lt 64 ] && $ip rule del pref $WARP_CH_SKIP_PREF 2>/dev/null; do _n=$((_n + 1)); done
+    local tg m
+    while [ $_n -lt 128 ] && $ip rule del pref $WARP_CH_SKIP_PREF 2>/dev/null; do _n=$((_n + 1)); done
     WARP_CH_SKIP_ON=""; WARP_CH_SKIP_UIDS=""
     [ "$1" = - ] && return 0
     if [ $# -gt 0 ]; then uids=$1; else uids=$(warp_chain_skip_uids); fi
+    tg=$(warp_chain_skip_tg)
+    if [ "$tg" = 1 ]; then
+        for m in $(warp_tg4); do
+            $ip rule add to "$m" fwmark $WARP_MARK/$WARP_MARK lookup $WARP_TABLE pref $WARP_CH_SKIP_PREF 2>/dev/null
+        done
+    fi
     for u in $uids; do
         $ip rule add uidrange "$u-$u" fwmark $WARP_MARK/$WARP_MARK lookup $WARP_TABLE pref $WARP_CH_SKIP_PREF 2>/dev/null && continue
         # ядро или ip без uidrange — список молча не действовал бы
         [ -n "$WARP_CH_SKIP_WARN" ] || log "WARNING: WARP: правило по uid ($u) не встало — «мимо своего сервера» не работает (ip rule uidrange)"
         WARP_CH_SKIP_WARN=1
     done
-    WARP_CH_SKIP_ON="$WARP_CHAIN_SKIP|$uids"; WARP_CH_SKIP_UIDS="$uids"; WARP_CH_SKIP_TS=$(date +%s)
+    WARP_CH_SKIP_ON="$WARP_CHAIN_SKIP|$tg|$uids"; WARP_CH_SKIP_UIDS="$uids"; WARP_CH_SKIP_TS=$(date +%s)
 }
 
 warp_chain_down() {   # [причина] — пусто: молча
@@ -1421,9 +1450,10 @@ warp_chain_reconcile() {
     # мимо своего сервера — и пока он не поднят или не отвечает; по подписи (список и uid), чтобы не трогать правила
     # на каждом круге; uid — раз в 30 с: переустановленное или поставленное позже приложение получает новый
     now=$(date +%s)
-    if [ -z "$WARP_CH_SKIP_ON" ] || [ "${WARP_CH_SKIP_ON%|*}" != "$WARP_CHAIN_SKIP" ] || [ $((now - WARP_CH_SKIP_TS)) -ge 30 ]; then
+    if [ -z "$WARP_CH_SKIP_ON" ] || [ "${WARP_CH_SKIP_ON%|*}" != "$WARP_CHAIN_SKIP|$(warp_chain_skip_tg)" ] || \
+       [ $((now - WARP_CH_SKIP_TS)) -ge 30 ]; then
         n=$(warp_chain_skip_uids); WARP_CH_SKIP_TS=$now
-        [ "$WARP_CH_SKIP_ON" = "$WARP_CHAIN_SKIP|$n" ] || warp_chain_skip_set "$n"
+        [ "$WARP_CH_SKIP_ON" = "$WARP_CHAIN_SKIP|$(warp_chain_skip_tg)|$n" ] || warp_chain_skip_set "$n"
     fi
     case "$WARP_CH_STATE" in
         off) warp_chain_up ;;

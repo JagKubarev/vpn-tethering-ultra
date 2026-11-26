@@ -233,7 +233,7 @@ reload_config() {
     _conf_grp_sig s_op0 $CONF_GRP_OPERA
     _conf_grp_sig s_wp0 $CONF_GRP_WARP
     _conf_grp_sig s_wr0 $CONF_GRP_WARPR
-    local s_tgw0="$WARP_ENABLE$WARP_TELEGRAM" s_api0="$OPERA_API_PROXY|$OPERA_COUNTRY" s_wc0="$WARP_CHAIN" s_wcs0="$WARP_CHAIN_SKIP" s_wk0="$WARP_STRICT|$WARP_STICK"
+    local s_tgw0="$WARP_ENABLE$WARP_TELEGRAM" s_api0="$OPERA_API_PROXY|$OPERA_COUNTRY" s_wc0="$WARP_CHAIN" s_wcs0="$WARP_CHAIN_SKIP|$WARP_CHAIN_SKIP_TG" s_wk0="$WARP_STRICT|$WARP_STICK"
     conf_restore_defaults
     USER_CONF_NOTE=""
     load_user_conf
@@ -265,7 +265,7 @@ reload_config() {
     [ "$s_wp0" != "$s_wp1" ] && what="$what WARP"
     [ "$s_wr0" != "$s_wr1" ] && what="$what что-идёт-в-WARP"
     [ "$s_wc0" != "$WARP_CHAIN" ] && what="$what свой-сервер-после-WARP"
-    [ "$s_wcs0" != "$WARP_CHAIN_SKIP" ] && what="$what мимо-своего-сервера"
+    [ "$s_wcs0" != "$WARP_CHAIN_SKIP|$WARP_CHAIN_SKIP_TG" ] && what="$what мимо-своего-сервера"
     [ "$s_wk0" != "$WARP_STRICT|$WARP_STICK" ] && what="$what блок-WARP/не-менять-сервер"
     [ "$s_api0" != "$OPERA_API_PROXY|$OPERA_COUNTRY" ] && what="$what Opera"
     log "Настройки перечитаны:${USER_CONF_NOTE:- (всё по умолчанию)}"
@@ -334,12 +334,20 @@ reload_config() {
     # мимо своего сервера: цепочку не трогаем — правила по uid заново, соединения приложений из старого и нового
     # списка — закрыть (открытые через другой выход молча висели бы до тайм-аута, как при смене пути у групп).
     # Цепочка сменилась или правила не стоят (WARP не поднят) — их выставит warp_chain_reconcile
-    if [ "$s_wcs0" != "$WARP_CHAIN_SKIP" ] && [ "$s_wc0" = "$WARP_CHAIN" ] && [ -n "$WARP_CH_SKIP_ON" ]; then
-        local _wu="$WARP_APP_UIDS" _wn _wp
+    if [ "$s_wcs0" != "$WARP_CHAIN_SKIP|$WARP_CHAIN_SKIP_TG" ] && [ "$s_wc0" = "$WARP_CHAIN" ] && [ -n "$WARP_CH_SKIP_ON" ]; then
+        local _wu="$WARP_APP_UIDS" _wn _wp _wt=""
         warp_chain_skip_set
-        WARP_APP_UIDS=$(for _wp in $s_wcs0 $WARP_CHAIN_SKIP; do pkg_uid "$_wp"; done | sort -u | tr '\n' ' ')
-        _wn=$(warp_kill_app_sockets); WARP_APP_UIDS="$_wu"
-        log "WARP: мимо своего сервера — ${WARP_CHAIN_SKIP:-никого}; закрыто соединений этих приложений: $_wn — переподключатся сразу"
+        _wn=0
+        if [ "${s_wcs0%|*}" != "$WARP_CHAIN_SKIP" ]; then
+            WARP_APP_UIDS=$(for _wp in ${s_wcs0%|*} $WARP_CHAIN_SKIP; do pkg_uid "$_wp"; done | sort -u | tr '\n' ' ')
+            _wn=$(warp_kill_app_sockets); WARP_APP_UIDS="$_wu"
+        fi
+        # сети Telegram: путь сменился и у раздачи, и у сокетов телефона к ним
+        if [ "${s_wcs0##*|}" != "$WARP_CHAIN_SKIP_TG" ] && [ "$WARP_TELEGRAM" = 1 ]; then
+            _wt=$(warp_drop_tether_ct "$(warp_tg4)")
+            warp_kill_sockets "Telegram мимо своего сервера" "$(warp_tg4)" -
+        fi
+        log "WARP: мимо своего сервера — ${WARP_CHAIN_SKIP:-никого}$([ "$(warp_chain_skip_tg)" = 1 ] && echo ', сети Telegram (и раздача)'); закрыто соединений этих приложений: $_wn${_wt:+, раздачи к Telegram: $_wt} — переподключатся сразу"
     fi
     # блок и «не менять сервер»: туннель не трогаем — правила запрета выставит сторож (warp_block_set), а «плохие»
     # с нуля, чтобы основной при «не менять» брался сразу
