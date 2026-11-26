@@ -186,18 +186,24 @@ warp_wg_file() {   # конфиг [адрес] [I1]
         /^[ \t]*\[Peer\]/ { print "AllowedIPs = 0.0.0.0/0, ::/0" }' "$1" > "$WARP_DIR/.run.wg")
 }
 
-# WARP_I1: I1 конфигов Cloudflare — поддельный QUIC Initial, по имени в нём оператор опознаёт весь
+# WARP_I1: I1 конфигов Cloudflare — поддельный QUIC Initial (или DNS-запрос, «dns_имя»: имени сайта для
+# классификации в нём нет вовсе — идея ZapretKVN v0.6.56, 26.11 рукопожатие и скорость как у QUIC), по имени
+# в QUIC оператор опознаёт весь
 # поток туннеля (08.11: bag.itunes.apple.com днём 2,5 Мбит/с, apteka.ru 20–30). Готовые — warp/i1/<имя>.txt
 # (tools/i1gen.py), собранные на телефоне (warp.sh i1gen, свои DCID и ключи) — $WARP_DIR/i1, они раньше.
 # Только вместо I1 конфига, свой не добавляем; свои серверы (не Cloudflare) — как в конфиге
+# I1 — только из тегов AmneziaWG: <b 0x…> байты, <r N> случайные (ID DNS-запроса), <c> счётчик, <t> время
 warp_i1() {
     local v f
     [ "$WARP_CF" = 1 ] && [ -n "$WARP_I1" ] || return 0
     for f in "$WARP_DIR/i1/$WARP_I1.txt" "$MODULE_DIR/warp/i1/$WARP_I1.txt"; do   # свой испорчен — готовый
         v=$(head -1 "$f" 2>/dev/null | tr -d '\r')
-        case "$v" in "<b 0x"*">") echo "$v"; return 0 ;; esac
+        case "$v" in "<"*">") ;; *) continue ;; esac
+        [ -z "$(printf '%s' "$v" | sed -e 's/<b 0x[0-9a-fA-F]*>//g' -e 's/<r [0-9]*>//g' -e 's/<[ct]>//g')" ] && { echo "$v"; return 0; }
     done
 }
+# Для журнала и WebUI: «dns_ya.ru» — DNS-запрос, иначе имя в поддельном QUIC
+warp_i1_label() { case "$1" in dns_*) echo "DNS-запрос ${1#dns_}" ;; *) echo "с именем $1" ;; esac; }
 
 # Адреса Cloudflare по порядку: рабочий для этой сети, из конфига, пул
 # (warp/endpoints.txt). После двух конфигов без хендшейка за круг — без пула:
@@ -334,7 +340,7 @@ warp_start() {   # имя конфига
     $ip -6 rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     WARP_CUR="$n"; WARP_STATE=starting; WARP_TS=$(date +%s); WARP_CHECK_TS=0; WARP_FAILS=0; WARP_NETCHG=0; WARP_TG_TS=0
     log "WARP: запускаю $n ($(sed -n 's/^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*//p' "$f" | head -1))$(
-        if [ -n "$(warp_i1)" ]; then echo ", I1 с именем $WARP_I1"
+        if [ -n "$(warp_i1)" ]; then echo ", I1 $(warp_i1_label "$WARP_I1")"
         elif [ "$WARP_CF" = 1 ] && [ -n "$WARP_I1" ]; then echo ", I1 как в конфиге: нет годного I1 «$WARP_I1» (ни своего, ни готового)"; fi)"
     WARP_HS=0; WARP_EP_TRIED=""; WARP_EP_SILENT=""; WARP_EP_Q=""; WARP_RU_EP=""; WARP_RU_TRY=0
     if [ "$WARP_CF" = 1 ]; then

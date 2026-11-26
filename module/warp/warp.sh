@@ -12,7 +12,8 @@
 #   warp.sh export ИМЯ           текст конфига
 #   warp.sh save ИМЯ             копия в «Загрузки» (ИМЯ.conf) -> «OK путь»
 #   warp.sh saveall              все конфиги одним zip в «Загрузки» -> «OK путь число»
-#   warp.sh i1gen ИМЯ            свой I1 с этим именем (свои DCID и ключи) -> i1/ИМЯ.txt, «OK ИМЯ»
+#   warp.sh i1gen ИМЯ            свой I1 с этим именем (свои DCID и ключи) -> i1/ИМЯ.txt, «OK ИМЯ»;
+#                                «dns_ИМЯ» — I1 в виде DNS-запроса A этого имени (без nfqws2)
 #   warp.sh i1list               имена своих I1
 #   warp.sh i1del ИМЯ
 #
@@ -291,10 +292,24 @@ case "$1" in
     i1gen)
         # I1 с любым именем на этой установке (WARP_I1): warp/i1gen.lua на Lua nfqws2. Хранится рядом с
         # конфигами — переживает обновление модуля; демон ищет здесь раньше готовых warp/i1
-        n=$(printf '%s' "$2" | tr 'A-Z' 'a-z')
+        n=$(printf '%s' "$2" | tr 'A-Z' 'a-z'); dns=""
+        case "$n" in dns_*) dns=1; n=${n#dns_} ;; esac
         case "$n" in ''|*[!a-z0-9.-]*|[.-]*|*[.-]|*..*) echo "ERR имя: латиница, цифры, точки и дефисы (.рф — в виде xn--)"; exit 1 ;; esac
         case "$n" in *.*) ;; *) echo "ERR нужно имя с точкой, например max.ru"; exit 1 ;; esac
         [ ${#n} -le 100 ] || { echo "ERR имя длиннее 100 знаков"; exit 1; }
+        if [ -n "$dns" ]; then
+            # DNS-запрос (как у ZapretKVN v0.6.56): ID случайный (<r 2>), RD, вопрос A IN, EDNS0 на 1232 байта —
+            # как у обычного резолвера; имени сайта для классификации в нём нет, криптографии не нужно
+            h="01000001000000000001"
+            for l in $(echo "$n" | tr '.' ' '); do
+                [ ${#l} -le 63 ] || { echo "ERR часть имени длиннее 63 знаков"; exit 1; }
+                h="$h$(printf '%02x' ${#l})$(printf '%s' "$l" | od -An -tx1 | tr -d ' \n')"
+            done
+            n="dns_$n"
+            mkdir -p "$WARP_DIR/i1" && printf '<r 2><b 0x%s000001000100002904d0000000000000>\n' "$h" > "$WARP_DIR/i1/.$n.tmp" &&
+                mv -f "$WARP_DIR/i1/.$n.tmp" "$WARP_DIR/i1/$n.txt" || { echo "ERR не записался"; exit 1; }
+            echo "OK $n"; exit 0
+        fi
         [ -x "$NQ2" ] || { echo "ERR нет nfqws2 — собрать I1 нечем"; exit 1; }
         src=$(head -1 "$MODDIR/warp/i1.txt" 2>/dev/null | tr -d '\r')
         case "$src" in "<b 0x"*">") ;; *) echo "ERR нет образца warp/i1.txt — переустановите модуль"; exit 1 ;; esac
@@ -309,7 +324,7 @@ case "$1" in
     i1list)
         for f in "$WARP_DIR"/i1/*.txt; do [ -f "$f" ] && { f=${f##*/}; echo "${f%.txt}"; }; done ;;
     i1del)
-        case "$2" in ''|*[!a-z0-9.-]*|.*) echo "ERR нет такого"; exit 1 ;; esac
+        case "${2#dns_}" in ''|*[!a-z0-9.-]*|.*) echo "ERR нет такого"; exit 1 ;; esac
         [ -f "$WARP_DIR/i1/$2.txt" ] || { echo "ERR нет такого"; exit 1; }
         rm -f "$WARP_DIR/i1/$2.txt" && echo "OK" ;;
     del)

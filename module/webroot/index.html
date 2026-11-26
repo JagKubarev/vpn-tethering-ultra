@@ -1040,9 +1040,11 @@ details > summary::after { border-color: currentColor; }
       <option value="web.max.ru">web.max.ru</option>
       <option value="fd.oneme.ru">fd.oneme.ru</option>
       <option value="ya.ru">ya.ru</option>
+      <option value="dns_ya.ru">DNS-запрос ya.ru</option>
+      <option value="dns_mtdd.ru">DNS-запрос mtdd.ru</option>
     </select>
-    <div class="s" style="margin-top:10px">Своё имя: модуль соберёт I1 на этом телефоне, со своими DCID и ключами. Потом «Применить».</div>
-    <div class="inline"><input type="text" id="i1In" placeholder="например ozon.ru" aria-label="Своё имя в I1" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="i1Gen">Собрать</button></div>
+    <div class="s" style="margin-top:10px">Своё имя: модуль соберёт I1 на этом телефоне, со своими DCID и ключами. «DNS-запрос» — I1 в виде запроса к DNS этого имени: имени сайта, по которому режут, в нём нет вовсе. Потом «Применить».</div>
+    <div class="inline"><input type="text" id="i1In" placeholder="например ozon.ru" aria-label="Своё имя в I1" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="i1Gen">Собрать</button><button class="btn" id="i1Dns">DNS-запрос</button></div>
   </div>
   <details id="warpCfg">
     <summary>Конфиги</summary>
@@ -1613,7 +1615,7 @@ function renderForm() {
     if (el.type === 'checkbox') el.checked = v === '1';
     else {
       // I1: своё имя (собранное здесь или свой файл) — отдельным пунктом, иначе выбор показал бы «Как в конфиге»
-      if (k === 'WARP_I1' && v && !Array.from(el.options).some((o) => o.value === v)) el.add(new Option(v + ' (своё)', v));
+      if (k === 'WARP_I1' && v && !Array.from(el.options).some((o) => o.value === v)) el.add(new Option(i1Label(v) + ' (своё)', v));
       el.value = v;
     }
   });
@@ -2525,20 +2527,22 @@ let WARP_N = 0, WARP_HTML = '';
 // свои I1 (собраны на этом телефоне: warp.sh i1gen) — в выбор «Имя в I1»; готовое с тем же именем — «(своё)».
 // Один раз (и после сборки), в фоне: loadWarp зовут раз в 10 с, а синхронный exec морозил страницу на MT6580
 let I1_LOADED = false;
+const i1Label = (n) => (/^dns_/.test(n) ? 'DNS-запрос ' + n.slice(4) : n);
 async function loadI1() {
   I1_LOADED = true;
   const r = await ctlBg('warp-i1list'), sel = $('[data-key=WARP_I1]');
-  (r.out || '').split('\n').map((x) => x.trim()).filter((x) => /^[a-z0-9.-]+$/.test(x)).forEach((n) => {
+  (r.out || '').split('\n').map((x) => x.trim()).filter((x) => /^(dns_)?[a-z0-9.-]+$/.test(x)).forEach((n) => {
     const o = Array.from(sel.options).find((x) => x.value === n);
-    if (!o) sel.add(new Option(n + ' (своё)', n));
-    else if (!/\(своё\)$/.test(o.text)) o.text = n + ' (своё)';
+    if (!o) sel.add(new Option(i1Label(n) + ' (своё)', n));
+    else if (!/\(своё\)$/.test(o.text)) o.text = i1Label(n) + ' (своё)';
   });
   sel.value = CUR.WARP_I1 || '';
 }
-$('#i1Gen').addEventListener('click', async () => {
-  const n = $('#i1In').value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/?#].*$/, '');
-  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(n)) { toast('Имя: латиница, цифры, точки — например ozon.ru (.рф — в виде xn--…)'); return; }
-  const b = $('#i1Gen'); b.disabled = true; b.textContent = 'Собираю…';
+async function i1Build(dns) {
+  const h = $('#i1In').value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/?#].*$/, '');
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(h)) { toast('Имя: латиница, цифры, точки — например ozon.ru (.рф — в виде xn--…)'); return; }
+  const n = (dns ? 'dns_' : '') + h, b = $(dns ? '#i1Dns' : '#i1Gen'), was = b.textContent;
+  b.disabled = true; b.textContent = 'Собираю…';
   try {
     const r = await ctlBg('warp-i1gen ' + q(n));
     if (!isOk(r)) { toast('Не собрался: ' + errText(r, 'нет ответа')); return; }
@@ -2547,10 +2551,12 @@ $('#i1Gen').addEventListener('click', async () => {
     // имя уже применено — «Применить» нечего применять (настройка та же): новый I1 подхватит переподключение
     if (saved('WARP_I1') === n && (ST.warp === 'up' || ST.warp === 'starting')) {
       const w = await ctlBg('warp-reconnect');
-      toast(isOk(w) ? 'Новый I1 с именем ' + n + ' собран — WARP переподключается с ним' : 'I1 собран, но переподключить WARP не вышло: ' + errText(w, 'нет ответа'));
-    } else toast('I1 с именем ' + n + ' собран — нажмите «Применить»');
-  } finally { b.disabled = false; b.textContent = 'Собрать'; }
-});
+      toast(isOk(w) ? 'Новый I1 (' + i1Label(n) + ') собран — WARP переподключается с ним' : 'I1 собран, но переподключить WARP не вышло: ' + errText(w, 'нет ответа'));
+    } else toast('I1 (' + i1Label(n) + ') собран — нажмите «Применить»');
+  } finally { b.disabled = false; b.textContent = was; }
+}
+$('#i1Gen').addEventListener('click', () => i1Build(false));
+$('#i1Dns').addEventListener('click', () => i1Build(true));
 
 async function loadWarp() {
   if (!I1_LOADED) loadI1();
