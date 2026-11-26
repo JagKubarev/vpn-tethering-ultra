@@ -193,14 +193,36 @@ warp_wg_file() {   # конфиг [адрес] [I1]
 # (tools/i1gen.py), собранные на телефоне (warp.sh i1gen, свои DCID и ключи) — $WARP_DIR/i1, они раньше.
 # Только вместо I1 конфига, свой не добавляем; свои серверы (не Cloudflare) — как в конфиге
 # I1 — только из тегов AmneziaWG: <b 0x…> байты, <r N> случайные (ID DNS-запроса), <c> счётчик, <t> время
+i1_valid() {   # I1 — только из тегов AmneziaWG
+    case "$1" in "<"*">") ;; *) return 1 ;; esac
+    [ -z "$(printf '%s' "$1" | sed -e 's/<b 0x[0-9a-fA-F][0-9a-fA-F]*>//g' -e 's/<r [0-9][0-9]*>//g' -e 's/<[ct]>//g')" ]
+}
+WARP_I1_RUN=""           # свежий I1 этого подъёма туннеля (warp_i1_fresh); пусто — из файла
 warp_i1() {
     local v f
     [ "$WARP_CF" = 1 ] && [ -n "$WARP_I1" ] || return 0
+    [ -n "$WARP_I1_RUN" ] && { echo "$WARP_I1_RUN"; return 0; }
     for f in "$WARP_DIR/i1/$WARP_I1.txt" "$MODULE_DIR/warp/i1/$WARP_I1.txt"; do   # свой испорчен — готовый
         v=$(head -1 "$f" 2>/dev/null | tr -d '\r')
-        case "$v" in "<"*">") ;; *) continue ;; esac
-        [ -z "$(printf '%s' "$v" | sed -e 's/<b 0x[0-9a-fA-F][0-9a-fA-F]*>//g' -e 's/<r [0-9][0-9]*>//g' -e 's/<[ct]>//g')" ] && { echo "$v"; return 0; }
+        i1_valid "$v" && { echo "$v"; return 0; }
     done
+}
+# Свежий I1 на каждый подъём туннеля: новые DCID, SCID, random и ключи — как у браузера на каждое соединение.
+# Из файла неделями уходил бы один и тот же пакет, а по совпадению байтов его легко запомнить. Образец —
+# выбранный I1 (имя и раскладка те же), nfqws2 + warp/i1gen.lua: ~16 мс на 13T, ~85 мс на MT6580 (26.11).
+# DNS-вариант не трогаем: ID у него AmneziaWG и так меняет на каждой отправке (<r 2>). Не вышло — I1 из файла
+warp_i1_fresh() {
+    local src r
+    WARP_I1_RUN=""
+    [ "$WARP_CF" = 1 ] && [ -n "$WARP_I1" ] && [ -n "$NFQWS2_BIN" ] && [ -f "$MODULE_DIR/warp/i1gen.lua" ] || return 0
+    case "$WARP_I1" in dns_*) return 0 ;; esac
+    src=$(warp_i1)
+    case "$src" in "<b 0x"*">") ;; *) return 0 ;; esac
+    # shellcheck disable=SC2086
+    r=$($TIMEOUT_CMD "$NFQWS2_BIN" --intercept=0 --uid=0:3998 --lua-init="I1_NAME='$WARP_I1' I1_SRC='$src'" \
+        --lua-init=@"$MODULE_DIR/warp/i1gen.lua" 2>/dev/null | grep '^<b 0x' | head -1)
+    i1_valid "$r" && WARP_I1_RUN="$r"
+    return 0
 }
 # Для журнала и WebUI: «dns_ya.ru» — DNS-запрос, иначе имя в поддельном QUIC
 warp_i1_label() { case "$1" in dns_*) echo "DNS-запрос ${1#dns_}" ;; *) echo "с именем $1" ;; esac; }
@@ -312,6 +334,7 @@ warp_start() {   # имя конфига
         case "$WARP_EP0" in engage.cloudflareclient.com:*) WARP_EP0="162.159.192.1:${WARP_EP0##*:}" ;; esac
         ep1=$(warp_ep_list | head -1)
     fi
+    warp_i1_fresh
     warp_wg_file "$f" "$ep1" "$(warp_i1)"
     "$AWG_BIN" setconf "$WARP_IF" "$WARP_DIR/.run.wg" >> "$WARP_RUN.log" 2>&1; rc=$?
     rm -f "$WARP_DIR/.run.wg"
@@ -340,7 +363,7 @@ warp_start() {   # имя конфига
     $ip -6 rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
     WARP_CUR="$n"; WARP_STATE=starting; WARP_TS=$(date +%s); WARP_CHECK_TS=0; WARP_FAILS=0; WARP_NETCHG=0; WARP_TG_TS=0
     log "WARP: запускаю $n ($(sed -n 's/^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*//p' "$f" | head -1))$(
-        if [ -n "$(warp_i1)" ]; then echo ", I1 $(warp_i1_label "$WARP_I1")"
+        if [ -n "$(warp_i1)" ]; then echo ", I1 $(warp_i1_label "$WARP_I1")${WARP_I1_RUN:+ (свежий)}"
         elif [ "$WARP_CF" = 1 ] && [ -n "$WARP_I1" ]; then echo ", I1 как в конфиге: нет годного I1 «$WARP_I1» (ни своего, ни готового)"; fi)"
     WARP_HS=0; WARP_EP_TRIED=""; WARP_EP_SILENT=""; WARP_EP_Q=""; WARP_RU_EP=""; WARP_RU_TRY=0
     if [ "$WARP_CF" = 1 ]; then
