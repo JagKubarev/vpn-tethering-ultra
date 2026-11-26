@@ -1273,9 +1273,15 @@ const HAS_KSU = typeof ksu !== 'undefined' && ksu && typeof ksu.exec === 'functi
 let cbSeq = 0;
 // Менеджер root может так и не вызвать ответ (26.11, 4PDA: Xiaomi 17T — «Добавить» у WARP не реагирует, в журнале
 // пусто): без срока кнопка висела бы заблокированной молча. Все команды через ctl короткие (долгие — ctlBg,
-// там каждый exec — короткий опрос), так что 30 с — с запасом; поздний ответ после срока — молча
+// там каждый exec — короткий опрос), так что 30 с — с запасом; поздний ответ после срока — молча (команда при этом
+// могла и выполниться — поэтому «не дождался», а не «не выполнилась»). Менеджер с синхронным ksu.exec (KernelSU)
+// держит страницу до конца команды: зависни он внутри — не сработает и срок; вернулся, пусть и через минуту, —
+// ответ придёт, срок снимаем
 const EXEC_TIMEOUT = 30000;
-let execToastTs = 0;
+const EXEC_SEC = EXEC_TIMEOUT / 1000;
+let execToastTs = 0, userTs = 0;
+// подсказку — только на то, что нажал сам пользователь: фоновые опросы (статус раз в 3 с) молчат
+['click', 'input', 'change'].forEach((t) => document.addEventListener(t, () => { userTs = Date.now(); }, true));
 function exec(cmd) {
   if (!HAS_KSU) return Promise.resolve(mockExec(cmd));
   return new Promise((resolve) => {
@@ -1285,9 +1291,12 @@ function exec(cmd) {
       if (done) return;
       done = true;
       window[name] = () => { delete window[name]; };
-      // опрос статуса раз в 3 с — не заваливать подсказками
-      if (Date.now() - execToastTs > 20000) { execToastTs = Date.now(); toast('Менеджер root не ответил за 30 с — команда не выполнилась. Напишите в тему модуля, какой у вас менеджер root и его версия'); }
-      resolve({ errno: 124, out: 'ERR менеджер root не ответил за 30 с', err: '' });
+      const now = Date.now();
+      if (now - userTs < EXEC_TIMEOUT + 5000 && now - execToastTs > 20000) {
+        execToastTs = now;
+        toast('Менеджер root не ответил за ' + EXEC_SEC + ' с — не знаю, выполнилась ли команда. Напишите в тему модуля, какой у вас менеджер root и его версия');
+      }
+      resolve({ errno: 124, out: 'ERR менеджер root не ответил за ' + EXEC_SEC + ' с', err: '' });
     }, EXEC_TIMEOUT);
     window[name] = (errno, stdout, stderr) => {
       delete window[name];
@@ -1295,10 +1304,13 @@ function exec(cmd) {
       done = true; clearTimeout(tm);
       resolve({ errno, out: stdout || '', err: stderr || '' });
     };
+    const t0 = Date.now();
     try { ksu.exec(cmd, '{}', name); }
     catch (e) {
       if (!done) { done = true; clearTimeout(tm); delete window[name]; resolve({ errno: 1, out: '', err: String(e) }); }
     }
+    // синхронный менеджер отработал команду дольше секунды — ответ уже в очереди, срок ему не нужен
+    if (!done && Date.now() - t0 > 1000) clearTimeout(tm);
   });
 }
 const ctl = (args) => exec(CTL + ' ' + args);
@@ -1603,7 +1615,8 @@ async function loadStatus() {
   stBusy = true;
   try {
     const r = await ctl('status');
-    if (n === stSeq) renderStatus(parseKV(r.out));
+    // менеджер root не ответил (exec, срок) — статус неизвестен: оставить прошлый, а не рисовать «не запущен»
+    if (n === stSeq && r.errno !== 124) renderStatus(parseKV(r.out));
   } finally { if (n === stSeq) stBusy = false; }
 }
 
