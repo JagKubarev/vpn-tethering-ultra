@@ -314,6 +314,8 @@ details > summary::after { border-color: currentColor; }
 /* ---- подсказка наверху карточки ---- */
 .tip { margin: 14px 16px 0; font-size: 13px; color: var(--accent); background: var(--line); background: color-mix(in srgb, var(--accent) 10%, transparent); border-radius: 10px; padding: 8px 10px; }
 .tip[hidden] { display: none; }
+.row[hidden] { display: none; }
+.s[hidden] { display: none; }
 
 /* ---- Выходы: плитки и списки ---- */
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
@@ -1017,6 +1019,13 @@ details > summary::after { border-color: currentColor; }
       <div class="s">Выключено — устройства раздачи ходят без WARP.</div></div>
     <label class="sw"><input type="checkbox" data-key="WARP_TETHER"><span></span></label>
   </div>
+  <div class="row col" data-dep="WARP_ENABLE" id="wcsRow" hidden>
+    <div class="txt"><div class="t">Мимо своего сервера</div>
+      <div class="s">У этих приложений то, что идёт в WARP, идёт в обычный WARP, без своего сервера: короче путь и задержка (Telegram, звонки, игры). Остальное — через свой сервер. Только приложения телефона: раздача — через свой сервер.</div></div>
+    <div class="chips" id="wcsChips"></div>
+    <div class="s mt8" id="wcsNote" hidden></div>
+    <div class="mt8"><button class="btn small" id="wcsAdd">Добавить приложение</button></div>
+  </div>
   <div class="row col" data-dep="WARP_ENABLE">
     <div class="txt"><div class="t">Если выход не работает</div>
       <div class="s">Что делать с тем, что идёт в WARP, когда свой сервер или сам WARP не отвечает. Блок — приложение увидит «нет сети», а не пойдёт через оператора.</div></div>
@@ -1587,7 +1596,7 @@ const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAM
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_ENGINE','ZAPRET2_STRATEGY','ZAPRET2_ARGS','ZAPRET2_FAKE_SNI','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE','ZAPRET_EXCL_APPS',
   'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','DNS_VIA_ZAPRET','YT_GGC_BLOCK','YT_DEAD_FAILFAST','YT_WSSIZE_RAMP','YT_RAMP_HOURS','YT_RETRY_MAX','ZAPRET_WATCHDOG','ZAPRET_AUTOPICK','ZAPRET_WATCHDOG_MIN',
   'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','ZAPRET_AUTO_FAIL',
-  'WARP_ENABLE','WARP_CONF','WARP_I1','WARP_CHAIN','WARP_STRICT','WARP_STICK','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_COUNTRY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
+  'WARP_ENABLE','WARP_CONF','WARP_I1','WARP_CHAIN','WARP_CHAIN_SKIP','WARP_STRICT','WARP_STICK','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_COUNTRY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
 // интервал в минутах человеческим языком: 15 -> «15 минут», 180 -> «3 часа»
 function fmtMin(v, def) {
   const m = +v || def;
@@ -1632,6 +1641,21 @@ function renderForm() {
 const GROUPS = [['TELEGRAM', 'Telegram', 'Без VPN Telegram закрыт по IP. Через Opera звонки не идут.'],
   ['GOOGLE', 'Google', 'Поиск, YouTube, Play — если оператор режет Google. Скорость — как у выхода.']];
 const domList = (k) => (CUR[k] || '').split(/\s+/).filter(Boolean);
+// клиенты Telegram — как WARP_TG_PKGS в lib/warp.sh: при WARP_TELEGRAM и WARP_PHONE идут в WARP целиком
+const TG_PKGS = ['org.telegram.messenger', 'org.telegram.messenger.web', 'org.telegram.messenger.beta', 'org.thunderdog.challegram',
+  'org.telegram.plus', 'tw.nekomimi.nekogram', 'xyz.nextalone.nagram', 'com.exteragram.messenger', 'uz.unnarsx.cherrygram',
+  'org.forkgram.messenger', 'it.octogram.android'];
+// свой сервер после WARP (WARP_CHAIN): путь — подписью; мимо него (WARP_CHAIN_SKIP) — только приложения телефона, не раздача
+function chainNotes() {
+  const ch = CUR.WARP_ENABLE === '1' ? CUR.WARP_CHAIN || '' : '', skip = appKeyList('WARP_CHAIN_SKIP');
+  const via = 'WARP → свой сервер ' + ch;
+  const tg = CUR.WARP_PHONE === '1' && skip.some((p) => TG_PKGS.includes(appBase(p)));
+  return {
+    grp: (k) => !ch ? '' : k === 'TELEGRAM' && tg ? 'Телефон — мимо своего сервера, раздача — через свой сервер ' + ch : via,
+    // у приложений и сайтов строка узкая (рядом выбор выхода) — коротко
+    app: (p) => !ch ? '' : skip.includes(p) ? 'мимо своего сервера' : 'через свой сервер',
+    site: () => !ch ? '' : 'через свой сервер' };
+}
 const segHtml = (attr, opts, cur, dis) => '<div class="seg" role="radiogroup">' + opts.map(([v, l]) =>
   '<button ' + attr + ' data-v="' + v + '" role="radio" aria-checked="' + (cur === v) + '" class="' + (cur === v ? 'on' : '') + '"' +
   (dis[v] ? ' disabled' : '') + '>' + l + '</button>').join('') + '</div>';
@@ -1640,13 +1664,15 @@ function renderRoutes() {
   const w = CUR.WARP_ENABLE === '1', o = CUR.OPERA_ENABLE === '1', dis = { warp: !w, opera: !o };
   const goneTxt = (r) => (r === 'warp' ? 'WARP выключен' : 'Opera выключена') + ', идёт напрямую';
   const gone = (r) => (r === 'warp' && !w) || (r === 'opera' && !o);
+  const cn = chainNotes(), cs = (r, t) => r === 'warp' && t ? '<div class="s">' + esc(t) + '</div>' : '';
   const g = GROUPS.map(([k, t, sub]) => {
     const r = CUR['WARP_' + k] === '1' ? 'warp' : CUR['OPERA_' + k] === '1' ? 'opera' : 'direct';
-    return '<div class="row col route-row"><div class="txt"><div class="t">' + t + '</div><div class="s">' + (gone(r) ? goneTxt(r) : sub) + '</div></div>' +
+    return '<div class="row col route-row"><div class="txt"><div class="t">' + t + '</div><div class="s">' + (gone(r) ? goneTxt(r) : sub) + '</div>' +
+      (gone(r) ? '' : cs(r, cn.grp(k))) + '</div>' +
       segHtml('data-grp="' + k + '"', [['direct', 'Прямо'], ['warp', 'WARP'], ['opera', 'Opera']], r, dis) + '</div>';
   }).join('');
   const item = (kind, id, name, sub, r) => '<div class="row item' + (gone(r) ? ' gone' : '') + '"><div class="txt"><div class="t">' + esc(name) + '</div>' +
-    (gone(r) ? '<div class="s">' + goneTxt(r) + '</div>' : sub ? '<div class="s">' + esc(sub) + '</div>' : '') + '</div>' +
+    (gone(r) ? '<div class="s">' + goneTxt(r) + '</div>' : (sub ? '<div class="s">' + esc(sub) + '</div>' : '') + cs(r, kind === 'app' ? cn.app(id) : cn.site())) + '</div>' +
     segHtml('data-' + kind + '="' + esc(id) + '"', [['warp', 'WARP'], ['opera', 'Opera']], r, {}) +
     '<button class="x" data-rm' + kind + '="' + esc(id) + '" aria-label="Убрать ' + esc(name) + '">✕</button></div>';
   const sites = domList('WARP_DOMAINS').map((d) => [d, 'warp']).concat(domList('OPERA_DOMAINS').map((d) => [d, 'opera']));
@@ -1886,6 +1912,15 @@ function renderDeps() {
   // data-dep2 — вторая нужная настройка (обе включены — строка действует)
   $$('[data-dep]').forEach((row) => { row.classList.toggle('off', CUR[row.dataset.dep] !== '1' || (!!row.dataset.dep2 && CUR[row.dataset.dep2] !== '1') || (!!row.dataset.depoff && CUR[row.dataset.depoff] === '1')); });
   renderFakeSni();
+  $('#wcsRow').hidden = !CUR.WARP_CHAIN;   // без своего сервера после WARP мимо него идти нечему
+  // мимо своего сервера уходит только то, что у приложения идёт в WARP: целиком (WARP_APPS, клиенты Telegram) или по
+  // группам и сайтам (WARP_PHONE); без WARP_PHONE и не целиком — правило не действует
+  const wcsIdle = appKeyList('WARP_CHAIN_SKIP').filter((p) => !appKeyList('WARP_APPS').includes(p) &&
+    !(CUR.WARP_TELEGRAM === '1' && CUR.WARP_PHONE === '1' && TG_PKGS.includes(appBase(p))));
+  $('#wcsNote').hidden = !wcsIdle.length;
+  $('#wcsNote').textContent = !wcsIdle.length ? '' : wcsIdle.map(label).join(', ') + (CUR.WARP_PHONE === '1'
+    ? ' — не в WARP целиком: мимо своего сервера пойдёт только то, что идёт в WARP по группам и сайтам.'
+    : ' — в WARP не идёт (WARP «Для самого телефона» выключен), здесь не действует.');
   // главный выключатель — на Главной и в шапке своей вкладки (у WARP и Opera — только во вкладке)
   // шапка вкладки: точка и подпись по состоянию главного выключателя
   $$('[data-mdot]').forEach((d) => { d.className = 'dot big' + (CUR[d.dataset.mdot] === '1' ? ' green' : ''); });
@@ -2118,7 +2153,8 @@ let SHEET_KEY = 'QUIC_BLOCK_APPS';
 const appKeyList = (k) => (CUR[k] || '').split(/\s+/).filter(Boolean);
 const quicList = () => appKeyList(SHEET_KEY);
 const CHIPS = { QUIC_BLOCK_APPS: ['#quicChips', 'Нет приложений — QUIC ни у кого не закрыт.'],
-  ZAPRET_EXCL_APPS: ['#zexChips', 'Нет — обход для всех приложений телефона.'] };
+  ZAPRET_EXCL_APPS: ['#zexChips', 'Нет — обход для всех приложений телефона.'],
+  WARP_CHAIN_SKIP: ['#wcsChips', 'Нет — всё, что идёт в WARP, идёт через свой сервер.'] };
 
 function renderChips() {
   Object.keys(CHIPS).forEach((k) => {
@@ -2128,7 +2164,7 @@ function renderChips() {
       : '<div class="empty">' + CHIPS[k][1] + '</div>';
   });
 }
-['#quicChips', '#zexChips'].forEach((id) => $(id).addEventListener('click', (e) => {
+['#quicChips', '#zexChips', '#wcsChips'].forEach((id) => $(id).addEventListener('click', (e) => {
   const p = e.target.dataset && e.target.dataset.rm, k = e.target.dataset && e.target.dataset.rk;
   if (!p || !k) return;
   setCur(k, appKeyList(k).filter((x) => x !== p).join(' '));
@@ -2191,9 +2227,10 @@ function openSheet(on) {
   $('#sheet').classList.toggle('show', on); $('#sheetBg').classList.toggle('show', on);
 }
 $('#zexAdd').addEventListener('click', () => { SHEET_KEY = 'ZAPRET_EXCL_APPS'; $('#quicAdd').click(); });
+$('#wcsAdd').addEventListener('click', () => { SHEET_KEY = 'WARP_CHAIN_SKIP'; $('#quicAdd').click(); });
 $('#quicAdd').addEventListener('click', async (e) => {
   if (e.isTrusted) SHEET_KEY = 'QUIC_BLOCK_APPS';
-  $('#sheetTitle').textContent = { WARP_APPS: 'Приложения через WARP', OPERA_APPS: 'Приложения через Opera', ZAPRET_EXCL_APPS: 'Исключения из обхода' }[SHEET_KEY] || 'Приложения без QUIC';
+  $('#sheetTitle').textContent = { WARP_APPS: 'Приложения через WARP', OPERA_APPS: 'Приложения через Opera', ZAPRET_EXCL_APPS: 'Исключения из обхода', WARP_CHAIN_SKIP: 'Мимо своего сервера' }[SHEET_KEY] || 'Приложения без QUIC';
   $('#appSearch').value = ''; $('#appList').innerHTML = '<div class="empty" style="padding:0 16px">Загружаю список…</div>';
   openSheet(true);
   await loadApps(); renderAppList(); renderChips();
@@ -2234,7 +2271,7 @@ async function waitAck(token, sec) {
 // ошибка сохранения — с названием настройки со страницы, а не с ключом конфига
 const KEY_TITLE = { WARP_TELEGRAM: 'Telegram через WARP', OPERA_TELEGRAM: 'Telegram через Opera', WARP_GOOGLE: 'Google через WARP',
   OPERA_GOOGLE: 'Google через Opera', WARP_DOMAINS: 'Сайты через WARP', OPERA_DOMAINS: 'Сайты через Opera',
-  WARP_APPS: 'Приложения через WARP', OPERA_APPS: 'Приложения через Opera', OPERA_COUNTRY: 'Регион Opera' };
+  WARP_APPS: 'Приложения через WARP', OPERA_APPS: 'Приложения через Opera', OPERA_COUNTRY: 'Регион Opera', WARP_CHAIN_SKIP: 'Мимо своего сервера' };
 // стратегия nfqws2 из статуса: «имя» или «имя+» (свои приёмы TCP)
 function z2Name(v) {
   v = v || 'hardcorp74';
@@ -2282,7 +2319,7 @@ $('#revertBtn').addEventListener('click', () => {
 // сброс вкладки: её поля (data-key внутри) и то, что в ней рисуется списками и выбором приложений — к умолчаниям
 const TAB_KEYS_EXTRA = { net: ['DNS_DIRECT', 'DNS_UPSTREAMS', 'DNS_FALLBACKS', 'DNS_GEO_UPSTREAMS'],
   bypass: ['QUIC_BLOCK_APPS', 'ZAPRET2_FAKE_SNI', 'ZAPRET_EXCL_APPS', 'ZAPRET_WATCHDOG_MIN', 'ZAPRET_ALT_MIN'],
-  warp: ['WARP_CONF', 'WARP_CHAIN', 'WARP_GOOGLE', 'WARP_TELEGRAM', 'WARP_APPS', 'WARP_DOMAINS', 'OPERA_DOMAINS', 'OPERA_TELEGRAM', 'OPERA_GOOGLE', 'OPERA_APPS'] };
+  warp: ['WARP_CONF', 'WARP_CHAIN', 'WARP_CHAIN_SKIP', 'WARP_GOOGLE', 'WARP_TELEGRAM', 'WARP_APPS', 'WARP_DOMAINS', 'OPERA_DOMAINS', 'OPERA_TELEGRAM', 'OPERA_GOOGLE', 'OPERA_APPS'] };
 const TAB_NAMES = { net: 'DNS', bypass: 'Обход', warp: 'Выходы' };
 $$('[data-tabreset]').forEach((b) => b.addEventListener('click', () => {
   if (busy) { toast('Подождите — применяются настройки'); return; }

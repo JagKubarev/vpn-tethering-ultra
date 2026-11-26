@@ -349,6 +349,10 @@ case "$1" in
         ASH_STANDALONE=1 setsid "$BB" sh "$MODDIR/service.sh" </dev/null >/dev/null 2>&1 &
         n=0
         while [ $n -lt 30 ]; do sleep 1; n=$((n + 1)); [ -n "$(daemon_pid)" ] && { echo "OK"; exit 0; }; done
+        # не встал — перенаправление DNS телефона, оставленное на перезапуск, снять: иначе телефон совсем без DNS
+        for t in /system/bin/iptables /system/bin/ip6tables; do
+            n=0; while [ $n -lt 8 ] && $t -w 2 -t nat -D OUTPUT -j VPN_PHONE_DNS 2>/dev/null; do n=$((n + 1)); done
+        done
         echo "ERR демон не запустился — смотрите журнал"; exit 1
         ;;
     update)     # есть ли версия новее: update.json из main (тот же, что у менеджера модулей) раз в 6 ч, иначе прежний ответ.

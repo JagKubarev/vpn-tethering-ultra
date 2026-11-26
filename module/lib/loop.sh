@@ -233,7 +233,7 @@ reload_config() {
     _conf_grp_sig s_op0 $CONF_GRP_OPERA
     _conf_grp_sig s_wp0 $CONF_GRP_WARP
     _conf_grp_sig s_wr0 $CONF_GRP_WARPR
-    local s_tgw0="$WARP_ENABLE$WARP_TELEGRAM" s_api0="$OPERA_API_PROXY|$OPERA_COUNTRY" s_wc0="$WARP_CHAIN" s_wk0="$WARP_STRICT|$WARP_STICK"
+    local s_tgw0="$WARP_ENABLE$WARP_TELEGRAM" s_api0="$OPERA_API_PROXY|$OPERA_COUNTRY" s_wc0="$WARP_CHAIN" s_wcs0="$WARP_CHAIN_SKIP" s_wk0="$WARP_STRICT|$WARP_STICK"
     conf_restore_defaults
     USER_CONF_NOTE=""
     load_user_conf
@@ -265,6 +265,7 @@ reload_config() {
     [ "$s_wp0" != "$s_wp1" ] && what="$what WARP"
     [ "$s_wr0" != "$s_wr1" ] && what="$what что-идёт-в-WARP"
     [ "$s_wc0" != "$WARP_CHAIN" ] && what="$what свой-сервер-после-WARP"
+    [ "$s_wcs0" != "$WARP_CHAIN_SKIP" ] && what="$what мимо-своего-сервера"
     [ "$s_wk0" != "$WARP_STRICT|$WARP_STICK" ] && what="$what блок-WARP/не-менять-сервер"
     [ "$s_api0" != "$OPERA_API_PROXY|$OPERA_COUNTRY" ] && what="$what Opera"
     log "Настройки перечитаны:${USER_CONF_NOTE:- (всё по умолчанию)}"
@@ -330,6 +331,16 @@ reload_config() {
         fi
         phone_status_refresh
     fi
+    # мимо своего сервера: цепочку не трогаем — правила по uid заново, соединения приложений из старого и нового
+    # списка — закрыть (открытые через другой выход молча висели бы до тайм-аута, как при смене пути у групп).
+    # Цепочка сменилась или правила не стоят (WARP не поднят) — их выставит warp_chain_reconcile
+    if [ "$s_wcs0" != "$WARP_CHAIN_SKIP" ] && [ "$s_wc0" = "$WARP_CHAIN" ] && [ -n "$WARP_CH_SKIP_ON" ]; then
+        local _wu="$WARP_APP_UIDS" _wn _wp
+        warp_chain_skip_set
+        WARP_APP_UIDS=$(for _wp in $s_wcs0 $WARP_CHAIN_SKIP; do pkg_uid "$_wp"; done | sort -u | tr '\n' ' ')
+        _wn=$(warp_kill_app_sockets); WARP_APP_UIDS="$_wu"
+        log "WARP: мимо своего сервера — ${WARP_CHAIN_SKIP:-никого}; закрыто соединений этих приложений: $_wn — переподключатся сразу"
+    fi
     # блок и «не менять сервер»: туннель не трогаем — правила запрета выставит сторож (warp_block_set), а «плохие»
     # с нуля, чтобы основной при «не менять» брался сразу
     [ "$s_wk0" != "$WARP_STRICT|$WARP_STICK" ] && WARP_BAD=""
@@ -359,7 +370,10 @@ handle_usr1() {
 cleanup_on_exit() {
     log "Exiting, cleaning up..."
     cleanup_all_rules
-    phone_dns_rules_off
+    # перезапуск (webctl restart): перенаправление DNS телефона на dnsproxy не снимаем — новый демон его подхватит.
+    # Пока dnsproxy нет (~10 с), запросы получают отказ, а не уходят оператору: 26.11 на 13T за перезапуск DNS
+    # телефона 12–14 с ходил к YOTA (Android кэширует настоящие адреса закрытых и гео-имён на их TTL)
+    restart_flag_fresh || phone_dns_rules_off
     PHONE_DNS_ON=0
     # zapret_down зовёт quic_block_apply — снимать QUIC после него, иначе REJECT остаётся
     zapret_down

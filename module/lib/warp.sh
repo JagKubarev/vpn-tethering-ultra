@@ -23,7 +23,8 @@ WARP_WL_RETRY=300        # то же при белом списке операт
 WARP_STATE=off           # off | starting | up | fail
 WARP_CUR=""              # конфиг в работе
 WARP_PID=""
-WARP_RESTART_FLAG=/data/local/tmp/vpn_tether_restart   # webctl restart: блок WARP на выходе не снимать
+WARP_RESTART_FLAG=/data/local/tmp/vpn_tether_restart   # webctl restart: блок WARP и DNS телефона на выходе не снимать
+restart_flag_fresh() { [ -n "$(find "$WARP_RESTART_FLAG" -mmin -1 2>/dev/null)" ]; }
 WARP_CH_ADDR=""          # адрес warp1 (своего сервера после WARP) — для запрета «адрес туннеля мимо туннеля»
 CHAIN_WARP_SRC=VPN_WARP_SRC
 WARP_TS=0                # когда запущен / поднялся
@@ -97,7 +98,7 @@ warp_down() {   # [причина] — пусто: молча
     # выход демона — блок снять (warp_reconcile при VPN и т.п. снимает его сам, до warp_down); кроме перезапуска
     # (webctl restart, флаг моложе минуты): новый демон ставит его через ~2 с, а без него эти секунды то, что
     # идёт в WARP, уходило оператору (26.11 на 13T ~30 пакетов к Telegram за перезапуск)
-    if [ "$1" = "выход" ] && [ -z "$(find "$WARP_RESTART_FLAG" -mmin -1 2>/dev/null)" ]; then warp_block_set 0; fi
+    if [ "$1" = "выход" ] && ! restart_flag_fresh; then warp_block_set 0; fi
     if [ "$WARP_BLK_LVL" -ge 1 ] 2>/dev/null; then
         # «Если выход не работает» — не напрямую: разметку держим, то, что идёт в WARP, упрётся в запрет
         # (таблица WARP пустая); открытые соединения закрыть — приложения сразу увидят «нет сети»
@@ -1190,6 +1191,8 @@ WARP_CH_EP_PREF=2970       # to сервер -> WARP_TABLE (default dev warp0)
 WARP_CH_NO_PREF=2971       # to сервер -> prohibit: warp0 нет — не напрямую
 WARP_CH_OIF_PREF=2976      # oif warp1 -> WARP_CH_TABLE (проверки, привязанные к warp1)
 WARP_CH_MARK_PREF=2977     # метка WARP -> WARP_CH_TABLE, раньше WARP_MARK_PREF (2979)
+WARP_CH_SKIP_PREF=2975     # uid из WARP_CHAIN_SKIP + метка WARP -> WARP_TABLE: мимо своего сервера, раньше 2977
+WARP_CH_SKIP_ON=""         # «set:<список>» — правила мимо своего сервера стоят для этого списка; пусто — не стоят
 WARP_CH_MTU=1200           # MTU warp0 1280 минус заголовки WireGuard (80)
 WARP_CH_MSS=1160
 WARP_CH_RETRY=120          # не поднялась / замолчала — повтор через 2 мин, дальше пауза растёт вдвое (до 30 мин):
@@ -1232,10 +1235,30 @@ warp_block_set() {   # 0 | 1 | 2
     phone_status_refresh
 }
 
+# Мимо своего сервера (WARP_CHAIN_SKIP): у этих приложений телефона то, что идёт в WARP, идёт в голый WARP (выход
+# Cloudflare, без крюка через сервер: 26.11 Telegram через Сингапур — ~600 мс, через WARP — ~230). Правило по uid
+# раньше правила цепочки (2977) и её запрета (2978): держим, пока WARP поднят и свой сервер задан, — и когда он не
+# отвечает: при WARP_STRICT=2 иначе и эти приложения упирались бы в запрет, хотя WARP жив. WARP упал — его таблица
+# пуста, и дальше как у всех: при WARP_STRICT 1/2 — запрет (2978/2981). Только IPv4 — как и правило цепочки
+warp_chain_skip_set() {   # [-] — только снять
+    local p u _n=0
+    while [ $_n -lt 64 ] && $ip rule del pref $WARP_CH_SKIP_PREF 2>/dev/null; do _n=$((_n + 1)); done
+    WARP_CH_SKIP_ON=""
+    [ "$1" = - ] && return 0
+    WARP_CH_SKIP_ON="set:$WARP_CHAIN_SKIP"
+    for p in $WARP_CHAIN_SKIP; do
+        u=$(pkg_uid "$p")
+        case "$u" in ''|*[!0-9]*) continue ;; esac
+        [ "$u" -ge 10000 ] || continue
+        $ip rule add uidrange "$u-$u" fwmark $WARP_MARK/$WARP_MARK lookup $WARP_TABLE pref $WARP_CH_SKIP_PREF 2>/dev/null
+    done
+}
+
 warp_chain_down() {   # [причина] — пусто: молча
     local was="$WARP_CH_STATE" k _n
     # сначала в WARP — то, что шло через цепочку; потом процесс; правила к серверу — последними
     $ip rule del fwmark $WARP_MARK/$WARP_MARK lookup $WARP_CH_TABLE pref $WARP_CH_MARK_PREF 2>/dev/null
+    warp_chain_skip_set -
     [ -n "$WARP_CH_PID" ] && kill "$WARP_CH_PID" 2>/dev/null
     $ip link del $WARP_CH_IF 2>/dev/null
     [ -n "$WARP_CH_ADDR" ] && warp_src_guard del "$WARP_CH_ADDR"; WARP_CH_ADDR=""
@@ -1328,9 +1351,10 @@ warp_chain_up() {
     if ! warp_chain_probe; then warp_chain_down; warp_chain_fail "рукопожатие есть, трафика нет"; return 1; fi
     $iptables -t mangle -I POSTROUTING 1 -o $WARP_CH_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $WARP_CH_MSS 2>/dev/null
     $iptables -t mangle -I PREROUTING 1 -i $WARP_CH_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $WARP_CH_MSS 2>/dev/null
+    warp_chain_skip_set
     $ip rule add fwmark $WARP_MARK/$WARP_MARK lookup $WARP_CH_TABLE pref $WARP_CH_MARK_PREF 2>/dev/null
     WARP_CH_STATE=up; WARP_CH_FAILS=0; WARP_CH_CHECK_TS=$(date +%s); WARP_CH_NOTE=""; WARP_CH_WAIT=$WARP_CH_RETRY; WARP_CH_NAME="$WARP_CHAIN"
-    log "WARP: после WARP — свой сервер $WARP_CHAIN ($host): выход ${WARP_CH_IP:-?}${WARP_CH_LOC:+, $WARP_CH_LOC}; напрямую к серверу ничего не идёт"
+    log "WARP: после WARP — свой сервер $WARP_CHAIN ($host): выход ${WARP_CH_IP:-?}${WARP_CH_LOC:+, $WARP_CH_LOC}; напрямую к серверу ничего не идёт${WARP_CHAIN_SKIP:+; мимо него — $WARP_CHAIN_SKIP}"
     # что уже шло через WARP — переподключится через цепочку
     warp_kill_sockets "свой сервер поднят"
     phone_status_refresh
@@ -1356,6 +1380,9 @@ warp_chain_reconcile() {
         fi
         return 0
     fi
+    # мимо своего сервера — и пока он не поднят или не отвечает (warp_chain_down их снимает: свой сервер выключен,
+    # WARP снят); по подписи — не трогать правила на каждом круге
+    [ "$WARP_CH_SKIP_ON" = "set:$WARP_CHAIN_SKIP" ] || warp_chain_skip_set
     now=$(date +%s)
     case "$WARP_CH_STATE" in
         off) warp_chain_up ;;
@@ -1369,7 +1396,7 @@ warp_chain_reconcile() {
             WARP_CH_CHECK_TS=$now
             # netd мог перетряхнуть правила
             $ip rule show 2>/dev/null | grep -q "^$WARP_CH_MARK_PREF:" || \
-                $ip rule add fwmark $WARP_MARK/$WARP_MARK lookup $WARP_CH_TABLE pref $WARP_CH_MARK_PREF 2>/dev/null
+                { warp_chain_skip_set; $ip rule add fwmark $WARP_MARK/$WARP_MARK lookup $WARP_CH_TABLE pref $WARP_CH_MARK_PREF 2>/dev/null; }
             # WARP сам не отвечает (нет сети, метро) — цепочке внутри него ответить нечем: проба ничего не скажет и стоила
             # бы до 14 с цикла демона; промах не считаем, следующая — через 10 с (ревью 25.11)
             if [ "$WARP_NONET" = 1 ] || [ "${WARP_FAILS:-0}" -gt 0 ]; then

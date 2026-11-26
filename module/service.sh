@@ -1040,6 +1040,7 @@ WARP_CONF=""            # предпочтительный конфиг (имя)
 WARP_I1=""              # имя в I1 конфигов Cloudflare (warp/i1/<имя>.txt); пусто — как в конфиге
 WARP_CHAIN=""           # свой сервер после WARP (имя своего конфига): AmneziaWG к нему внутри туннеля Cloudflare —
                         # ТСПУ видит только WARP (lib/warp.sh, warp_chain_*); пусто — выкл
+WARP_CHAIN_SKIP=""      # приложения телефона мимо своего сервера: то, что у них идёт в WARP, — в голый WARP (пакеты, pkg@N)
 # Что пускать в WARP (только по адресам самих сервисов, не общих CDN):
 WARP_GOOGLE=0           # сети Google (goog.json) — в «волны» ТСПУ
 WARP_TELEGRAM=1         # сети Telegram (заблокирован по IP)
@@ -1213,7 +1214,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
             # как WARP_DOMAINS, плюс «!домен» — и через адреса общих CDN
             case "$val" in *[!a-z0-9.\ !-]*) ok=0 ;; esac
             [ ${#val} -le 2000 ] || ok=0 ;;
-        QUIC_BLOCK_APPS|WARP_APPS|OPERA_APPS|ZAPRET_EXCL_APPS)
+        QUIC_BLOCK_APPS|WARP_APPS|OPERA_APPS|ZAPRET_EXCL_APPS|WARP_CHAIN_SKIP)
             # имена пакетов; пусто — допустимо (выключить); клон — pkg@N (N — пользователь)
             case "$val" in *[!A-Za-z0-9._@\ ]*) ok=0 ;; esac
             if [ "$ok" = "1" ]; then
@@ -1252,7 +1253,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_GEO_UPSTREAMS DNS_GEO_DOMAINS DNS_GEO_STRICT DNS_GEO_MODE DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET2_FAKE_SNI ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS DNS_VIA_ZAPRET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_WSSIZE_RAMP YT_RAMP_HOURS YT_RETRY_MAX ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_I1 WARP_CHAIN WARP_STRICT WARP_STICK WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_GEO_UPSTREAMS DNS_GEO_DOMAINS DNS_GEO_STRICT DNS_GEO_MODE DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET2_FAKE_SNI ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS DNS_VIA_ZAPRET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_WSSIZE_RAMP YT_RAMP_HOURS YT_RETRY_MAX ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_I1 WARP_CHAIN WARP_CHAIN_SKIP WARP_STRICT WARP_STICK WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 # Убранные ключи: в старом конфиге — молча мимо, без «неизвестный ключ» (15.11)
 CONF_RETIRED="YT_DEAD_WARP YT_SLOW_RETRY"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
@@ -1927,8 +1928,14 @@ dnsproxy_kill_strays
 warp_routes_off force      # туннель и его маршруты от убитого демона
 warp_down
 warp_start_block           # блок и разметка WARP — сразу, не через ~15 с первого круга (утечка 26.11)
+# DNS телефона, оставленный старым демоном на перезапуск, — держим: сторож снимет сам, если не нужен (VPN поднят)
+# или dnsproxy не поднялся (phone_dns_reconcile при PHONE_DNS_ON=1); иначе — хвост убитого демона, снять
+if restart_flag_fresh && $iptables -t nat -C OUTPUT -j "$CHAIN_PHONE_DNS" 2>/dev/null; then
+    PHONE_DNS_ON=1; log "Перезапуск: DNS телефона остаётся на dnsproxy"
+else
+    phone_dns_rules_off
+fi
 rm -f "$WARP_RESTART_FLAG"  # блок, оставленный старым демоном на перезапуск, уже заменён своим
-phone_dns_rules_off
 rm -f "$DNSPROXY_PID_FILE" /data/local/tmp/vpn_tether_probe.* /data/local/tmp/vpn_tether_alt.*
 # /data/local/tmp переживает перезагрузку, а tun после неё часто с тем же
 # ifindex — старая метка срезала бы ретраи первого поиска таблицы (ревью PR #21)
