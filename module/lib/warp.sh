@@ -199,7 +199,7 @@ warp_i1() {
     for f in "$WARP_DIR/i1/$WARP_I1.txt" "$MODULE_DIR/warp/i1/$WARP_I1.txt"; do   # свой испорчен — готовый
         v=$(head -1 "$f" 2>/dev/null | tr -d '\r')
         case "$v" in "<"*">") ;; *) continue ;; esac
-        [ -z "$(printf '%s' "$v" | sed -e 's/<b 0x[0-9a-fA-F]*>//g' -e 's/<r [0-9]*>//g' -e 's/<[ct]>//g')" ] && { echo "$v"; return 0; }
+        [ -z "$(printf '%s' "$v" | sed -e 's/<b 0x[0-9a-fA-F][0-9a-fA-F]*>//g' -e 's/<r [0-9][0-9]*>//g' -e 's/<[ct]>//g')" ] && { echo "$v"; return 0; }
     done
 }
 # Для журнала и WebUI: «dns_ya.ru» — DNS-запрос, иначе имя в поддельном QUIC
