@@ -23,6 +23,9 @@ WARP_WL_RETRY=300        # то же при белом списке операт
 WARP_STATE=off           # off | starting | up | fail
 WARP_CUR=""              # конфиг в работе
 WARP_PID=""
+WARP_RESTART_FLAG=/data/local/tmp/vpn_tether_restart   # webctl restart: блок WARP на выходе не снимать
+WARP_CH_ADDR=""          # адрес warp1 (своего сервера после WARP) — для запрета «адрес туннеля мимо туннеля»
+CHAIN_WARP_SRC=VPN_WARP_SRC
 WARP_TS=0                # когда запущен / поднялся
 WARP_CHECK_TS=0          # последняя проверка трафиком (0 — проверить сейчас)
 WARP_FAILS=0             # проверок подряд без ответа
@@ -66,6 +69,22 @@ WARP_TG_PAUSE=1800       # не помогли WARP_TG_MAX подряд — 30 �
 WARP_TG_HOLD=0           # до этого времени (epoch) не переподключать
 WARP_SU_G=""             # su -g работает (проверка — мимо прокси AdGuard)
 
+# Адрес туннеля — только через туннель: на пакеты уже закрытых сокетов (после ss -K, смены пути) ядро отвечает
+# RST без метки и привязки, и main уводил их оператору с адресом warp0/warp1 (26.11 на 13T: 15 RST к Telegram
+# за минуту — данных нет, но ТСПУ видит). filter OUTPUT, в начале; снимается вместе с туннелем
+warp_src_guard() {   # add|del адрес (IPv4, можно с /маской)
+    local a="${2%%/*}"
+    case "$a" in *.*.*.*) ;; *) return 0 ;; esac
+    if [ "$1" = add ]; then
+        $iptables -N "$CHAIN_WARP_SRC" 2>/dev/null
+        $iptables -C "$CHAIN_WARP_SRC" -s "$a" ! -o warp+ -j DROP 2>/dev/null || $iptables -A "$CHAIN_WARP_SRC" -s "$a" ! -o warp+ -j DROP
+        $iptables -C OUTPUT -j "$CHAIN_WARP_SRC" 2>/dev/null || $iptables -I OUTPUT 1 -j "$CHAIN_WARP_SRC"
+    else
+        $iptables -D "$CHAIN_WARP_SRC" -s "$a" ! -o warp+ -j DROP 2>/dev/null
+    fi
+    return 0
+}
+
 # Остатки от убитого демона: интерфейс, правило, процесс, сокет
 warp_kill_strays() {
     local p
@@ -75,8 +94,10 @@ warp_kill_strays() {
 warp_down() {   # [причина] — пусто: молча
     # свой сервер после WARP — первым: без warp0 его правила к серверу ведут в никуда (prohibit)
     warp_chain_down "${1:+WARP снят}"
-    # выход демона — блок снять (warp_reconcile при VPN и т.п. снимает его сам, до warp_down)
-    [ "$1" = "выход" ] && warp_block_set 0
+    # выход демона — блок снять (warp_reconcile при VPN и т.п. снимает его сам, до warp_down); кроме перезапуска
+    # (webctl restart, флаг моложе минуты): новый демон ставит его через ~2 с, а без него эти секунды то, что
+    # идёт в WARP, уходило оператору (26.11 на 13T ~30 пакетов к Telegram за перезапуск)
+    if [ "$1" = "выход" ] && [ -z "$(find "$WARP_RESTART_FLAG" -mmin -1 2>/dev/null)" ]; then warp_block_set 0; fi
     if [ "$WARP_BLK_LVL" -ge 1 ] 2>/dev/null; then
         # «Если выход не работает» — не напрямую: разметку держим, то, что идёт в WARP, упрётся в запрет
         # (таблица WARP пустая); открытые соединения закрыть — приложения сразу увидят «нет сети»
@@ -89,6 +110,8 @@ warp_down() {   # [причина] — пусто: молча
     $ip route flush table $WARP_TABLE 2>/dev/null
     $ip -6 route flush table $WARP_TABLE 2>/dev/null
     $ip link del $WARP_IF 2>/dev/null
+    # запрет «адрес туннеля мимо туннеля» — целиком (и от убитого демона): туннелей больше нет
+    $iptables -F "$CHAIN_WARP_SRC" 2>/dev/null
     [ -n "$WARP_PID" ] && kill "$WARP_PID" 2>/dev/null
     warp_kill_strays
     rm -f "$WARP_SOCK_DIR/$WARP_IF.sock" "$WARP_DIR/.run.wg"
@@ -298,7 +321,7 @@ warp_start() {   # имя конфига
     for a in $(sed -n 's/^[[:space:]]*Address[[:space:]]*=//p' "$f" | tr ',' ' '); do
         case "$a" in
             *:*) $ip -6 addr add "$a" dev $WARP_IF 2>/dev/null ;;
-            *.*) $ip addr add "$a" dev $WARP_IF 2>/dev/null ;;
+            *.*) $ip addr add "$a" dev $WARP_IF 2>/dev/null; warp_src_guard add "$a" ;;
         esac
     done
     mtu=$(sed -n 's/^[[:space:]]*MTU[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$f" | head -1)
@@ -892,19 +915,24 @@ warp_kill_app_sockets() {
 }
 
 # Соединения, открытые до разметки WARP (старт демона): метка ставится только новым соединениям, и такие
-# шли бы мимо WARP, пока не закроются. Раздача и телефон к сетям групп — записи conntrack без метки WARP
-# (следующий пакет заведёт новую, уже с меткой: приложение переподключится через WARP или упрётся в блок);
-# сокеты телефона — warp_kill_sockets (и приложений целиком); «ct» — только conntrack (второй вызов на старте:
-# сокеты телефона к тому времени уже переподключились с меткой, рвать их снова незачем)
-warp_drop_unmarked() {   # причина [ct]
-    local m c n=0
-    if [ -n "$CONNTRACK_BIN" ]; then
-        for m in $(warp_dst4); do
-            c=$($CONNTRACK_BIN -D -d "$m" --mark 0/$WARP_MARK 2>&1 | sed -n 's/.* \([0-9][0-9]*\) flow entries.*/\1/p')
-            n=$((n + ${c:-0}))
+# шли бы мимо WARP, пока не закроются. Раздача (WARP_TETHER=1) к сетям групп — записи conntrack без метки WARP
+# с её подсетей (следующий пакет заведёт новую, уже с меткой: клиент переподключится через WARP или упрётся в
+# блок); сокеты телефона — warp_kill_sockets (по WARP_PHONE, и приложений целиком). То, что идёт мимо WARP
+# намеренно (раздача при WARP_TETHER=0, root и система), не трогаем. «ct» — только conntrack (второй вызов на
+# старте: сокеты телефона к тому времени уже переподключились с меткой, рвать их снова незачем)
+warp_drop_unmarked() {   # причина [ct] [ифейсы раздачи — по умолчанию LAST_TETHER_IFACES]
+    local i s m c n=0 ifs="${3-$LAST_TETHER_IFACES}"
+    if [ -n "$CONNTRACK_BIN" ] && [ "$WARP_TETHER" = 1 ]; then
+        for i in $ifs; do
+            s=$($ip -4 addr show dev "$i" 2>/dev/null | awk '/inet / { print $2; exit }')
+            [ -n "$s" ] || continue
+            for m in $(warp_dst4); do
+                c=$($CONNTRACK_BIN -D -s "$s" -d "$m" --mark 0/$WARP_MARK 2>&1 | sed -n 's/.* \([0-9][0-9]*\) flow entries.*/\1/p')
+                n=$((n + ${c:-0}))
+            done
         done
     fi
-    [ "$n" -gt 0 ] && log "WARP: сброшено соединений без разметки ($1): $n записей conntrack (раздача и телефон) — переподключатся уже через WARP"
+    [ "$n" -gt 0 ] && log "WARP: сброшено соединений раздачи без разметки ($1): $n — переподключатся уже через WARP"
     [ "$2" = ct ] || warp_kill_sockets "$1"
     return 0
 }
@@ -913,9 +941,11 @@ warp_drop_unmarked() {   # причина [ct]
 # Иначе в это окно то, что идёт в WARP, уходило оператору напрямую, а открытые тогда соединения так и оставались
 # без метки: 26.11 на 13T за перезапуск ~100 пакетов к сетям Telegram через оператора (телефон и раздача) и ещё
 # ~50 после подъёма своего сервера. Только при «Если выход не работает» = блок (WARP_STRICT 1/2): при 0 без
-# туннеля размеченное и так идёт напрямую. Вызов 1 — до настройки сети: только телефон, без адресов доменов (DNS
-# ещё нет); вызов 2 (аргумент 1) — после apply_state: раздача и домены (полная сборка, как в цикле)
+# туннеля размеченное и так идёт напрямую. Вызов 1 — до настройки сети: телефон и раздача (её ифейсы — discovery:
+# при перезапуске старая разметка снесена, и до вызова 2 клиенты шли бы мимо — 26.11 ~19 пакетов), без адресов
+# доменов (DNS ещё нет); вызов 2 (аргумент 1) — после apply_state: домены и ифейсы, как их увидел apply_state
 warp_start_block() {   # [1 — второй вызов]
+    local tif
     [ "$WARP_ENABLE" = 1 ] && [ "$WARP_STRICT" -ge 1 ] 2>/dev/null || return 0
     [ -n "$AWG_BIN" ] && [ -n "$AWG_GO_BIN" ] || return 0
     vpn_up_now && return 0
@@ -926,12 +956,13 @@ warp_start_block() {   # [1 — второй вызов]
         return 0
     else
         WARP_APP_UIDS=$(warp_app_uids); WARP_APP_TS=$(date +%s)
+        tif=""; [ "$WARP_TETHER" = 1 ] && tif=$(get_active_tether_ifaces)
         warp_block_set "$WARP_STRICT"
-        warp_routes_apply "" || return 0
+        warp_routes_apply "$tif" || return 0
         # подпись пустая — первый же reconcile пересоберёт с раздачей и доменами; группы — как сейчас
         WARP_RT_SIG=""; WARP_RT_DST=$(warp_dst4); WARP_RT_GRP="$WARP_GOOGLE$WARP_TELEGRAM$WARP_PHONE|$WARP_DOMAINS"
     fi
-    warp_drop_unmarked "старт демона"
+    warp_drop_unmarked "старт демона" "" "$tif"
 }
 
 # Через туннель идёт видео YouTube: в conntrack есть установленные соединения с обеими
@@ -1161,6 +1192,7 @@ warp_chain_down() {   # [причина] — пусто: молча
     $ip rule del fwmark $WARP_MARK/$WARP_MARK lookup $WARP_CH_TABLE pref $WARP_CH_MARK_PREF 2>/dev/null
     [ -n "$WARP_CH_PID" ] && kill "$WARP_CH_PID" 2>/dev/null
     $ip link del $WARP_CH_IF 2>/dev/null
+    [ -n "$WARP_CH_ADDR" ] && warp_src_guard del "$WARP_CH_ADDR"; WARP_CH_ADDR=""
     $ip rule del oif $WARP_CH_IF lookup $WARP_CH_TABLE pref $WARP_CH_OIF_PREF 2>/dev/null
     $ip route flush table $WARP_CH_TABLE 2>/dev/null
     # по pref, а не по адресу: после убитого демона адреса прошлого запуска не знаем
@@ -1230,7 +1262,8 @@ warp_chain_up() {
     # keepalive: соединение через WARP к серверу держит NAT Cloudflare, без него после тишины рукопожатие заново
     for pk in $("$AWG_BIN" show "$WARP_CH_IF" peers 2>/dev/null); do "$AWG_BIN" set "$WARP_CH_IF" peer "$pk" persistent-keepalive 25 2>/dev/null; done
     for a in $(sed -n 's/^[[:space:]]*Address[[:space:]]*=//p' "$f" | tr ',' ' '); do
-        case "$a" in *:*) $ip -6 addr add "$a" dev $WARP_CH_IF 2>/dev/null ;; *.*) $ip addr add "$a" dev $WARP_CH_IF 2>/dev/null ;; esac
+        case "$a" in *:*) $ip -6 addr add "$a" dev $WARP_CH_IF 2>/dev/null ;;
+            *.*) $ip addr add "$a" dev $WARP_CH_IF 2>/dev/null; WARP_CH_ADDR="$a"; warp_src_guard add "$a" ;; esac
     done
     mtu=$(sed -n 's/^[[:space:]]*MTU[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$f" | head -1)
     [ -n "$mtu" ] && [ "$mtu" -lt "$WARP_CH_MTU" ] || mtu=$WARP_CH_MTU

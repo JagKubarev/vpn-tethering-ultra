@@ -1925,6 +1925,7 @@ dnsproxy_kill_strays
 warp_routes_off force      # туннель и его маршруты от убитого демона
 warp_down
 warp_start_block           # блок и разметка WARP — сразу, не через ~15 с первого круга (утечка 26.11)
+rm -f "$WARP_RESTART_FLAG"  # блок, оставленный старым демоном на перезапуск, уже заменён своим
 phone_dns_rules_off
 rm -f "$DNSPROXY_PID_FILE" /data/local/tmp/vpn_tether_probe.* /data/local/tmp/vpn_tether_alt.*
 # /data/local/tmp переживает перезагрузку, а tun после неё часто с тем же

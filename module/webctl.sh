@@ -338,9 +338,12 @@ case "$1" in
         [ -f "$MODDIR/service.sh" ] || { echo "ERR не нашёл service.sh"; exit 1; }
         pid=$(daemon_pid)
         if [ -n "$pid" ]; then
+            # перезапуск, а не остановка: блок WARP на выходе не снимать (lib/warp.sh, warp_down) — новый демон
+            # поставит свой через ~2 с, а иначе эти секунды то, что идёт в WARP, уходило оператору
+            : > /data/local/tmp/vpn_tether_restart
             kill -TERM "$pid"; w=0
             while kill -0 "$pid" 2>/dev/null && [ $w -lt 40 ]; do sleep 1; w=$((w + 1)); done
-            kill -0 "$pid" 2>/dev/null && { echo "ERR демон не завершился за 40 с"; exit 1; }
+            kill -0 "$pid" 2>/dev/null && { rm -f /data/local/tmp/vpn_tether_restart; echo "ERR демон не завершился за 40 с"; exit 1; }
         fi
         # busybox в standalone, как у менеджера модулей; своя сессия — не завершится вместе с WebUI
         ASH_STANDALONE=1 setsid "$BB" sh "$MODDIR/service.sh" </dev/null >/dev/null 2>&1 &

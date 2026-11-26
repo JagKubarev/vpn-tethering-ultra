@@ -306,22 +306,35 @@ zapret_kill_all() {
 # ответила или пусто — пусто, и тогда список не трогаем
 # Снимок — в файле: zapret_vpn_uids зовут через $(...), переменная из подоболочки не вернулась бы
 VPN_SVC_FILE=/data/local/tmp/vpn_tether_vpnsvc
-vpn_service_ids() {   # [force] -> appId через пробел
-    local now ts ids="" p u
+vpn_service_ids() {   # [force] -> appId через пробел; пусто — список неизвестен (не ответил, обрезан)
+    local now ts ids="" o u t n p v to=""
     now=$(date +%s)
     if [ "$1" != force ] && read -r ts ids < "$VPN_SVC_FILE" 2>/dev/null && [ $((now - ts)) -lt 600 ] 2>/dev/null; then
         echo "$ids"; return 0
     fi
     ids=""
-    for p in $($TIMEOUT_CMD sh -c "cmd package query-services --brief -a android.net.VpnService 2>/dev/null" | \
-               sed -n 's|^ *\([A-Za-z0-9_][A-Za-z0-9_.]*\)/.*|\1|p' | sort -u); do
-        u=$(pkg_uid "$p")
-        case "$u" in ''|*[!0-9]*) continue ;; esac
-        ids="$ids $((u % 100000))"
+    # тайм-аут 10 с, а не 3: на MT6580 cmd медленный, и обрезанный список выбросил бы настоящий VPN-клиент
+    [ -n "$TIMEOUT_CMD" ] && to="${TIMEOUT_CMD%3}10"
+    # каждый запущенный пользователь (клоны, рабочий профиль): «--user all» команда не принимает
+    for u in $(pm list users 2>/dev/null | sed -n 's/.*UserInfo{\([0-9]*\):.*} running.*/\1/p'); do
+        o=$($to sh -c "cmd package query-services --user $u --brief -a android.net.VpnService 2>/dev/null")
+        case "$o" in *"No services found"*) continue ;; esac
+        # всё или ничего: «N services found» и столько же «Service #» — иначе обрезан, снимок пустой (файл не трогаем)
+        t=$(printf '%s\n' "$o" | sed -n 's/^\([0-9][0-9]*\) services\{0,1\} found.*/\1/p' | head -1)
+        n=$(printf '%s\n' "$o" | grep -c 'Service #')
+        if [ -z "$t" ] || [ "$t" != "$n" ]; then ids=""; break; fi
+        for p in $(printf '%s\n' "$o" | sed -n 's|^ *\([A-Za-z0-9_][A-Za-z0-9_.]*\)/.*|\1|p' | sort -u); do
+            if [ "$u" = 0 ]; then v=$(pkg_uid "$p"); else v=$(pkg_uid "$p@$u"); fi
+            case "$v" in ''|*[!0-9]*) continue ;; esac
+            ids="$ids $((v % 100000))"
+        done
     done
-    ids="${ids# }"
+    ids=$(echo $ids | tr ' ' '\n' | sort -u | tr '\n' ' '); ids="${ids% }"
     echo "$now $ids" > "$VPN_SVC_FILE"
     echo "$ids"
+}
+uid_pkg() {   # uid -> пакет, по владельцу папки данных (pm --uid есть не на всех прошивках)
+    ls -ln "/data/user/$(($1 / 100000))/" 2>/dev/null | awk -v u="$1" '$3 == u { print $NF; exit }'
 }
 # uid из ZAPRET_VPN_UIDS_FILE, у которых сейчас VPN-клиент; остальные — из файла вон (с записью в журнал)
 zapret_vpn_learned() {
@@ -338,7 +351,7 @@ zapret_vpn_learned() {
     done
     if [ -n "$drop" ]; then
         for u in $drop; do
-            log "zapret: uid $u больше не VPN-клиент ($(pm list packages --uid "$u" 2>/dev/null | sed -n 's/^package:\([^ ]*\).*/\1/p' | head -1 | grep . || echo 'не установлен')) — убрал из исключений обхода"
+            log "zapret: uid $u больше не VPN-клиент ($(uid_pkg "$u" | grep . || echo 'не установлен')) — убрал из исключений обхода"
         done
         if [ -n "$keep" ]; then printf '%s\n' $keep > "$ZAPRET_VPN_UIDS_FILE.tmp"; else : > "$ZAPRET_VPN_UIDS_FILE.tmp"; fi
         mv -f "$ZAPRET_VPN_UIDS_FILE.tmp" "$ZAPRET_VPN_UIDS_FILE"
