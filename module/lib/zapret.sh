@@ -624,8 +624,8 @@ zapret2_gfake_upd() {
         # так видеопрофиль; Kubarev 18.11: подсказка при vt_soft_crck лишняя)
         ts=0; printf '%s\n' "$Z2_CUSTOM $t $Z2_SYN" | tr ' ' '\n' | \
             grep -E '^--lua-desync=(fake|hostfakesplit|hostfakesplit_alt|fakedsplit|fakeddisorder):' | grep -qE 'tcp_ts=' && ts=1
-        case "$t" in *fake:blob=tls_google*)
-            n=$(printf '%s\n' "$t" | tr ' ' '\n' | grep 'fake:blob=tls_google' | grep -oE 'sni=[^:,]+' | head -1); n=${n#sni=} ;;
+        case "$t" in *fake:blob=tls_google*|*fake:blob=ch_clone*)
+            n=$(printf '%s\n' "$t" | tr ' ' '\n' | grep -E 'fake:blob=(tls_google|ch_clone)' | grep -oE 'sni=[^:,]+' | head -1); n=${n#sni=} ;;
             *) n=- ;; esac
         echo "${n:-www.google.com} $ts"
     )
@@ -634,14 +634,15 @@ zapret2_gfake_upd() {
     [ -n "$2" ] || { Z2_GF=""; Z2_TS=""; return 0; }
     Z2_GF_KEY="$k"; Z2_GF="$1"; Z2_TS="$2"
 }
-# ZAPRET2_FAKE_SNI: у подделок blob=tls_google (поддельный ClientHello www.google.com) имя — из конфига:
+# ZAPRET2_FAKE_SNI: у подделок blob=tls_google (поддельный ClientHello www.google.com) и blob=ch_clone (клон настоящего,
+# vt_soft_crck_clone) имя — из конфига:
 # есть tls_mod с sni= — меняем его, есть tls_mod без sni — дописываем, нет — ставим tls_mod=sni=<имя>.
 # Подделки из других файлов и нулей (видео) не трогаем
 zapret2_fake_sni() {   # приёмы
     printf '%s\n' "$1" | awk -v n="$ZAPRET2_FAKE_SNI" '{
         for (i = 1; i <= NF; i++) {
             t = $i
-            if (t ~ /^--lua-desync=fake:blob=tls_google(:|$)/) {
+            if (t ~ /^--lua-desync=fake:blob=(tls_google|ch_clone)(:|$)/) {
                 c = split(t, f, ":"); o = ""; m = 0
                 for (j = 1; j <= c; j++) {
                     if (f[j] ~ /^tls_mod=/) {
@@ -650,7 +651,7 @@ zapret2_fake_sni() {   # приёмы
                     }
                     o = o (j > 1 ? ":" : "") f[j]
                 }
-                if (!m) sub(/blob=tls_google/, "blob=tls_google:tls_mod=sni=" n, o)
+                if (!m) sub(/blob=(tls_google|ch_clone)/, "&:tls_mod=sni=" n, o)
                 t = o
             }
             printf "%s%s", (i > 1 ? " " : ""), t
