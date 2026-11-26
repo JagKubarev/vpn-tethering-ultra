@@ -210,18 +210,35 @@ warp_i1() {
 # Свежий I1 на каждый подъём туннеля: новые DCID, SCID, random и ключи — как у браузера на каждое соединение.
 # Из файла неделями уходил бы один и тот же пакет, а по совпадению байтов его легко запомнить. Образец —
 # выбранный I1 (имя и раскладка те же), nfqws2 + warp/i1gen.lua: ~16 мс на 13T, ~85 мс на MT6580 (26.11).
-# DNS-вариант не трогаем: ID у него AmneziaWG и так меняет на каждой отправке (<r 2>). Не вышло — I1 из файла
+# DNS-вариант не трогаем: ID у него AmneziaWG и так меняет на каждой отправке (<r 2>). Не вышло — I1 из файла,
+# с причиной в журнале (иначе I1 тихо стал бы статичным навсегда). Частые повторы подъёма (нет сети — раз в
+# 30 с, перебор конфигов) — прошлый I1 в пределах минуты: nfqws2 зря не гоняем (~0,5 с на MT6580).
+# Ограничение: в пределах сеанса AmneziaWG шлёт этот I1 на каждом новом рукопожатии (~раз в 2 мин) — внутрь
+# зашифрованного QUIC случайное тегом <r> не вставить; свежий — только с новым подъёмом туннеля
+WARP_I1_RUN_NAME=""; WARP_I1_RUN_TS=0; WARP_I1_ERR=""
 warp_i1_fresh() {
-    local src r
+    local src o r e now
+    now=$(date +%s)
+    [ "$WARP_CF" = 1 ] && [ -n "$WARP_I1" ] && [ -n "$NFQWS2_BIN" ] && [ -f "$MODULE_DIR/warp/i1gen.lua" ] || { WARP_I1_RUN=""; return 0; }
+    case "$WARP_I1" in dns_*) WARP_I1_RUN=""; return 0 ;; esac
+    [ -n "$WARP_I1_RUN" ] && [ "$WARP_I1_RUN_NAME" = "$WARP_I1" ] && [ $((now - WARP_I1_RUN_TS)) -lt 60 ] && return 0
     WARP_I1_RUN=""
-    [ "$WARP_CF" = 1 ] && [ -n "$WARP_I1" ] && [ -n "$NFQWS2_BIN" ] && [ -f "$MODULE_DIR/warp/i1gen.lua" ] || return 0
-    case "$WARP_I1" in dns_*) return 0 ;; esac
     src=$(warp_i1)
     case "$src" in "<b 0x"*">") ;; *) return 0 ;; esac
     # shellcheck disable=SC2086
-    r=$($TIMEOUT_CMD "$NFQWS2_BIN" --intercept=0 --uid=0:3998 --lua-init="I1_NAME='$WARP_I1' I1_SRC='$src'" \
-        --lua-init=@"$MODULE_DIR/warp/i1gen.lua" 2>/dev/null | grep '^<b 0x' | head -1)
-    i1_valid "$r" && WARP_I1_RUN="$r"
+    o=$($TIMEOUT_CMD "$NFQWS2_BIN" --intercept=0 --uid=0:3998 --lua-init="I1_NAME='$WARP_I1' I1_SRC='$src'" \
+        --lua-init=@"$MODULE_DIR/warp/i1gen.lua" 2>&1)
+    r=$(printf '%s\n' "$o" | grep '^<b 0x' | head -1)
+    if i1_valid "$r"; then
+        WARP_I1_RUN="$r"; WARP_I1_RUN_NAME="$WARP_I1"; WARP_I1_RUN_TS=$now; WARP_I1_ERR=""
+        return 0
+    fi
+    e=$(printf '%s\n' "$o" | grep '^ERR ' | head -1)
+    [ -n "$e" ] || e=$(printf '%s\n' "$o" | grep . | tail -1 | cut -c1-120)
+    [ -n "$e" ] || e="nfqws2 не ответил"
+    # одна и та же причина — один раз, не на каждый подъём
+    [ "$e" != "$WARP_I1_ERR" ] && log "WARNING: WARP: свежий I1 не собрался ($e) — шлю I1 из файла"
+    WARP_I1_ERR="$e"
     return 0
 }
 # Для журнала и WebUI: «dns_ya.ru» — DNS-запрос, иначе имя в поддельном QUIC
