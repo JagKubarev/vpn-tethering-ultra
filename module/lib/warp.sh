@@ -67,6 +67,19 @@ WARP_TG_MAX=5
 WARP_TG_PAUSE=1800       # не помогли WARP_TG_MAX подряд — 30 мин не переподключать
 WARP_TG_HOLD=0           # до этого времени (epoch) не переподключать
 WARP_SU_G=""             # su -g работает (проверка — мимо прокси AdGuard)
+# MASQUE (WARP_ENGINE=masque, 28.11): usque вместо amneziawg-go, интерфейс тот же warp0 — маршруты, группы, свой сервер
+# после WARP и проверки — как у AmneziaWG. usque — от uid 1000 (system): от root, даже с группой 3999, AdGuard с
+# root-прокси отбивает UDP 443 («sendmsg: operation not permitted», 13T), uid 1000 пропускает; группа 3999 — мимо его
+# перехвата TCP (HTTP/2). tun создаёт root и отдаёт uid 1000 (ip tuntap … user), usque его только открывает (-I: адреса
+# и маршруты — наши). В /data/adb uid 1000 не войти — бинарь и копия аккаунта в WARP_MQ_DIR (uid 1000, 700).
+# 28.11 ночью на YOTA: 37–44 Мбит/с против 20–29 у AmneziaWG, пинг под нагрузкой 145–180 мс против 250–320
+WARP_MQ_NAME=masque                  # «конфиг» в WARP_CUR и статусе
+WARP_MQ_CONF=$WARP_DIR/masque.json   # аккаунт (usque register): ключ — только root
+WARP_MQ_DIR=/data/local/tmp/vpn_tether_mq
+WARP_MQ_UID=1000
+WARP_MQ_SU=""                        # как запускать от uid 1000 (warp_mq_su)
+WARP_MQ_REG_TS=0                     # когда начата регистрация (0 — не идёт)
+WARP_MQ_WARN=""                      # «MASQUE только arm64» — в журнал один раз
 
 # Адрес туннеля — только через туннель: на пакеты уже закрытых сокетов (после ss -K, смены пути) ядро отвечает
 # RST без метки и привязки, и main уводил их оператору с адресом warp0/warp1 (26.11 на 13T: 15 RST к Telegram
@@ -88,6 +101,10 @@ warp_src_guard() {   # add|del адрес (IPv4, можно с /маской)
 warp_kill_strays() {
     local p
     for p in $(pidof amneziawg-go-arm64 amneziawg-go-arm 2>/dev/null); do kill "$p" 2>/dev/null; done
+    # usque — только наш (из WARP_MQ_DIR): свой usque юзера (стенд, набор для проверки) не трогаем
+    for p in $(pidof usque 2>/dev/null); do
+        case "$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null)" in "$WARP_MQ_DIR/usque "*) kill "$p" 2>/dev/null ;; esac
+    done
 }
 
 warp_down() {   # [причина] — пусто: молча
@@ -122,6 +139,8 @@ warp_down() {   # [причина] — пусто: молча
 # поднятый вместо Cloudflare, он шёл бы к серверу напрямую — ради чего цепочка и нужна
 # «Не менять сервер» (WARP_STICK): за какой держаться — основной (WARP_CONF), не выбран — тот, что поднимался последним
 # (ревью 25.11: без основного выключатель молча не действовал); пусто — пока ни один не поднимался, по порядку
+warp_mq_on() { [ "$WARP_ENGINE" = masque ] && [ -n "$USQUE_BIN" ]; }
+
 warp_stick_name() {
     local n
     [ "$WARP_STICK" = 1 ] || return 1
@@ -133,6 +152,8 @@ warp_stick_name() {
 
 warp_conf_names() {
     local f n
+    # MASQUE — один «конфиг», аккаунт создаётся при запуске (warp_mq_start); конфиги AmneziaWG не берём
+    if warp_mq_on; then echo "$WARP_MQ_NAME"; return 0; fi
     if n=$(warp_stick_name); then echo "$n"; return 0; fi
     [ -n "$WARP_CONF" ] && [ "$WARP_CONF" != "$WARP_CHAIN" ] && [ -f "$WARP_DIR/$WARP_CONF.conf" ] && echo "$WARP_CONF"
     for f in "$WARP_DIR"/*.conf; do
@@ -275,6 +296,12 @@ warp_ep_kick() {   # адрес — пробуем его с этого моме
 # не проверяется при подъёме — без этого «нет трафика» значило и то, и другое)
 warp_hs_note() {
     local hs tr n="рукопожатия нет"
+    if [ "$WARP_CUR" = "$WARP_MQ_NAME" ]; then
+        # у usque своего «show» нет — последняя строка его журнала
+        hs=$(grep -v 'Hop Limit' "$WARP_MQ_DIR/usque.log" 2>/dev/null | tail -1 | cut -c 25-140)
+        echo "usque: ${hs:-журнал пуст}${WARP_PROBE_NOTE:+; $WARP_PROBE_NOTE}"
+        return 0
+    fi
     hs=$("$AWG_BIN" show $WARP_IF latest-handshakes 2>/dev/null | awk '{print $2; exit}')
     [ "${hs:-0}" -gt 0 ] && n="рукопожатие есть"
     # принято больше рукопожатия — сервер отвечает; rc — как упала проверка:
@@ -316,6 +343,7 @@ warp_colo_ru() { case "$WARP_RU_COLOS" in *" $WARP_COLO "*) return 0 ;; esac; re
 
 warp_start() {   # имя конфига
     local n="$1" f="$WARP_DIR/$1.conf" a mtu i=0 rc ep1=""
+    if [ "$n" = "$WARP_MQ_NAME" ] && warp_mq_on; then warp_mq_start; return $?; fi
     warp_down
     # старые прошивки (8.1): /dev/tun вместо /dev/net/tun
     [ -e /dev/net/tun ] || { mkdir -p /dev/net && ln -s /dev/tun /dev/net/tun; } 2>/dev/null
@@ -386,6 +414,114 @@ warp_start() {   # имя конфига
         WARP_EP_Q=$(warp_ep_list | awk 'NR > 1' | tr '\n' ' ')
         warp_ep_kick "$ep1"
     fi
+    return 0
+}
+
+# ---- MASQUE (usque) ----
+warp_mq_su() {   # WARP_MQ_SU — запуск от uid 1000 (с группой 3999, если su умеет); 1 — никак
+    [ -n "$WARP_MQ_SU" ] && return 0
+    if su $WARP_MQ_UID -g "$DNSPROXY_GID" -c true >/dev/null 2>&1; then WARP_MQ_SU="su $WARP_MQ_UID -g $DNSPROXY_GID"
+    elif su $WARP_MQ_UID -c true >/dev/null 2>&1; then WARP_MQ_SU="su $WARP_MQ_UID"
+    else return 1; fi
+}
+
+warp_mq_pid() {   # pid нашего usque
+    local p
+    for p in $(pidof usque 2>/dev/null); do
+        case "$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null)" in "$WARP_MQ_DIR/usque nativetun "*) echo "$p"; return 0 ;; esac
+    done
+    return 1
+}
+
+# Каталог uid 1000: бинарь (копия, если другой) и копия аккаунта. В /data/local/tmp пишет и shell — чужой или
+# не каталог (ссылка) пересоздаём своим
+warp_mq_prep() {
+    if [ -L "$WARP_MQ_DIR" ] || [ ! -d "$WARP_MQ_DIR" ] || [ "$(stat -c %u "$WARP_MQ_DIR" 2>/dev/null)" != "$WARP_MQ_UID" ]; then
+        rm -rf "$WARP_MQ_DIR"
+        mkdir -m 700 "$WARP_MQ_DIR" 2>/dev/null || return 1
+        chown $WARP_MQ_UID:$WARP_MQ_UID "$WARP_MQ_DIR" || return 1
+    fi
+    chmod 700 "$WARP_MQ_DIR"
+    if ! cmp -s "$USQUE_BIN" "$WARP_MQ_DIR/usque"; then
+        cp -f "$USQUE_BIN" "$WARP_MQ_DIR/usque.new" && chmod 755 "$WARP_MQ_DIR/usque.new" &&
+            mv -f "$WARP_MQ_DIR/usque.new" "$WARP_MQ_DIR/usque" || return 1
+    fi
+    return 0
+}
+
+# Аккаунт Cloudflare для MASQUE: нет — usque register в фоне (до ~15 с), от uid 1000, мимо AdGuard.
+# 0 — есть, 1 — создаётся, 2 — не создался (журнал — здесь)
+warp_mq_register() {
+    local now e
+    [ -s "$WARP_MQ_CONF" ] && return 0
+    now=$(date +%s)
+    if grep -q '"private_key"' "$WARP_MQ_DIR/new.json" 2>/dev/null; then
+        mkdir -p "$WARP_DIR"
+        (umask 077; cp -f "$WARP_MQ_DIR/new.json" "$WARP_MQ_CONF.tmp") && mv -f "$WARP_MQ_CONF.tmp" "$WARP_MQ_CONF" || return 2
+        rm -f "$WARP_MQ_DIR/new.json"; WARP_MQ_REG_TS=0
+        log "WARP: MASQUE — аккаунт Cloudflare создан"
+        return 0
+    fi
+    if [ "$WARP_MQ_REG_TS" -gt 0 ]; then
+        [ $((now - WARP_MQ_REG_TS)) -lt 60 ] && return 1
+        e=$(grep -v '^[[:space:]]*$' "$WARP_MQ_DIR/reg.log" 2>/dev/null | tail -1 | cut -c1-160)
+        log "WARP: MASQUE — аккаунт не создался (${e:-нет ответа за минуту})"
+        WARP_MQ_REG_TS=0
+        return 2
+    fi
+    warp_mq_prep || return 2
+    rm -f "$WARP_MQ_DIR/new.json" "$WARP_MQ_DIR/reg.log"
+    log "WARP: MASQUE — аккаунта нет, создаю (usque register)"
+    $WARP_MQ_SU -c "cd $WARP_MQ_DIR && exec ./usque register -a -n vpn-tether -c $WARP_MQ_DIR/new.json > $WARP_MQ_DIR/reg.log 2>&1" \
+        < /dev/null > /dev/null 2>&1 &
+    WARP_MQ_REG_TS=$now
+    return 1
+}
+
+warp_mq_fail() {   # заметка пауза_с [строка журнала]
+    [ -n "$3" ] && log "WARP: MASQUE — $3"
+    warp_down; WARP_RETRY_TS=$(( $(date +%s) + $2 )); warp_set_state fail "$1"
+    return 1
+}
+
+warp_mq_start() {
+    local a4 a6 sni="$WARP_MASQUE_SNI" i=0 h2="" how="HTTP/3 по UDP 443"
+    warp_down
+    [ -e /dev/net/tun ] || { mkdir -p /dev/net && ln -s /dev/tun /dev/net/tun; } 2>/dev/null
+    warp_mq_su || { warp_mq_fail "MASQUE: нет su $WARP_MQ_UID" $WARP_RETRY_SECS "не запустить от uid $WARP_MQ_UID (su $WARP_MQ_UID не работает)"; return 1; }
+    warp_mq_register
+    case $? in
+        0) ;;
+        1) warp_mq_fail "создаю аккаунт MASQUE" 10; return 1 ;;
+        *) warp_mq_fail "аккаунт MASQUE не создался" $WARP_RETRY_SECS; return 1 ;;
+    esac
+    warp_mq_prep || { warp_mq_fail "MASQUE: нет каталога" 60 "не подготовить $WARP_MQ_DIR"; return 1; }
+    (umask 077; cp -f "$WARP_MQ_CONF" "$WARP_MQ_DIR/config.json") && chown $WARP_MQ_UID:$WARP_MQ_UID "$WARP_MQ_DIR/config.json"
+    a4=$(sed -n 's/.*"ipv4"[[:space:]]*:[[:space:]]*"\([0-9.]*\)".*/\1/p' "$WARP_MQ_CONF" | head -1)
+    a6=$(sed -n 's/.*"ipv6"[[:space:]]*:[[:space:]]*"\([0-9a-fA-F:]*\)".*/\1/p' "$WARP_MQ_CONF" | head -1)
+    [ -n "$a4" ] || { warp_mq_fail "MASQUE: в аккаунте нет адреса" $WARP_RETRY_SECS "в $WARP_MQ_CONF нет адреса ipv4"; return 1; }
+    $ip tuntap add dev $WARP_IF mode tun user $WARP_MQ_UID 2>/dev/null || {
+        warp_mq_fail "MASQUE: нет tun" 60 "не создать $WARP_IF (ip tuntap)"; return 1; }
+    [ "$WARP_MASQUE_H2" = 1 ] && { h2=" --http2"; how="HTTP/2 по TCP 443"; }
+    : > "$WARP_MQ_DIR/usque.log"; chown $WARP_MQ_UID:$WARP_MQ_UID "$WARP_MQ_DIR/usque.log"
+    $WARP_MQ_SU -c "exec $WARP_MQ_DIR/usque nativetun -c $WARP_MQ_DIR/config.json -n $WARP_IF -I --always-reconnect -m 1280${sni:+ -s $sni}$h2 >> $WARP_MQ_DIR/usque.log 2>&1" \
+        < /dev/null > /dev/null 2>&1 &
+    WARP_PID=""
+    while [ $i -lt 50 ] && [ -z "$WARP_PID" ]; do sleep 0.1; i=$((i + 1)); WARP_PID=$(warp_mq_pid); done
+    [ -n "$WARP_PID" ] || { warp_mq_fail "MASQUE: usque не запустился" 60 \
+        "usque не запустился за 5 с ($(tail -1 "$WARP_MQ_DIR/usque.log" 2>/dev/null | cut -c1-120))"; return 1; }
+    $ip addr add "$a4/32" dev $WARP_IF 2>/dev/null; warp_src_guard add "$a4"
+    [ -n "$a6" ] && $ip -6 addr add "$a6/128" dev $WARP_IF 2>/dev/null
+    $ip link set $WARP_IF mtu 1280 up 2>/dev/null
+    echo 2 > /proc/sys/net/ipv4/conf/$WARP_IF/rp_filter 2>/dev/null
+    $ip route replace default dev $WARP_IF table $WARP_TABLE 2>/dev/null
+    $ip -6 route replace default dev $WARP_IF table $WARP_TABLE 2>/dev/null
+    $ip rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
+    $ip -6 rule add oif $WARP_IF lookup $WARP_TABLE pref $WARP_PREF 2>/dev/null
+    # Cloudflare — проверка строгая (warp=on); хендшейка awg нет — сразу к проверке трафиком, адреса не перебираем
+    WARP_CUR="$WARP_MQ_NAME"; WARP_STATE=starting; WARP_TS=$(date +%s); WARP_CHECK_TS=0; WARP_FAILS=0; WARP_NETCHG=0; WARP_TG_TS=0
+    WARP_CF=1; WARP_EP0=""; WARP_HS=1; WARP_EP_TRIED=""; WARP_EP_SILENT=""; WARP_EP_Q=""; WARP_EP_CUR=""; WARP_RU_EP=""; WARP_RU_TRY=0
+    log "WARP: запускаю MASQUE (usque, $how, имя ${sni:-как у Cloudflare})"
     return 0
 }
 
@@ -546,6 +682,9 @@ warp_reconcile() {
     elif [ "$VPN_TETHER_MODE" != "off" ]; then why="поднят VPN"
     elif wan_gone; then why="нет сети"
     fi
+    if [ "$WARP_ENGINE" = masque ] && [ -z "$USQUE_BIN" ] && [ -z "$WARP_MQ_WARN" ]; then
+        WARP_MQ_WARN=1; log "WARNING: WARP: MASQUE (usque) только на arm64 — беру AmneziaWG"
+    fi
     # первые конфиги — только при сети (иначе регистрация падает до перезагрузки)
     [ -z "$why" ] && warp_ensure
     # «Если выход не работает» (WARP_STRICT): блок держим, пока WARP включён и нужен — и без сети, и в паузе kill-switch
@@ -584,6 +723,12 @@ warp_reconcile() {
                     [ "$WARP_NOTE" = "не поднялся" ] || log "WARP: $n не поднялся — «Не менять сервер»: пробую его же каждые 30 с"
                     warp_set_state fail "не поднялся"
                     WARP_BAD=""; WARP_EP_FULL=0; WARP_RETRY_TS=$((now + 30))
+                    return 0
+                elif warp_mq_on; then
+                    # MASQUE — один: не ждать 5 мин, как после круга конфигов; в журнал — один раз
+                    [ "$WARP_NOTE" = "не поднялся" ] || log "WARP: MASQUE не поднялся — повтор каждую минуту"
+                    warp_set_state fail "не поднялся"
+                    WARP_BAD=""; WARP_RETRY_TS=$((now + 60))
                     return 0
                 else
                     log "WARP: ни один конфиг не поднялся — повтор через $((WARP_RETRY_SECS / 60)) мин"
@@ -646,7 +791,7 @@ warp_reconcile() {
                 log "WARP: $WARP_CUR поднят за $(( $(date +%s) - WARP_TS )) с${WARP_COLO:+ (площадка $WARP_COLO)}"
                 if [ "$WARP_CF" = 1 ] && warp_colo_ru; then
                     log "WARNING: WARP: только российская площадка Cloudflare ($WARP_COLO) — Telegram и часть сайтов через WARP могут не открываться"
-                elif [ "$WARP_CF" = 1 ]; then
+                elif [ "$WARP_CF" = 1 ] && [ -n "$WARP_EP_CUR" ]; then
                     warp_ep_save "$WARP_EP_CUR"
                 fi
                 WARP_COLO_UP="$WARP_COLO"

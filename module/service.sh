@@ -1038,6 +1038,12 @@ ZAPRET_AUTO_FAIL=3
 WARP_ENABLE=0
 WARP_CONF=""            # предпочтительный конфиг (имя); пусто — по порядку
 WARP_I1=""              # имя в I1 конфигов Cloudflare (warp/i1/<имя>.txt); пусто — как в конфиге
+WARP_ENGINE=awg         # awg — AmneziaWG (конфиги ниже); masque — WARP через MASQUE (bin/usque: HTTP/3 по UDP 443,
+                        # как у приложения 1.1.1.1), свой аккаунт модуль создаёт сам; только arm64 (lib/warp.sh, warp_mq_*)
+WARP_MASQUE_SNI="apteka.ru"   # имя в первом пакете MASQUE; пусто — как у Cloudflare (consumer-masque.cloudflareclient.com:
+                        # 28.11 на YOTA в 00:20 с ним туннель не поднимался, в 01:46 — за 3 с; с apteka.ru — оба раза)
+WARP_MASQUE_H2=0        # 1 — MASQUE по HTTP/2 через TCP 443, если оператор режет UDP к Cloudflare. Проба: 28.11 на YOTA
+                        # usque так подключался, но трафик через tun не шёл (через socks в 00:24 — шёл, 11–12 Мбит/с)
 WARP_CHAIN=""           # свой сервер после WARP (имя своего конфига): AmneziaWG к нему внутри туннеля Cloudflare —
                         # ТСПУ видит только WARP (lib/warp.sh, warp_chain_*); пусто — выкл
 WARP_CHAIN_SKIP=""      # приложения телефона мимо своего сервера: то, что у них идёт в WARP, — в голый WARP (пакеты, pkg@N)
@@ -1153,7 +1159,7 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
     case "$key" in
         DNSPROXY_ENABLE|DNS_GEO_STRICT|DNS_PHONE|KILL_SWITCH|KILL_SWITCH_STRICT|NET_PROFILE_ADAPTIVE|STATUS_IN_DESCRIPTION|\
         DNS_VIA_ZAPRET|ZAPRET_ENABLE|ZAPRET_PHONE|ZAPRET_QUIC_BLOCK|ZAPRET_QUIC_FAKE|QUIC_BLOCK_YT|QUIC_YT_FAKE|ZAPRET_PER_NET|DNS_META_EU|YT_GGC_BLOCK|\
-        OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|YT_WSSIZE_RAMP|ZAPRET_WATCHDOG|ZAPRET_AUTOPICK|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER|WARP_STICK|WARP_CHAIN_SKIP_TG)
+        OPERA_ENABLE|OPERA_TELEGRAM|OPERA_GOOGLE|OPERA_PHONE|OPERA_TETHER|YT_DEAD_FAILFAST|YT_WSSIZE_RAMP|ZAPRET_WATCHDOG|ZAPRET_AUTOPICK|TETHER_STEALTH|TETHER_TTL_STRICT|ZAPRET_ALT|WARP_ENABLE|WARP_GOOGLE|WARP_TELEGRAM|WARP_PHONE|WARP_TETHER|WARP_STICK|WARP_CHAIN_SKIP_TG|WARP_MASQUE_H2)
             case "$val" in 0|1) ;; *) ok=0 ;; esac ;;
         ZAPRET_WATCHDOG_MIN)
             case "$val" in ''|*[!0-9]*) ok=0 ;; *) [ "$val" -ge 5 ] && [ "$val" -le 240 ] || ok=0 ;; esac ;;
@@ -1173,6 +1179,9 @@ _conf_set() {   # _conf_set KEY VALUE  (KEY уже из белого списк�
         ZAPRET2_FAKE_SNI) case "$val" in *[!a-z0-9.-]*|.*|*.) ok=0 ;; esac
             [ ${#val} -le 100 ] || ok=0 ;;
         WARP_STRICT) case "$val" in 0|1|2) ;; *) ok=0 ;; esac ;;
+        WARP_ENGINE) case "$val" in awg|masque) ;; *) ok=0 ;; esac ;;
+        WARP_MASQUE_SNI) case "$val" in *[!a-z0-9.-]*|.*|*.) ok=0 ;; esac
+            [ ${#val} -le 100 ] || ok=0 ;;
         WARP_I1) # имя готового I1, файл — warp/i1; «dns_имя» — DNS-запрос (подчёркивания в именах сайтов нет)
             case "${val#dns_}" in *[!a-z0-9.-]*|[.-]*|*[.-]) ok=0 ;; esac
             [ "$val" != dns_ ] || ok=0
@@ -1254,7 +1263,7 @@ load_user_conf() {
 }
 
 # Ключи, которые можно задать в vpn_tether.conf (и из WebUI)
-CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_GEO_UPSTREAMS DNS_GEO_DOMAINS DNS_GEO_STRICT DNS_GEO_MODE DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET2_FAKE_SNI ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS DNS_VIA_ZAPRET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_WSSIZE_RAMP YT_RAMP_HOURS YT_RETRY_MAX ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_I1 WARP_CHAIN WARP_CHAIN_SKIP WARP_CHAIN_SKIP_TG WARP_STRICT WARP_STICK WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
+CONF_KEYS="DNSPROXY_ENABLE DNS_DIRECT DNS_VPN DNS_PHONE DNS_UPSTREAMS DNS_FALLBACKS DNS_GEO_UPSTREAMS DNS_GEO_DOMAINS DNS_GEO_STRICT DNS_GEO_MODE DNS_VPN_UPSTREAMS DNS_BOOTSTRAP DNS_HEALTH_INTERVAL DNS_HEALTH_RECOVER KILL_SWITCH KILL_SWITCH_STRICT NET_PROFILE_ADAPTIVE STATUS_IN_DESCRIPTION QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET2_FAKE_SNI ZAPRET_MODE ZAPRET_PHONE ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_EXCL_APPS ZAPRET_PER_NET DNS_META_EU DNS_META_ECS DNS_META_UPSTREAMS DNS_VIA_ZAPRET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_WSSIZE_RAMP YT_RAMP_HOURS YT_RETRY_MAX ZAPRET_WATCHDOG ZAPRET_AUTOPICK ZAPRET_WATCHDOG_MIN TETHER_STEALTH TETHER_TTL_STRICT ZAPRET_ALT ZAPRET_ALT_MIN ZAPRET_AUTO_FAIL WARP_ENABLE WARP_CONF WARP_I1 WARP_ENGINE WARP_MASQUE_SNI WARP_MASQUE_H2 WARP_CHAIN WARP_CHAIN_SKIP WARP_CHAIN_SKIP_TG WARP_STRICT WARP_STICK WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER OPERA_ENABLE OPERA_API_PROXY OPERA_COUNTRY OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
 # Убранные ключи: в старом конфиге — молча мимо, без «неизвестный ключ» (15.11)
 CONF_RETIRED="YT_DEAD_WARP YT_SLOW_RETRY"
 # Значения по умолчанию — снимок до чтения файла: при перечитывании (WebUI)
@@ -1647,6 +1656,9 @@ for _c in $_WG_ARCH; do
     [ -x "$MODULE_DIR/bin/awg-$_c" ] && [ -x "$MODULE_DIR/bin/amneziawg-go-$_c" ] && {
         AWG_BIN="$MODULE_DIR/bin/awg-$_c"; AWG_GO_BIN="$MODULE_DIR/bin/amneziawg-go-$_c"; break; }
 done
+# MASQUE (WARP_ENGINE=masque): usque — только arm64, сборки armv7 в релизе нет
+USQUE_BIN=""
+case "$_WG_ARCH" in *arm64*) [ -x "$MODULE_DIR/bin/usque-arm64" ] && USQUE_BIN="$MODULE_DIR/bin/usque-arm64" ;; esac
 # --- Opera ---
 OPERA_BIN=""; OPERA_HEV_BIN=""
 for _c in $_WG_ARCH; do

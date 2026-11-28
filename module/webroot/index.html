@@ -1045,7 +1045,25 @@ details > summary::after { border-color: currentColor; }
       <div class="s">Только основной конфиг: замолчал — переподключается он же, на другие не переходит.</div></div>
     <label class="sw"><input type="checkbox" data-key="WARP_STICK"><span></span></label>
   </div>
-  <div class="row col" data-dep="WARP_ENABLE">
+  <div class="row col" data-dep="WARP_ENABLE" id="warpEngRow">
+    <div class="txt"><div class="t">Как подключаться</div>
+      <div class="s">AmneziaWG — конфиги ниже. MASQUE — как приложение 1.1.1.1: HTTP/3 к Cloudflare, свой аккаунт модуль создаёт сам. Ночью на YOTA MASQUE был быстрее (37–44 Мбит/с против 20–29) и с меньшей задержкой; днём, бывает, упирается в те же 2–3 Мбит/с. Свой сервер после WARP работает и с ним.</div></div>
+    <select data-key="WARP_ENGINE">
+      <option value="awg">AmneziaWG (WireGuard)</option>
+      <option value="masque">MASQUE (HTTP/3)</option>
+    </select>
+  </div>
+  <div class="row col" data-dep="WARP_ENABLE" id="warpMqSniRow" hidden>
+    <div class="txt"><div class="t">Имя для MASQUE</div>
+      <div class="s">Имя в первом пакете подключения. С именем Cloudflare (пусто) на YOTA MASQUE поднимается не всегда, с apteka.ru — да. Не подключается — попробуйте другое имя.</div></div>
+    <input type="text" data-key="WARP_MASQUE_SNI" placeholder="пусто — consumer-masque.cloudflareclient.com" aria-label="Имя для MASQUE" autocapitalize="off" autocorrect="off" spellcheck="false">
+  </div>
+  <div class="row" data-dep="WARP_ENABLE" id="warpMqH2Row" hidden>
+    <div class="txt"><div class="t">MASQUE по TCP (HTTP/2)</div>
+      <div class="s">Проба — если оператор режет UDP к Cloudflare: тот же туннель через TCP 443. На YOTA так подключается, но трафик пока не идёт; медленнее и с большей задержкой.</div></div>
+    <label class="sw"><input type="checkbox" data-key="WARP_MASQUE_H2"><span></span></label>
+  </div>
+  <div class="row col" data-dep="WARP_ENABLE" id="warpI1Row">
     <div class="txt"><div class="t">Имя в I1</div>
       <div class="s">I1 — поддельный QUIC-пакет перед подключением: по имени в нём оператор узнаёт туннель. Если WARP днём упирается в 2–3 Мбит/с — попробуйте другое имя. Меняется только у конфигов Cloudflare, сам конфиг не трогаю.</div></div>
     <select data-key="WARP_I1">
@@ -1632,7 +1650,7 @@ const KEYS = ['DNSPROXY_ENABLE','DNS_DIRECT','DNS_VPN','DNS_PHONE','DNS_UPSTREAM
   'STATUS_IN_DESCRIPTION','QUIC_BLOCK_APPS','QUIC_BLOCK_YT','QUIC_YT_FAKE','ZAPRET_ENABLE','ZAPRET_ENGINE','ZAPRET2_STRATEGY','ZAPRET2_ARGS','ZAPRET2_FAKE_SNI','ZAPRET_MODE','ZAPRET_PHONE','ZAPRET_STRATEGY','ZAPRET_ARGS','ZAPRET_QUIC_BLOCK','ZAPRET_QUIC_FAKE','ZAPRET_EXCL_APPS',
   'ZAPRET_PER_NET','DNS_META_EU','DNS_META_ECS','DNS_META_UPSTREAMS','DNS_VIA_ZAPRET','YT_GGC_BLOCK','YT_DEAD_FAILFAST','YT_WSSIZE_RAMP','YT_RAMP_HOURS','YT_RETRY_MAX','ZAPRET_WATCHDOG','ZAPRET_AUTOPICK','ZAPRET_WATCHDOG_MIN',
   'TETHER_STEALTH','TETHER_TTL_STRICT','ZAPRET_ALT','ZAPRET_ALT_MIN','ZAPRET_AUTO_FAIL',
-  'WARP_ENABLE','WARP_CONF','WARP_I1','WARP_CHAIN','WARP_CHAIN_SKIP','WARP_CHAIN_SKIP_TG','WARP_STRICT','WARP_STICK','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_COUNTRY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
+  'WARP_ENABLE','WARP_CONF','WARP_I1','WARP_ENGINE','WARP_MASQUE_SNI','WARP_MASQUE_H2','WARP_CHAIN','WARP_CHAIN_SKIP','WARP_CHAIN_SKIP_TG','WARP_STRICT','WARP_STICK','WARP_GOOGLE','WARP_TELEGRAM','WARP_APPS','WARP_DOMAINS','WARP_PHONE','WARP_TETHER','OPERA_ENABLE','OPERA_API_PROXY','OPERA_COUNTRY','OPERA_DOMAINS','OPERA_TELEGRAM','OPERA_GOOGLE','OPERA_APPS','OPERA_PHONE','OPERA_TETHER'];   // = CONF_KEYS в service.sh
 // интервал в минутах человеческим языком: 15 -> «15 минут», 180 -> «3 часа»
 function fmtMin(v, def) {
   const m = +v || def;
@@ -1953,6 +1971,9 @@ function renderDeps() {
   renderFakeSni();
   $('#wcsRow').hidden = !CUR.WARP_CHAIN;   // без своего сервера после WARP мимо него идти нечему
   $('#wcsTgRow').hidden = !CUR.WARP_CHAIN;
+  // MASQUE: своё имя и HTTP/2; I1 у него нет — строку I1 прячем
+  const mq = CUR.WARP_ENGINE === 'masque';
+  $('#warpMqSniRow').hidden = !mq; $('#warpMqH2Row').hidden = !mq; $('#warpI1Row').hidden = mq;
   // мимо своего сервера уходит только то, что у приложения идёт в WARP: целиком (WARP_APPS, клиенты Telegram) или по
   // группам и сайтам (WARP_PHONE); без WARP_PHONE и не целиком — правило не действует
   const wcsIdle = appKeyList('WARP_CHAIN_SKIP').filter((p) => !appKeyList('WARP_APPS').includes(p) &&
@@ -2311,7 +2332,8 @@ async function waitAck(token, sec) {
 // ошибка сохранения — с названием настройки со страницы, а не с ключом конфига
 const KEY_TITLE = { WARP_TELEGRAM: 'Telegram через WARP', OPERA_TELEGRAM: 'Telegram через Opera', WARP_GOOGLE: 'Google через WARP',
   OPERA_GOOGLE: 'Google через Opera', WARP_DOMAINS: 'Сайты через WARP', OPERA_DOMAINS: 'Сайты через Opera',
-  WARP_APPS: 'Приложения через WARP', OPERA_APPS: 'Приложения через Opera', OPERA_COUNTRY: 'Регион Opera', WARP_CHAIN_SKIP: 'Мимо своего сервера', WARP_CHAIN_SKIP_TG: 'Telegram мимо своего сервера' };
+  WARP_APPS: 'Приложения через WARP', OPERA_APPS: 'Приложения через Opera', OPERA_COUNTRY: 'Регион Opera', WARP_CHAIN_SKIP: 'Мимо своего сервера', WARP_CHAIN_SKIP_TG: 'Telegram мимо своего сервера',
+  WARP_ENGINE: 'Как подключаться', WARP_MASQUE_SNI: 'Имя для MASQUE', WARP_MASQUE_H2: 'MASQUE по TCP (HTTP/2)' };
 // стратегия nfqws2 из статуса: «имя» или «имя+» (свои приёмы TCP)
 function z2Name(v) {
   v = v || 'hardcorp74';
@@ -2499,7 +2521,7 @@ function warpState(s) {
   return r;
 }
 function warpState0(s) {
-  const c = s.warp_conf ? ' · ' + s.warp_conf : '';
+  const c = s.warp_conf ? ' · ' + (s.warp_conf === 'masque' ? 'MASQUE' : s.warp_conf) : '';
   switch (s.warp) {
     case 'up': {
       const k = s.warp_colo || '';
@@ -3618,7 +3640,7 @@ function mockExec(cmd) {
   if (a === 'status') return { errno: 0, out: 'daemon=1\nmodule_version=предпросмотр\nmode=' + (M.target === 'vpn' ? 'vpn' : 'direct') +
     '\ntarget=' + M.target + '\nifaces=wlan2 rndis0\nvpn_up=1\ndns_state=' + (M.target === 'vpn' ? 'DNAT 8.8.8.8' : 'dnsproxy doh') +
     '\nzapret=on\nzapret_auto=2\nzapret_per_net=1\nzapret_strategy=custom\nzapret_eff_args=--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G\nzapret_src=net\nnet_key=' + (M.target === 'vpn' ? 'wifi:Дом_5G' : 'mobile:25011') + '\nnet_label=' + (M.target === 'vpn' ? 'Дом_5G' : 'YOTA') + '\nmeta_eu=1\nmeta_eu_on=1\nmeta_ecs=185.15.56.0\ndns_degraded=0\ndns_alt=0\nggc=on\nyt_dead=2\nyt_dead_hits=37\nyt_slow=on\nyt_slow_kills=43\nyt_slow_fast=5\nstealth=on\nstealth_strict=0\nttl_foreign=3055\nstealth_rivals=Tether Unblock\nstealth_rival_rules=3\nzwd=1\nzwd_last=13:45|починил: прежняя стратегия\nwan=rmnet_data1\nexit=' + (Math.floor(Date.now() / 1000) - 120) + '|rmnet_data1|188.162.73.24|RU|' + (M.wave ? '000|204' : '204|204') + '\nphone_dns=0\ndns_phone_enabled=1\ndnsproxy_enable=1\ndns_upstream=dns.google\ndns_geo=dns.zapret.moe\nkill_switch=1\nmtu=1420\nmss=1380\nquic_uids=10538\nwarp=up\nwarp_conf=warp-2\nwarp_note=\nconf_note= DNSPROXY_ENABLE\nupdated=20:15:04\n' };
-  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD ZAPRET_ENGINE=nfqws2\nD ZAPRET2_STRATEGY=vt_soft_crck\nD ZAPRET2_ARGS=\nD ZAPRET2_FAKE_SNI=\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.google/dns-query\nD DNS_FALLBACKS=https://cloudflare-dns.com/dns-query https://dns.quad9.net/dns-query https://dns.adguard-dns.com/dns-query https://doh.libredns.gr/dns-query\nD DNS_GEO_UPSTREAMS=https://dns.semqka.xyz/dns-query https://doh.fuckingspeedtest.com/dns-query https://dns.commonnet.work/dns-query https://not-a-dns.quic.best/dns-query https://w.quic.best/dns-query https://sync.bezmezhau.com/dns-query https://dns.geodema.love/dns-query https://dns.dagami.ru/dns-query https://dns.zapret.moe/dns-query https://dns.keyoneday.ru/dns-query https://d.webshiftvpn.ru/dns-query https://cf.dns-ai.ru/dns-query\nD DNS_GEO_DOMAINS=\nD DNS_GEO_STRICT=1\nD DNS_GEO_MODE=split\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=all\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=0\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD DNS_VIA_ZAPRET=1\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD YT_WSSIZE_RAMP=1\nD YT_RAMP_HOURS=48\nD YT_RETRY_MAX=3\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=0\nD OPERA_API_PROXY=\nD OPERA_COUNTRY=EU\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\n' +
+  if (a === 'conf') return { errno: 0, out: 'D DNSPROXY_ENABLE=1\nD ZAPRET_ENGINE=nfqws2\nD ZAPRET2_STRATEGY=vt_soft_crck\nD ZAPRET2_ARGS=\nD ZAPRET2_FAKE_SNI=\nD DNS_DIRECT=doh\nD DNS_VPN=dnat\nD DNS_PHONE=1\nD DNS_UPSTREAMS=https://dns.google/dns-query\nD DNS_FALLBACKS=https://cloudflare-dns.com/dns-query https://dns.quad9.net/dns-query https://dns.adguard-dns.com/dns-query https://doh.libredns.gr/dns-query\nD DNS_GEO_UPSTREAMS=https://dns.semqka.xyz/dns-query https://doh.fuckingspeedtest.com/dns-query https://dns.commonnet.work/dns-query https://not-a-dns.quic.best/dns-query https://w.quic.best/dns-query https://sync.bezmezhau.com/dns-query https://dns.geodema.love/dns-query https://dns.dagami.ru/dns-query https://dns.zapret.moe/dns-query https://dns.keyoneday.ru/dns-query https://d.webshiftvpn.ru/dns-query https://cf.dns-ai.ru/dns-query\nD DNS_GEO_DOMAINS=\nD DNS_GEO_STRICT=1\nD DNS_GEO_MODE=split\nD DNS_VPN_UPSTREAMS=https://dns.google/dns-query https://cloudflare-dns.com/dns-query\nD DNS_BOOTSTRAP=77.88.8.8:53 1.1.1.1:53 8.8.8.8:53\nD DNS_HEALTH_INTERVAL=5\nD DNS_HEALTH_RECOVER=30\nD KILL_SWITCH=1\nD KILL_SWITCH_STRICT=0\nD NET_PROFILE_ADAPTIVE=0\nD STATUS_IN_DESCRIPTION=1\nD QUIC_BLOCK_APPS=\nD QUIC_BLOCK_YT=1\nD QUIC_YT_FAKE=0\nD ZAPRET_ENABLE=1\nD ZAPRET_MODE=all\nD ZAPRET_PHONE=1\nD ZAPRET_STRATEGY=fakeddisorder\nD ZAPRET_ARGS=\nD ZAPRET_QUIC_BLOCK=1\nD ZAPRET_QUIC_FAKE=0\nD ZAPRET_PER_NET=1\nD DNS_META_EU=1\nD DNS_META_ECS=185.15.56.0\nD DNS_META_UPSTREAMS=https://dns.google/dns-query\nD DNS_VIA_ZAPRET=1\nD YT_GGC_BLOCK=0\nD YT_DEAD_FAILFAST=1\nD YT_WSSIZE_RAMP=1\nD YT_RAMP_HOURS=48\nD YT_RETRY_MAX=3\nD ZAPRET_WATCHDOG=1\nD ZAPRET_AUTOPICK=0\nD OPERA_API_PROXY=\nD OPERA_COUNTRY=EU\nD ZAPRET_WATCHDOG_MIN=15\nD TETHER_STEALTH=1\nD TETHER_TTL_STRICT=0\nD ZAPRET_ALT=1\nD ZAPRET_ALT_MIN=360\nD ZAPRET_AUTO_FAIL=3\nD WARP_ENABLE=0\nD WARP_CONF=\nD WARP_GOOGLE=0\nD WARP_TELEGRAM=1\nD WARP_APPS=\nD WARP_DOMAINS=\nD WARP_PHONE=1\nD WARP_TETHER=1\nD WARP_ENGINE=awg\nD WARP_MASQUE_SNI=apteka.ru\nD WARP_MASQUE_H2=0\n' +
     Object.keys(M.usr).map((k) => 'U ' + k + '=' + M.usr[k] + '\n').join('') };
   if (a === 'znet') return { errno: 0, out: 'C wifi:Дом_5G|Дом_5G\n' + (M.znets || (M.znets =
     'wifi:Дом_5G|custom|--dpi-desync=fake,multidisorder --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-fake-tls=@G|Дом_5G|подбор: открыла 8 из 8|2026-10-20 13:05\n' +

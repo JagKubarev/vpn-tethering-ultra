@@ -1,0 +1,5 @@
+usque v4.2.1 — WARP через MASQUE (HTTP/3 по UDP или HTTP/2 по TCP), MIT
+https://github.com/Diniboy1123/usque/releases/tag/v4.2.1
+usque_4.2.1_android_arm64.zip, SHA-256 2754ff58786297319b4a037dccda4aefe7a33587d5c1bee34ee4b6e86a3fbaa9 (сверено с checksums.txt)
+bin/usque-arm64 — usque из архива без изменений, SHA-256 6c6c47ca3a0dcc5f0d6df75c703476fa9aa18e692015d3236dd11751a6ad16ce
+Сборки armv7 под Android в релизе нет — на 32-битных телефонах MASQUE недоступен, WARP — AmneziaWG.

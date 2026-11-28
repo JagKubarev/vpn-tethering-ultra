@@ -16,7 +16,8 @@ case "$ARCH" in
         set_perm "$MODPATH/bin/vtpoke-arm64"    0 0 0755
         rm -f "$MODPATH/bin/vtgid-arm"
         set_perm "$MODPATH/bin/vtgid-arm64"     0 0 0755
-        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + nfqws2 (zapret2) + AmneziaWG + curl 8.23.0 + opera-proxy v1.31.0 + hev-socks5-tproxy 2.13.1, arm64"
+        set_perm "$MODPATH/bin/usque-arm64"     0 0 0755
+        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + nfqws2 (zapret2) + AmneziaWG + curl 8.23.0 + opera-proxy v1.31.0 + hev-socks5-tproxy 2.13.1 + usque v4.2.1, arm64"
         ;;
     arm)
         rm -f "$MODPATH/bin/conntrack-arm64" "$MODPATH/bin/dnsproxy-arm64" "$MODPATH/bin/nfqws-arm64" "$MODPATH/bin/opera-proxy-arm64" "$MODPATH/bin/hev-socks5-tproxy-arm64"               "$MODPATH/bin/amneziawg-go-arm64" "$MODPATH/bin/awg-arm64"
@@ -33,6 +34,7 @@ case "$ARCH" in
         set_perm "$MODPATH/bin/vtpoke-arm"      0 0 0755
         rm -f "$MODPATH/bin/vtgid-arm64"
         set_perm "$MODPATH/bin/vtgid-arm"       0 0 0755
+        rm -f "$MODPATH/bin/usque-arm64"   # сборки usque для armv7 нет — WARP только AmneziaWG
         ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + nfqws2 (zapret2) + AmneziaWG + curl 8.23.0 + opera-proxy v1.31.0 + hev-socks5-tproxy 2.13.1, armv7"
         ;;
     *)
@@ -57,7 +59,8 @@ case "$ARCH" in
         set_perm "$MODPATH/bin/vtpoke-arm"      0 0 0755
         set_perm "$MODPATH/bin/vtgid-arm64"     0 0 0755
         set_perm "$MODPATH/bin/vtgid-arm"       0 0 0755
-        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + nfqws2 (zapret2) + AmneziaWG + curl 8.23.0 + opera-proxy v1.31.0 + hev-socks5-tproxy 2.13.1, arm64+armv7"
+        set_perm "$MODPATH/bin/usque-arm64"     0 0 0755
+        ui_print "- conntrack v1.4.8 + dnsproxy v0.86.0 + nfqws (zapret v72.13) + nfqws2 (zapret2) + AmneziaWG + curl 8.23.0 + opera-proxy v1.31.0 + hev-socks5-tproxy 2.13.1 + usque v4.2.1, arm64+armv7"
         ;;
 esac
 # свой curl — на прошивках без системного (Xiaomi): модуль находит его по PATH

@@ -71,6 +71,8 @@
   домены и приложения телефона; для телефона и для раздачи — отдельными переключателями. Конфиги создаются прямо с телефона или импортируются из
   AmneziaVPN; перестал отвечать — модуль переходит на следующий (пропавшая сеть, например в
   метро, сбоем конфига не считается).
+  Вместо AmneziaWG можно MASQUE — как приложение 1.1.1.1, HTTP/3 к Cloudflare (usque, только arm64):
+  аккаунт модуль создаёт сам, всё остальное — так же.
 - **YouTube и Google Play на мобильном интернете.** Повтор: рвётся только зависшее соединение
   (и запрос без ответа тоже, у загрузок Play — через 2–3 с), «малое окно» серверам, которые оператор
   глушит по ответу, пустой ACK вместо обрыва простаивающего видео, отдельная стратегия для YouTube,
@@ -321,8 +323,9 @@ VPN-клиента отвечает адресом вида `240.0.0.140`. Andro
 | `conntrack` | v1.4.8 (статическая сборка) | conntrack-tools, [netfilter.org](https://www.netfilter.org/projects/conntrack-tools/) | GPL-2.0 ([`conntrack.LICENSE`](module/bin/conntrack.LICENSE); рецепт сборки — [`conntrack.SOURCE`](module/bin/conntrack.SOURCE), исходники — [`third_party/conntrack/`](third_party/conntrack/)) |
 | `amneziawg-go` | v3.1.20260828 | [amnezia-vpn/amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go) | MIT ([`amneziawg-go.LICENSE`](module/bin/amneziawg-go.LICENSE); Go — [`golang.LICENSE`](module/bin/golang.LICENSE)) |
 | `awg` | из amneziawg-tools v3.1.20260812 | [amnezia-vpn/amneziawg-tools](https://github.com/amnezia-vpn/amneziawg-tools) | GPL-2.0 ([`awg.LICENSE`](module/bin/awg.LICENSE); сборка — [`amneziawg.SOURCE`](module/bin/amneziawg.SOURCE), исходники — [`third_party/amneziawg/`](third_party/amneziawg/)) |
+| `usque` | v4.2.1 (arm64) | [Diniboy1123/usque](https://github.com/Diniboy1123/usque) | MIT ([`usque.LICENSE`](module/bin/usque.LICENSE), [`usque.SOURCE`](module/bin/usque.SOURCE)) |
 
-Спасибо авторам zapret и zapret2 (bol-van), nfqws2-android (Dea1hwa1cher) и авторам стратегий из `meta.tsv`, dnsproxy (AdGuard), AmneziaWG (Amnezia) и netfilter. Некоторые идеи подбора
+Спасибо авторам zapret и zapret2 (bol-van), nfqws2-android (Dea1hwa1cher) и авторам стратегий из `meta.tsv`, dnsproxy (AdGuard), AmneziaWG (Amnezia), usque (Diniboy1123) и netfilter. Некоторые идеи подбора
 стратегий взяты из ZDT-D, byedpi (`--auto`) и zapret2 (circular), как указано в журнале
 изменений. Спасибо участникам темы на 4PDA за тесты на своих устройствах и сетях.
 
