@@ -1147,7 +1147,7 @@ details > summary::after { border-color: currentColor; }
   </div>
   <div class="row" data-dep="OPERA_ENABLE">
     <div class="txt"><div class="t">Весь трафик телефона через Opera</div>
-      <div class="s">Только TCP: QUIC отбивается (приложения перейдут на TCP), звонки и прочий UDP — напрямую. Мимо — как у WARP, список «Мимо туннеля». Включён и «весь трафик» WARP — главнее WARP, Opera подхватит, пока он не поднят.</div></div>
+      <div class="s">Только TCP: QUIC отбивается (приложения перейдут на TCP), звонки и прочий UDP — напрямую. Мимо — как у WARP, список «Мимо туннеля». Включён и «весь трафик» WARP — главнее WARP; пока он не поднят, подхватит Opera, если в «Если выход не работает» не выбран блок.</div></div>
     <label class="sw"><input type="checkbox" data-key="OPERA_ALL_PHONE"><span></span></label>
   </div>
   <div class="row" data-dep="OPERA_ENABLE">
@@ -1727,6 +1727,8 @@ function renderForm() {
     else {
       // I1: своё имя (собранное здесь или свой файл) — отдельным пунктом, иначе выбор показал бы «Как в конфиге»
       if (k === 'WARP_I1' && v && !Array.from(el.options).some((o) => o.value === v)) el.add(new Option(i1Label(v) + ' (своё)', v));
+      // порт MASQUE из конфига не из списка — отдельным пунктом, иначе выбор был бы пустым (ревью 28.11)
+      if (k === 'WARP_MASQUE_PORT' && v && !Array.from(el.options).some((o) => o.value === v)) el.add(new Option(v + ' (свой)', v));
       el.value = v;
     }
   });
