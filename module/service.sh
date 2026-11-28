@@ -1042,8 +1042,8 @@ WARP_ENGINE=awg         # awg — AmneziaWG (конфиги ниже); masque �
                         # как у приложения 1.1.1.1), свой аккаунт модуль создаёт сам; только arm64 (lib/warp.sh, warp_mq_*)
 WARP_MASQUE_SNI="apteka.ru"   # имя в первом пакете MASQUE; пусто — как у Cloudflare (consumer-masque.cloudflareclient.com:
                         # 28.11 на YOTA в 00:20 с ним туннель не поднимался, в 01:46 — за 3 с; с apteka.ru — оба раза)
-WARP_MASQUE_H2=0        # 1 — MASQUE по HTTP/2 через TCP 443, если оператор режет UDP к Cloudflare. Проба: 28.11 на YOTA
-                        # usque так подключался, но трафик через tun не шёл (через socks в 00:24 — шёл, 11–12 Мбит/с)
+WARP_MASQUE_H2=0        # 1 — MASQUE по HTTP/2 через TCP 443, если оператор режет UDP к Cloudflare; имя — всегда Cloudflare
+                        # (с apteka.ru по TCP «Connected», а трафика нет; без имени 28.11 днём на YOTA — 17,5 Мбит/с)
 WARP_CHAIN=""           # свой сервер после WARP (имя своего конфига): AmneziaWG к нему внутри туннеля Cloudflare —
                         # ТСПУ видит только WARP (lib/warp.sh, warp_chain_*); пусто — выкл
 WARP_CHAIN_SKIP=""      # приложения телефона мимо своего сервера: то, что у них идёт в WARP, — в голый WARP (пакеты, pkg@N)

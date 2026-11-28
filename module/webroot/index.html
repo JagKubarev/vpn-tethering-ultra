@@ -1055,12 +1055,14 @@ details > summary::after { border-color: currentColor; }
   </div>
   <div class="row col" data-dep="WARP_ENABLE" id="warpMqSniRow" hidden>
     <div class="txt"><div class="t">Имя для MASQUE</div>
-      <div class="s">Имя в первом пакете подключения. С именем Cloudflare (пусто) на YOTA MASQUE поднимается не всегда, с apteka.ru — да. Не подключается — попробуйте другое имя.</div></div>
+      <div class="s">Имя в первом пакете подключения. С именем Cloudflare (пусто) на YOTA MASQUE поднимается не всегда, с apteka.ru — да. Не подключается — попробуйте другое имя. По HTTP/2 — всегда имя Cloudflare.</div></div>
     <input type="text" data-key="WARP_MASQUE_SNI" placeholder="пусто — consumer-masque.cloudflareclient.com" aria-label="Имя для MASQUE" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <div class="s mt8">Аккаунт Cloudflare для MASQUE модуль создал сам. Перестал подключаться совсем — создайте новый.</div>
+    <div class="mt8"><button class="btn small" id="warpMqReset">Новый аккаунт MASQUE</button></div>
   </div>
   <div class="row" data-dep="WARP_ENABLE" id="warpMqH2Row" hidden>
     <div class="txt"><div class="t">MASQUE по TCP (HTTP/2)</div>
-      <div class="s">Проба — если оператор режет UDP к Cloudflare: тот же туннель через TCP 443. На YOTA так подключается, но трафик пока не идёт; медленнее и с большей задержкой.</div></div>
+      <div class="s">Если оператор режет UDP к Cloudflare: тот же туннель через TCP 443, всегда с именем Cloudflare. На YOTA днём 28.11 — 17,5 Мбит/с; задержка обычно больше, чем по UDP.</div></div>
     <label class="sw"><input type="checkbox" data-key="WARP_MASQUE_H2"><span></span></label>
   </div>
   <div class="row col" data-dep="WARP_ENABLE" id="warpI1Row">
@@ -1441,8 +1443,14 @@ function renderTop(s, names, exTxt, exOld) {
     '<button class="btn small" data-renew>Новый адрес</button>';
 }
 
+// usque только на arm64: на armv7 модуль берёт AmneziaWG — пункт выключен, с пояснением (статус warp_mq)
+function warpMqOpt() {
+  const o = $('[data-key=WARP_ENGINE] option[value=masque]');
+  if (o) { const no = ST.warp_mq === '0'; o.disabled = no; o.textContent = 'MASQUE (HTTP/3)' + (no ? ' — только arm64' : ''); }
+}
 function renderStatus(s) {
   ST = s;
+  warpMqOpt();
   renderFakeSni();
   renderWinHint();
   if ((s.dns_alt || '') + '|' + (s.dns_upstream || '') !== DNS_ST_KEY) { DNS_ST_KEY = (s.dns_alt || '') + '|' + (s.dns_upstream || ''); renderDnsLists(); }
@@ -1974,6 +1982,7 @@ function renderDeps() {
   // MASQUE: своё имя и HTTP/2; I1 у него нет — строку I1 прячем
   const mq = CUR.WARP_ENGINE === 'masque';
   $('#warpMqSniRow').hidden = !mq; $('#warpMqH2Row').hidden = !mq; $('#warpI1Row').hidden = mq;
+  warpMqOpt();
   // мимо своего сервера уходит только то, что у приложения идёт в WARP: целиком (WARP_APPS, клиенты Telegram) или по
   // группам и сайтам (WARP_PHONE); без WARP_PHONE и не целиком — правило не действует
   const wcsIdle = appKeyList('WARP_CHAIN_SKIP').filter((p) => !appKeyList('WARP_APPS').includes(p) &&
@@ -2656,6 +2665,14 @@ async function i1Build(dns) {
   } finally { b.disabled = false; b.textContent = was; }
 }
 $('#i1Gen').addEventListener('click', () => i1Build(false));
+$('#warpMqReset').addEventListener('click', async () => {
+  if (!confirm('Удалить аккаунт MASQUE и создать новый? WARP переподключится.')) return;
+  const b = $('#warpMqReset'); b.disabled = true;
+  try {
+    const r = await ctlBg('warp-mq-reset');
+    toast(isOk(r) ? (r.out || '').replace(/^OK\s*/, '') || 'Готово' : 'Не вышло: ' + errText(r, 'нет ответа'));
+  } finally { b.disabled = false; }
+});
 $('#i1Dns').addEventListener('click', () => i1Build(true));
 
 async function loadWarp() {

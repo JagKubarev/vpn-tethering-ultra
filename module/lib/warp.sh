@@ -420,7 +420,9 @@ warp_start() {   # имя конфига
 # ---- MASQUE (usque) ----
 warp_mq_su() {   # WARP_MQ_SU — запуск от uid 1000 (с группой 3999, если su умеет); 1 — никак
     [ -n "$WARP_MQ_SU" ] && return 0
+    # KernelSU понимает -g и после uid; Magisk разбирает опции только до uid (ревью 28.11) — оба порядка, потом без группы
     if su $WARP_MQ_UID -g "$DNSPROXY_GID" -c true >/dev/null 2>&1; then WARP_MQ_SU="su $WARP_MQ_UID -g $DNSPROXY_GID"
+    elif su -g "$DNSPROXY_GID" $WARP_MQ_UID -c true >/dev/null 2>&1; then WARP_MQ_SU="su -g $DNSPROXY_GID $WARP_MQ_UID"
     elif su $WARP_MQ_UID -c true >/dev/null 2>&1; then WARP_MQ_SU="su $WARP_MQ_UID"
     else return 1; fi
 }
@@ -478,23 +480,28 @@ warp_mq_register() {
     return 1
 }
 
-warp_mq_fail() {   # заметка пауза_с [строка журнала]
+warp_mq_hold() {   # заметка пауза_с [строка журнала] — туннеля ещё нет, снимать нечего
     [ -n "$3" ] && log "WARP: MASQUE — $3"
-    warp_down; WARP_RETRY_TS=$(( $(date +%s) + $2 )); warp_set_state fail "$1"
+    WARP_RETRY_TS=$(( $(date +%s) + $2 )); warp_set_state fail "$1"
     return 1
+}
+warp_mq_fail() {   # то же, но туннель уже начали поднимать — снять
+    warp_down; warp_mq_hold "$@"
 }
 
 warp_mq_start() {
     local a4 a6 sni="$WARP_MASQUE_SNI" i=0 h2="" how="HTTP/3 по UDP 443"
-    warp_down
-    [ -e /dev/net/tun ] || { mkdir -p /dev/net && ln -s /dev/tun /dev/net/tun; } 2>/dev/null
-    warp_mq_su || { warp_mq_fail "MASQUE: нет su $WARP_MQ_UID" $WARP_RETRY_SECS "не запустить от uid $WARP_MQ_UID (su $WARP_MQ_UID не работает)"; return 1; }
+    # su и аккаунт — до warp_down: зовут из off/fail или после warp_down (warp_reconnect), туннеля нет; повтор раз
+    # в 10 с, пока создаётся аккаунт, иначе при блоке (WARP_STRICT) каждый раз закрывал сокеты приложений (ревью 28.11)
+    warp_mq_su || { warp_mq_hold "MASQUE: нет su $WARP_MQ_UID" $WARP_RETRY_SECS "не запустить от uid $WARP_MQ_UID (su $WARP_MQ_UID не работает)"; return 1; }
     warp_mq_register
     case $? in
         0) ;;
-        1) warp_mq_fail "создаю аккаунт MASQUE" 10; return 1 ;;
-        *) warp_mq_fail "аккаунт MASQUE не создался" $WARP_RETRY_SECS; return 1 ;;
+        1) warp_mq_hold "создаю аккаунт MASQUE" 10; return 1 ;;
+        *) warp_mq_hold "аккаунт MASQUE не создался" $WARP_RETRY_SECS; return 1 ;;
     esac
+    warp_down
+    [ -e /dev/net/tun ] || { mkdir -p /dev/net && ln -s /dev/tun /dev/net/tun; } 2>/dev/null
     warp_mq_prep || { warp_mq_fail "MASQUE: нет каталога" 60 "не подготовить $WARP_MQ_DIR"; return 1; }
     (umask 077; cp -f "$WARP_MQ_CONF" "$WARP_MQ_DIR/config.json") && chown $WARP_MQ_UID:$WARP_MQ_UID "$WARP_MQ_DIR/config.json"
     a4=$(sed -n 's/.*"ipv4"[[:space:]]*:[[:space:]]*"\([0-9.]*\)".*/\1/p' "$WARP_MQ_CONF" | head -1)
@@ -502,7 +509,9 @@ warp_mq_start() {
     [ -n "$a4" ] || { warp_mq_fail "MASQUE: в аккаунте нет адреса" $WARP_RETRY_SECS "в $WARP_MQ_CONF нет адреса ipv4"; return 1; }
     $ip tuntap add dev $WARP_IF mode tun user $WARP_MQ_UID 2>/dev/null || {
         warp_mq_fail "MASQUE: нет tun" 60 "не создать $WARP_IF (ip tuntap)"; return 1; }
-    [ "$WARP_MASQUE_H2" = 1 ] && { h2=" --http2"; how="HTTP/2 по TCP 443"; }
+    # HTTP/2 — только с именем Cloudflare: с чужим (apteka.ru) TLS по TCP Cloudflare принимает, «Connected», но
+    # трафик не возит (28.11 13T: с apteka.ru — 0, без имени — 17,5 Мбит/с днём)
+    [ "$WARP_MASQUE_H2" = 1 ] && { h2=" --http2"; how="HTTP/2 по TCP 443"; sni=""; }
     : > "$WARP_MQ_DIR/usque.log"; chown $WARP_MQ_UID:$WARP_MQ_UID "$WARP_MQ_DIR/usque.log"
     $WARP_MQ_SU -c "exec $WARP_MQ_DIR/usque nativetun -c $WARP_MQ_DIR/config.json -n $WARP_IF -I --always-reconnect -m 1280${sni:+ -s $sni}$h2 >> $WARP_MQ_DIR/usque.log 2>&1" \
         < /dev/null > /dev/null 2>&1 &
@@ -718,17 +727,18 @@ warp_reconcile() {
                 if [ -z "$(warp_conf_names)" ]; then
                     [ "$WARP_NOTE" = "нет конфигов" ] || log "WARP: нет конфигов — создайте или импортируйте в WebUI"
                     warp_set_state fail "нет конфигов"
+                elif warp_mq_on; then
+                    # MASQUE — один: не ждать 5 мин, как после круга конфигов; в журнал — один раз. Раньше «Не менять
+                    # сервер»: та ветка писала бы имя конфига AmneziaWG (ревью 28.11)
+                    [ "$WARP_NOTE" = "не поднялся" ] || log "WARP: MASQUE не поднялся — повтор каждую минуту"
+                    warp_set_state fail "не поднялся"
+                    WARP_BAD=""; WARP_RETRY_TS=$((now + 60))
+                    return 0
                 elif n=$(warp_stick_name); then
                     # «Не менять сервер»: тот же через 30 с, не через 5 мин; в журнал — один раз
                     [ "$WARP_NOTE" = "не поднялся" ] || log "WARP: $n не поднялся — «Не менять сервер»: пробую его же каждые 30 с"
                     warp_set_state fail "не поднялся"
                     WARP_BAD=""; WARP_EP_FULL=0; WARP_RETRY_TS=$((now + 30))
-                    return 0
-                elif warp_mq_on; then
-                    # MASQUE — один: не ждать 5 мин, как после круга конфигов; в журнал — один раз
-                    [ "$WARP_NOTE" = "не поднялся" ] || log "WARP: MASQUE не поднялся — повтор каждую минуту"
-                    warp_set_state fail "не поднялся"
-                    WARP_BAD=""; WARP_RETRY_TS=$((now + 60))
                     return 0
                 else
                     log "WARP: ни один конфиг не поднялся — повтор через $((WARP_RETRY_SECS / 60)) мин"
@@ -851,7 +861,10 @@ warp_reconcile() {
                 # живом DC1 — переподнять (новая сессия), не больше WARP_TG_MAX подряд
                 # со своим сервером после WARP Telegram идёт через него — сессия Cloudflare ни при чём; при «только свой
                 # сервер» (блок 2) через WARP он не идёт и когда цепочка не поднята — переподключать WARP незачем
-                if [ "$WARP_TELEGRAM" = 1 ] && [ "$WARP_CF" = 1 ] && [ "$WARP_CH_STATE" != up ] && [ "$WARP_BLK_LVL" != 2 ] && \
+                # MASQUE — не переподключаем: аккаунт тот же, и что новая сессия даёт другой выход, не проверено, а
+                # переподключение рвёт всё, что идёт через WARP (ревью 28.11)
+                if [ "$WARP_TELEGRAM" = 1 ] && [ "$WARP_CF" = 1 ] && [ "$WARP_CUR" != "$WARP_MQ_NAME" ] && \
+                   [ "$WARP_CH_STATE" != up ] && [ "$WARP_BLK_LVL" != 2 ] && \
                    [ "$now" -ge "$WARP_TG_HOLD" ] && \
                    [ $((now - WARP_TG_TS)) -ge $WARP_TG_SECS ]; then
                     WARP_TG_TS=$now

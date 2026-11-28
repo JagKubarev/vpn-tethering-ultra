@@ -44,6 +44,7 @@
 #   webctl.sh warp-i1gen ИМЯ|warp-i1list|warp-i1del ИМЯ   свой I1 для WARP_I1 (имя в поддельном QUIC Initial)
 #   webctl.sh warp-stats              туннель: последнее рукопожатие и трафик (awg show)
 #   webctl.sh warp-reconnect          тот же конфиг заново (новая сессия Cloudflare)
+#   webctl.sh warp-mq-reset           новый аккаунт MASQUE: старый удалить, демон создаст новый при подъёме
 #                                     конфиги WARP (AmneziaWG) — см. warp/warp.sh
 # ============================================================================
 
@@ -1405,6 +1406,22 @@ case "$1" in
         while [ -f "$f" ] && [ $i -lt 80 ]; do sleep 0.25; i=$((i + 1)); done
         if [ -f "$f" ]; then rm -f "$f"; echo "ERR демон не ответил за 20 с"; exit 0; fi
         echo "OK переподключаю"
+        ;;
+
+    warp-mq-reset)
+        # аккаунт сломан (Cloudflare отозвал, файл испорчен) — иначе MASQUE пробовал бы его раз в минуту бесконечно
+        # (ревью 28.11). Удаляем — при следующем подъёме демон зарегистрирует новый; поднят — переподключаем сразу
+        rm -f /data/adb/vpn_tether_warp/masque.json /data/local/tmp/vpn_tether_mq/config.json
+        if [ -n "$(daemon_pid)" ] && grep -q '^warp_conf=masque$' "$STATUS_FILE" 2>/dev/null && \
+           grep -qE '^warp=(up|starting)$' "$STATUS_FILE" 2>/dev/null; then
+            f="$MODDIR/warp_reconn_req"; : > "$f"
+            i=0
+            while [ -f "$f" ] && [ $i -lt 80 ]; do sleep 0.25; i=$((i + 1)); done
+            [ -f "$f" ] && { rm -f "$f"; echo "OK аккаунт удалён — новый создастся при следующем подъёме"; exit 0; }
+            echo "OK аккаунт удалён, создаю новый"
+        else
+            echo "OK аккаунт удалён — новый создастся при следующем подъёме MASQUE (до минуты)"
+        fi
         ;;
 
     warp-list|warp-gen|warp-import|warp-del|warp-export|warp-save|warp-saveall|warp-i1gen|warp-i1list|warp-i1del)
