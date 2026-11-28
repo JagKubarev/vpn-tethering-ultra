@@ -304,8 +304,10 @@ $(echo $forced $OPERA_DOM_FLAST | tr ' ' '\n')"
 # на телефоне WARP (его ip rule раньше), на раздаче — чья цепочка в PREROUTING раньше
 opera_wanted() {
     [ "$OPERA_ENABLE" = "1" ] || return 1
-    [ -n "$OPERA_DOMAINS$OPERA_APPS" ] || [ "$OPERA_TELEGRAM" = "1" ] || [ "$OPERA_GOOGLE" = "1" ]
+    [ -n "$OPERA_DOMAINS$OPERA_APPS" ] || [ "$OPERA_TELEGRAM" = "1" ] || [ "$OPERA_GOOGLE" = "1" ] || \
+        [ "$OPERA_ALL_PHONE" = "1" ] || [ "$OPERA_ALL_TETHER" = "1" ]
 }
+OPERA_ALL_X=""   # «весь трафик» телефона через Opera: uid мимо (warp_all_excl_uids)
 opera_dst4() {
     local a
     [ "$OPERA_GOOGLE" = "1" ] && tr -d '\r' < "$MODULE_DIR/warp/google-ipv4.txt" 2>/dev/null | grep -E '^[0-9]+\.'
@@ -378,7 +380,13 @@ opera_rules_on() {
         # «127.0.0.1:33611» как адрес сайта (502 на всё, приложение молчит)
         echo "-A $CHAIN_OPERA_IN -i lo ! -d 127.0.0.0/8 -p tcp -m mark --mark $OPERA_MARK/$OPERA_MARK $tp"
         for i in "$@"; do echo "-A $CHAIN_OPERA_IN -i $i -p tcp -j $CHAIN_OPERA_TP"; done
-        [ -n "$*" ] && opera_dst4 | while read -r m; do echo "-A $CHAIN_OPERA_TP -p tcp -d $m $tp"; done
+        if [ -n "$*" ] && [ "$OPERA_ALL_TETHER" = "1" ]; then
+            # весь TCP раздачи — кроме локальных сетей (WebUI и DNS телефона, локалка клиента)
+            echo "-A $CHAIN_OPERA_TP -p tcp -d 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,169.254.0.0/16 -j RETURN"
+            echo "-A $CHAIN_OPERA_TP -p tcp $tp"
+        elif [ -n "$*" ] && [ "$OPERA_TETHER" = "1" ]; then
+            opera_dst4 | while read -r m; do echo "-A $CHAIN_OPERA_TP -p tcp -d $m $tp"; done
+        fi
         # ответы hev телефону: сокет наследует метку TPROXY, и SYN-ACK снова попал бы
         # в правило -i lo выше — приложение висит в SYN-SENT (05.11). addrtype в ядре нет
         echo "-A $CHAIN_OPERA_OUT -o lo -j MARK --set-xmark 0x0/$OPERA_MARK"
@@ -394,6 +402,11 @@ opera_rules_on() {
         [ "$OPERA_PHONE" = "1" ] && opera_dst4 | while read -r m; do
             echo "-A $CHAIN_OPERA_OUT -p tcp -d $m -j MARK --set-xmark $OPERA_MARK/$OPERA_MARK"
         done
+        # весь TCP приложений телефона — после групп (у «мимо» группы остаются)
+        if [ "$OPERA_ALL_PHONE" = "1" ]; then
+            for u in $OPERA_ALL_X; do echo "-A $CHAIN_OPERA_OUT -m owner --uid-owner $u -j RETURN"; done
+            echo "-A $CHAIN_OPERA_OUT -p tcp -j MARK --set-xmark $OPERA_MARK/$OPERA_MARK"
+        fi
         echo "COMMIT"
         # QUIC в TPROXY не попадёт, а сайт увидел бы адрес оператора: отказ,
         # браузер сразу перейдёт на TCP
@@ -403,7 +416,19 @@ opera_rules_on() {
         for u in $excl; do echo "-A $CHAIN_OPERA_QO -m owner --uid-owner $u -j RETURN"; done
         for u in $uids; do echo "-A $CHAIN_OPERA_QO -p udp --dport 443 -m owner --uid-owner $u -j REJECT"; done
         [ "$OPERA_PHONE" = "1" ] && opera_dst4 | while read -r m; do echo "-A $CHAIN_OPERA_QO -p udp --dport 443 -d $m -j REJECT"; done
-        [ -n "$*" ] && opera_dst4 | while read -r m; do echo "-A $CHAIN_OPERA_QF -p udp --dport 443 -d $m -j REJECT"; done
+        if [ -n "$*" ] && [ "$OPERA_ALL_TETHER" = "1" ]; then
+            for i in "$@"; do
+                echo "-A $CHAIN_OPERA_QF -i $i -d 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10 -j RETURN"
+                echo "-A $CHAIN_OPERA_QF -i $i -p udp --dport 443 -j REJECT"
+            done
+        elif [ -n "$*" ] && [ "$OPERA_TETHER" = "1" ]; then
+            opera_dst4 | while read -r m; do echo "-A $CHAIN_OPERA_QF -p udp --dport 443 -d $m -j REJECT"; done
+        fi
+        if [ "$OPERA_ALL_PHONE" = "1" ]; then
+            for u in $OPERA_ALL_X; do echo "-A $CHAIN_OPERA_QO -m owner --uid-owner $u -j RETURN"; done
+            echo "-A $CHAIN_OPERA_QO -o lo -j RETURN"
+            echo "-A $CHAIN_OPERA_QO -p udp --dport 443 -j REJECT"
+        fi
         echo "COMMIT"
     } > "$f"
     if ! ${iptables%% *}-restore -w 2 --noflush < "$f" 2>"$f.err" && \
@@ -425,7 +450,7 @@ opera_rules_on() {
 
     # IPv6 групп и приложений — отбить, уйдёт на v4 (сайты из списка по IPv6 не
     # отбиваются). От адресов сайтов не зависит: их смена сюда не доходит
-    s6="$OPERA_TELEGRAM$OPERA_GOOGLE$OPERA_PHONE|$excl|$uids|$*"
+    s6="$OPERA_TELEGRAM$OPERA_GOOGLE$OPERA_PHONE|$excl|$uids|$*|$OPERA_ALL_PHONE$OPERA_ALL_TETHER|$OPERA_ALL_X"
     [ "$s6" = "$OPERA_V6_SIG" ] && $ip6tables -C OUTPUT -j "$CHAIN_OPERA_V6" 2>/dev/null && \
         $ip6tables -C FORWARD -j "$CHAIN_OPERA_V6F" 2>/dev/null && s6=""
     if [ -n "$s6" ] && [ "$OPERA_V6_OK" != "0" ]; then
@@ -439,9 +464,23 @@ opera_rules_on() {
         $ip6tables -A "$CHAIN_OPERA_V6" $m -p tcp -j REJECT --reject-with tcp-reset 2>/dev/null
         $ip6tables -A "$CHAIN_OPERA_V6" $m -j REJECT --reject-with icmp6-adm-prohibited 2>/dev/null
     done
+    if [ "$OPERA_ALL_PHONE" = "1" ]; then
+        # весь трафик телефона — v6 приложений целиком (кроме самого телефона и локальных), уйдут на v4
+        $ip6tables -A "$CHAIN_OPERA_V6" -o lo -j RETURN 2>/dev/null
+        $ip6tables -A "$CHAIN_OPERA_V6" -d fe80::/10,fc00::/7,ff00::/8 -j RETURN 2>/dev/null
+        for u in $OPERA_ALL_X; do $ip6tables -A "$CHAIN_OPERA_V6" -m owner --uid-owner "$u" -j RETURN 2>/dev/null; done
+        $ip6tables -A "$CHAIN_OPERA_V6" -p tcp -j REJECT --reject-with tcp-reset 2>/dev/null
+        $ip6tables -A "$CHAIN_OPERA_V6" -j REJECT --reject-with icmp6-adm-prohibited 2>/dev/null
+    fi
     $ip6tables -C OUTPUT -j "$CHAIN_OPERA_V6" 2>/dev/null || $ip6tables -I OUTPUT 1 -j "$CHAIN_OPERA_V6" 2>/dev/null
     $ip6tables -N "$CHAIN_OPERA_V6F" 2>/dev/null; $ip6tables -F "$CHAIN_OPERA_V6F" 2>/dev/null
     for i in "$@"; do
+        if [ "$OPERA_ALL_TETHER" = "1" ]; then
+            $ip6tables -A "$CHAIN_OPERA_V6F" -i "$i" -d fe80::/10,fc00::/7,ff00::/8 -j RETURN 2>/dev/null
+            $ip6tables -A "$CHAIN_OPERA_V6F" -i "$i" -p tcp -j REJECT --reject-with tcp-reset 2>/dev/null
+            $ip6tables -A "$CHAIN_OPERA_V6F" -i "$i" -j REJECT --reject-with icmp6-adm-prohibited 2>/dev/null
+            continue
+        fi
         opera_dst6 | while read -r m; do
             $ip6tables -A "$CHAIN_OPERA_V6F" -i "$i" -d "$m" -p tcp -j REJECT --reject-with tcp-reset 2>/dev/null
             $ip6tables -A "$CHAIN_OPERA_V6F" -i "$i" -d "$m" -j REJECT --reject-with icmp6-adm-prohibited 2>/dev/null
@@ -670,15 +709,16 @@ opera_reconcile() {
     [ $((now - OPERA_DOM_TS)) -ge $OPERA_DOM_SECS ] && opera_domains_refresh
     if [ $((now - OPERA_APP_TS)) -ge 30 ]; then
         OPERA_APP_UIDS=$(opera_app_uids); OPERA_EXCL=$(zapret_vpn_uids); OPERA_APP_TS=$now
+        OPERA_ALL_X=""; [ "$OPERA_ALL_PHONE" = "1" ] && OPERA_ALL_X=$(warp_all_excl_uids)
     fi
-    if [ -z "$OPERA_DOM_IPS$OPERA_APP_UIDS" ] && [ "$OPERA_TELEGRAM$OPERA_GOOGLE" = "00" ]; then
+    if [ -z "$OPERA_DOM_IPS$OPERA_APP_UIDS" ] && [ "$OPERA_TELEGRAM$OPERA_GOOGLE$OPERA_ALL_PHONE$OPERA_ALL_TETHER" = "0000" ]; then
         [ -n "$OPERA_RULES_SIG" ] && opera_rules_off
         return 0
     fi
     # раздача — только в режиме «напрямую»: TPROXY забирает пакет до FORWARD, и
     # в blocked клиенты вышли бы мимо kill-switch
-    [ "$VPN_TETHER_MODE" = "off" ] && [ "$OPERA_TETHER" = "1" ] && ifaces="$LAST_TETHER_IFACES"
-    sig="$OPERA_TELEGRAM$OPERA_GOOGLE$OPERA_PHONE|$ifaces|$OPERA_EXCL|$OPERA_APP_UIDS|$OPERA_DOM_IPS"
+    [ "$VPN_TETHER_MODE" = "off" ] && { [ "$OPERA_TETHER" = "1" ] || [ "$OPERA_ALL_TETHER" = "1" ]; } && ifaces="$LAST_TETHER_IFACES"
+    sig="$OPERA_TELEGRAM$OPERA_GOOGLE$OPERA_PHONE|$ifaces|$OPERA_EXCL|$OPERA_APP_UIDS|$OPERA_DOM_IPS|$OPERA_ALL_PHONE$OPERA_ALL_TETHER|$OPERA_ALL_X"
     [ "$sig" = "$OPERA_RULES_SIG" ] && { [ "$OPERA_TICK" != 0 ] || opera_rules_ok; } && return 0
     # без opera_rules_off: цепочки перезаполняются на месте, ip rule и таблица стоят —
     # новый адрес одного сайта не рвёт соединения других
@@ -688,7 +728,7 @@ opera_reconcile() {
         n=$(opera_dst4 | grep -c .)
         OPERA_NETS=$(echo $OPERA_APP_UIDS | wc -w)
         { [ "$OPERA_PHONE" = "1" ] || [ -n "$ifaces" ]; } && OPERA_NETS=$((OPERA_NETS + n))
-        log "opera: через Opera ${OPERA_ENDPOINT:-?}: сетей $n, приложений $(echo $OPERA_APP_UIDS | wc -w | tr -d ' '), общих CDN мимо: ${OPERA_DOM_SKIP:-0}, телефон: $OPERA_PHONE, раздача: ${ifaces:-нет}"
+        log "opera: через Opera ${OPERA_ENDPOINT:-?}: сетей $n, приложений $(echo $OPERA_APP_UIDS | wc -w | tr -d ' '), общих CDN мимо: ${OPERA_DOM_SKIP:-0}, телефон: $OPERA_PHONE, раздача: ${ifaces:-нет}$([ "$OPERA_ALL_PHONE" = 1 ] && echo "; весь TCP телефона (мимо uid: ${OPERA_ALL_X:-нет})")$([ "$OPERA_ALL_TETHER" = 1 ] && [ -n "$ifaces" ] && echo "; весь TCP раздачи")"
         phone_status_refresh
     elif [ "$rc" = 2 ]; then
         opera_rules_off

@@ -168,6 +168,7 @@ update_status() {
         echo "warp_colo=$WARP_COLO_UP"
         echo "warp_cf=$WARP_CF"
         echo "warp_mq=$([ -n "$USQUE_BIN" ] && echo 1 || echo 0)"
+        echo "warp_mq_via=$([ "$WARP_CUR" = masque ] && echo "$WARP_MQ_VIA")"
         echo "warp_chain=$([ -n "$WARP_CHAIN" ] && echo "$WARP_CH_STATE" || echo off)"
         echo "warp_chain_ip=$WARP_CH_IP"
         echo "warp_chain_loc=$WARP_CH_LOC"

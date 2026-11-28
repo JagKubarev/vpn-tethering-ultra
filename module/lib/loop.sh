@@ -210,8 +210,8 @@ CONF_GRP_QUIC="QUIC_BLOCK_APPS QUIC_BLOCK_YT QUIC_YT_FAKE"
 CONF_GRP_STEALTH="TETHER_STEALTH TETHER_TTL_STRICT"
 CONF_GRP_WARP="WARP_ENABLE WARP_CONF WARP_I1 WARP_ENGINE"
 # имя и HTTP/2 MASQUE — в подписи WARP только при WARP_ENGINE=masque (reload_config): AmneziaWG они не касаются
-CONF_GRP_OPERA="OPERA_ENABLE OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER"
-CONF_GRP_WARPR="WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER"
+CONF_GRP_OPERA="OPERA_ENABLE OPERA_DOMAINS OPERA_TELEGRAM OPERA_GOOGLE OPERA_APPS OPERA_PHONE OPERA_TETHER OPERA_ALL_PHONE OPERA_ALL_TETHER WARP_ALL_EXCL"
+CONF_GRP_WARPR="WARP_GOOGLE WARP_TELEGRAM WARP_APPS WARP_DOMAINS WARP_PHONE WARP_TETHER WARP_ALL_PHONE WARP_ALL_TETHER WARP_ALL_EXCL"
 CONF_GRP_ZAPRET="DNS_VIA_ZAPRET ZAPRET_ENABLE ZAPRET_ENGINE ZAPRET2_STRATEGY ZAPRET2_ARGS ZAPRET2_FAKE_SNI ZAPRET_MODE ZAPRET_PHONE ZAPRET_EXCL_APPS ZAPRET_STRATEGY ZAPRET_ARGS ZAPRET_QUIC_BLOCK ZAPRET_QUIC_FAKE ZAPRET_PER_NET YT_GGC_BLOCK YT_DEAD_FAILFAST YT_WSSIZE_RAMP"
 _conf_grp_sig() {   # $1 = имя переменной-результата, дальше ключи
     local _v="$1" _k _o=""; shift
@@ -234,7 +234,7 @@ reload_config() {
     _conf_grp_sig s_op0 $CONF_GRP_OPERA
     _conf_grp_sig s_wp0 $CONF_GRP_WARP
     _conf_grp_sig s_wr0 $CONF_GRP_WARPR
-    local s_wm0="$WARP_MASQUE_SNI|$WARP_MASQUE_H2"
+    local s_wm0="$WARP_MASQUE_SNI|$WARP_MASQUE_H2|$WARP_MASQUE_PORT"
     local s_tgw0="$WARP_ENABLE$WARP_TELEGRAM" s_api0="$OPERA_API_PROXY|$OPERA_COUNTRY" s_wc0="$WARP_CHAIN" s_wcs0="$WARP_CHAIN_SKIP|$WARP_CHAIN_SKIP_TG" s_wk0="$WARP_STRICT|$WARP_STICK"
     conf_restore_defaults
     USER_CONF_NOTE=""
@@ -257,7 +257,7 @@ reload_config() {
     # прокси регистрации — аргумент opera-proxy: новый заработает только с новым запуском
     [ "$s_api0" != "$OPERA_API_PROXY|$OPERA_COUNTRY" ] && [ "$OPERA_STATE" != "off" ] && { log "opera: сменился регион или свой прокси, перезапускаю"; opera_down quiet; }
     _conf_grp_sig s_wp1 $CONF_GRP_WARP
-    [ "$WARP_ENGINE" = masque ] && [ "$s_wm0" != "$WARP_MASQUE_SNI|$WARP_MASQUE_H2" ] && s_wp1="$s_wp1|masque"
+    [ "$WARP_ENGINE" = masque ] && [ "$s_wm0" != "$WARP_MASQUE_SNI|$WARP_MASQUE_H2|$WARP_MASQUE_PORT" ] && s_wp1="$s_wp1|masque"
     _conf_grp_sig s_wr1 $CONF_GRP_WARPR
     RELOAD_NEED_REBUILD=0
     [ "$s_dns0" != "$s_dns1" ] && { what="$what DNS"; RELOAD_NEED_REBUILD=1; }
@@ -320,7 +320,7 @@ reload_config() {
     if [ "$s_wp0" != "$s_wp1" ]; then
         # WARP: снять, сторож поднимет заново с новым конфигом (~2с)
         warp_down "настройки"
-        WARP_BAD=""; WARP_EP_FULL=0; WARP_RETRY_TS=0; WARP_ENSURE_DONE=0
+        WARP_BAD=""; WARP_EP_FULL=0; WARP_RETRY_TS=0; WARP_ENSURE_DONE=0; WARP_MQ_IDX=0
         warp_set_state off ""
     fi
     if [ "$s_wc0" != "$WARP_CHAIN" ]; then

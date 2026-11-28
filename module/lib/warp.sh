@@ -80,6 +80,11 @@ WARP_MQ_UID=1000
 WARP_MQ_SU=""                        # как запускать от uid 1000 (warp_mq_su)
 WARP_MQ_REG_TS=0                     # когда начата регистрация (0 — не идёт)
 WARP_MQ_WARN=""                      # «MASQUE только arm64» — в журнал один раз
+# Перебор, если не поднялся (28.11): днём YOTA режет UDP 443 к Cloudflare до 0,2–2,5 Мбит/с, другие порты — 12–18;
+# сначала выбранный (WARP_MASQUE_PORT, HTTP/2 — если выбран он), дальше остальные QUIC и в конце HTTP/2 443
+WARP_MQ_PORTS="4443 443 8443 500 1701 4500 8095"   # все проверены 28.11 (13T, YOTA): подключаются
+WARP_MQ_IDX=0                        # номер варианта в warp_mq_seq; 0 — выбранный в настройках
+WARP_MQ_VIA=""                       # как поднят сейчас: «UDP 4443» / «TCP 443» — в журнал и статус
 
 # Адрес туннеля — только через туннель: на пакеты уже закрытых сокетов (после ss -K, смены пути) ядро отвечает
 # RST без метки и привязки, и main уводил их оператору с адресом warp0/warp1 (26.11 на 13T: 15 RST к Telegram
@@ -490,12 +495,30 @@ warp_mq_hold() {   # заметка пауза_с [строка журнала] 
     WARP_RETRY_TS=$(( $(date +%s) + $2 )); warp_set_state fail "$1"
     return 1
 }
+warp_mq_seq() {   # варианты по порядку: q<порт> — QUIC, h<порт> — HTTP/2
+    local p out
+    if [ "$WARP_MASQUE_H2" = 1 ]; then out="h$WARP_MASQUE_PORT"; else out="q$WARP_MASQUE_PORT"; fi
+    for p in $WARP_MQ_PORTS; do
+        [ "$p" = "$WARP_MASQUE_PORT" ] && [ "$WARP_MASQUE_H2" != 1 ] && continue
+        out="$out q$p"
+    done
+    [ "$WARP_MASQUE_H2" = 1 ] || out="$out h443"
+    echo $out
+}
+# следующий вариант; 1 — круг пройден (снова выбранный): тогда как с обычным конфигом — «не поднялся», повтор через минуту
+warp_mq_next() {
+    WARP_MQ_IDX=$((WARP_MQ_IDX + 1))
+    [ "$WARP_MQ_IDX" -lt $(warp_mq_seq | wc -w) ] && return 0
+    WARP_MQ_IDX=0
+    return 1
+}
+
 warp_mq_fail() {   # то же, но туннель уже начали поднимать — снять
     warp_down; warp_mq_hold "$@"
 }
 
 warp_mq_start() {
-    local a4 a6 sni="$WARP_MASQUE_SNI" i=0 h2="" how="HTTP/3 по UDP 443"
+    local a4 a6 sni="$WARP_MASQUE_SNI" i=0 h2="" how v port
     # su и аккаунт — до warp_down: зовут из off/fail или после warp_down (warp_reconnect), туннеля нет; повтор раз
     # в 10 с, пока создаётся аккаунт, иначе при блоке (WARP_STRICT) каждый раз закрывал сокеты приложений (ревью 28.11)
     warp_mq_su || { warp_mq_hold "MASQUE: нет su $WARP_MQ_UID" $WARP_RETRY_SECS "не запустить от uid $WARP_MQ_UID (su $WARP_MQ_UID не работает)"; return 1; }
@@ -514,11 +537,16 @@ warp_mq_start() {
     [ -n "$a4" ] || { warp_mq_fail "MASQUE: в аккаунте нет адреса" $WARP_RETRY_SECS "в $WARP_MQ_CONF нет адреса ipv4"; return 1; }
     $ip tuntap add dev $WARP_IF mode tun user $WARP_MQ_UID 2>/dev/null || {
         warp_mq_fail "MASQUE: нет tun" 60 "не создать $WARP_IF (ip tuntap)"; return 1; }
-    # HTTP/2 — только с именем Cloudflare: с чужим (apteka.ru) TLS по TCP Cloudflare принимает, «Connected», но
-    # трафик не возит (28.11 13T: с apteka.ru — 0, без имени — 17,5 Мбит/с днём)
-    [ "$WARP_MASQUE_H2" = 1 ] && { h2=" --http2"; how="HTTP/2 по TCP 443"; sni=""; }
+    # вариант из перебора (warp_mq_seq); HTTP/2 — только с именем Cloudflare: с чужим (apteka.ru) TLS по TCP
+    # Cloudflare принимает, «Connected», но трафик не возит (28.11 13T: с apteka.ru — 0, без имени — 17,5 Мбит/с днём)
+    v=$(warp_mq_seq | tr ' ' '\n' | sed -n "$((WARP_MQ_IDX + 1))p"); [ -n "$v" ] || { WARP_MQ_IDX=0; v=$(warp_mq_seq | cut -d' ' -f1); }
+    port=${v#?}
+    case "$v" in
+        h*) h2=" --http2"; sni=""; how="HTTP/2 по TCP $port"; WARP_MQ_VIA="TCP $port" ;;
+        *)  how="HTTP/3 по UDP $port"; WARP_MQ_VIA="UDP $port" ;;
+    esac
     : > "$WARP_MQ_DIR/usque.log"; chown $WARP_MQ_UID:$WARP_MQ_UID "$WARP_MQ_DIR/usque.log"
-    $WARP_MQ_SU -c "exec $WARP_MQ_DIR/usque nativetun -c $WARP_MQ_DIR/config.json -n $WARP_IF -I --always-reconnect -m 1280${sni:+ -s $sni}$h2 >> $WARP_MQ_DIR/usque.log 2>&1" \
+    $WARP_MQ_SU -c "exec $WARP_MQ_DIR/usque nativetun -c $WARP_MQ_DIR/config.json -n $WARP_IF -I --always-reconnect -m 1280 -P $port${sni:+ -s $sni}$h2 >> $WARP_MQ_DIR/usque.log 2>&1" \
         < /dev/null > /dev/null 2>&1 &
     WARP_PID=""
     while [ $i -lt 50 ] && [ -z "$WARP_PID" ]; do sleep 0.1; i=$((i + 1)); WARP_PID=$(warp_mq_pid); done
@@ -535,7 +563,7 @@ warp_mq_start() {
     # Cloudflare — проверка строгая (warp=on); хендшейка awg нет — сразу к проверке трафиком, адреса не перебираем
     WARP_CUR="$WARP_MQ_NAME"; WARP_STATE=starting; WARP_TS=$(date +%s); WARP_CHECK_TS=0; WARP_FAILS=0; WARP_NETCHG=0; WARP_TG_TS=0
     WARP_CF=1; WARP_EP0=""; WARP_HS=1; WARP_EP_TRIED=""; WARP_EP_SILENT=""; WARP_EP_Q=""; WARP_EP_CUR=""; WARP_RU_EP=""; WARP_RU_TRY=0
-    log "WARP: запускаю MASQUE (usque, $how, имя ${sni:-как у Cloudflare})"
+    log "WARP: запускаю MASQUE (usque, $how, имя ${sni:-как у Cloudflare})$([ "$WARP_MQ_IDX" -gt 0 ] && echo " — запасной вариант $((WARP_MQ_IDX + 1)) из $(warp_mq_seq | wc -w)")"
     return 0
 }
 
@@ -804,6 +832,8 @@ warp_reconcile() {
                 fi
                 WARP_LAST_UP="$WARP_CUR"   # за него держится «Не менять сервер», если основной не выбран
                 log "WARP: $WARP_CUR поднят за $(( $(date +%s) - WARP_TS )) с${WARP_COLO:+ (площадка $WARP_COLO)}"
+                [ "$WARP_CUR" = "$WARP_MQ_NAME" ] && [ "$WARP_MQ_IDX" -gt 0 ] && \
+                    log "WARP: MASQUE работает через запасной вариант — $WARP_MQ_VIA (выбранный не поднялся; его можно выбрать в настройках)"
                 if [ "$WARP_CF" = 1 ] && warp_colo_ru; then
                     log "WARNING: WARP: только российская площадка Cloudflare ($WARP_COLO) — Telegram и часть сайтов через WARP могут не открываться"
                 elif [ "$WARP_CF" = 1 ] && [ -n "$WARP_EP_CUR" ]; then
@@ -827,6 +857,10 @@ warp_reconcile() {
                 elif [ $WARP_FAILS -ge 3 ] && ! warp_uplink; then
                     log "WARP: $WARP_CUR — нет трафика ($(warp_hs_note)), но напрямую тоже — $(warp_nonet_note) — конфиг не бракую, повтор через $(warp_nonet_wait) с"
                     warp_down; WARP_RETRY_TS=$((now + $(warp_nonet_wait))); warp_set_state fail "$(warp_nonet_note)"
+                elif [ $WARP_FAILS -ge 3 ] && [ "$WARP_CUR" = "$WARP_MQ_NAME" ] && warp_mq_next; then
+                    # MASQUE: следующий порт (или HTTP/2) сразу, конфиг не бракуем
+                    log "WARP: MASQUE ($WARP_MQ_VIA) — нет трафика через туннель ($(warp_hs_note)), пробую следующий вариант"
+                    warp_down; warp_set_state off ""
                 elif [ $WARP_FAILS -ge 3 ]; then
                     log "WARP: $WARP_CUR — нет трафика через туннель ($(warp_hs_note)), беру следующий"
                     warp_mark_bad "$WARP_CUR"; warp_down; warp_set_state off ""
@@ -933,7 +967,9 @@ warp_reconcile() {
                 # после сбоя — проверять чаще: 3 подряд ≈ полминуты
                 WARP_CHECK_TS=$((now - WARP_CHECK_SECS + 10))
                 log "WARP: $WARP_CUR не отвечает ($WARP_FAILS/3)"
-                if [ $WARP_FAILS -ge 3 ]; then
+                if [ $WARP_FAILS -ge 3 ] && [ "$WARP_CUR" = "$WARP_MQ_NAME" ] && warp_mq_next; then
+                    warp_down "не отвечает — MASQUE пробую на следующем порту"; warp_set_state off ""
+                elif [ $WARP_FAILS -ge 3 ]; then
                     warp_mark_bad "$WARP_CUR"; warp_down "не отвечает"; warp_set_state off ""
                 fi
             fi ;;
@@ -976,6 +1012,8 @@ WARP_DOM_LAST=""                  # адреса прошлого обновле
 WARP_DOM_SKIP=0
 WARP_APP_UIDS=""
 WARP_APP_TS=0
+WARP_ALL_X=""                     # «весь трафик»: uid мимо (warp_all_excl_uids), пересчёт вместе с WARP_APP_UIDS
+WARP_RT_ALL=""                    # «весь трафик» (телефон, раздача) при последней сборке — смена закрывает соединения
 
 # Домен -> IPv4 через наш dnsproxy (те же ответы, что у клиентов); его нет —
 # через 1.1.1.1. Свой разбор ответа: у busybox nslookup нет -port, dig нет.
@@ -1066,6 +1104,19 @@ warp_app_uids() {
     echo "${out# }"
 }
 
+# «Весь трафик» (WARP_ALL_PHONE, OPERA_ALL_PHONE): uid мимо — VPN-клиенты и «мимо обхода» (zapret_vpn_uids) и
+# WARP_ALL_EXCL (банки, Госуслуги: зарубежный адрес им не нравится)
+warp_all_excl_uids() {
+    local p u out
+    out=$(zapret_vpn_uids)
+    for p in $WARP_ALL_EXCL; do
+        u=$(pkg_uid "$p")
+        case "$u" in ''|*[!0-9]*) continue ;; esac
+        out="$out $u"
+    done
+    echo $out | tr ' ' '\n' | grep -E '^[0-9]+$' | sort -un | tr '\n' ' '
+}
+
 # Адреса групп по строке: google/telegram из файлов, домены
 warp_dst4() {   # \r — на случай списка, сохранённого в Windows (iptables-restore его не примет)
     local a
@@ -1096,6 +1147,13 @@ warp_dst6() {
 warp_kill_sockets() {   # причина [сети — по умолчанию все сети групп] [- — без приложений]
     local f="" m n=0 k=0 nets="${2-$(warp_dst4)}"
     command -v ss >/dev/null 2>&1 || return 0
+    # весь трафик телефона через WARP: путь сменился у всех приложений — их сокеты (uid ≥ 10000, кроме мимо и
+    # WARP_KILL_KEEP). Смена групп («-») и Telegram мимо своего сервера — как обычно, по сетям
+    if [ "$WARP_ALL_PHONE" = 1 ] && [ "$3" != "-" ]; then
+        n=$(warp_kill_each "" "" "$WARP_ALL_X $WARP_KILL_KEEP" 10000)
+        [ "${n:-0}" -gt 0 ] && log "WARP: закрыто соединений приложений телефона (весь трафик через WARP): $n ($1) — переподключатся сразу"
+        return 0
+    fi
     if [ "$WARP_PHONE" = "1" ]; then
         for m in $nets; do f="$f${f:+ or }dst $m"; done
         # shellcheck disable=SC2086
@@ -1122,13 +1180,14 @@ warp_kill_app_sockets() {
 
 # Сокеты по одному: ss -K по uid не фильтрует, но показывает его (-e). Фильтр ss (пусто — все), только эти uid
 # (пусто — любые), кроме этих uid. Печатает, сколько закрыто
-warp_kill_each() {   # "фильтр" "только uid" "кроме uid"
+warp_kill_each() {   # "фильтр" "только uid" "кроме uid" [uid от — только приложения, без сокетов к самому телефону]
     local l lp p a n=0
     command -v ss >/dev/null 2>&1 || { echo 0; return 0; }
     # два состояния — с колонкой State: $4 свой адрес, $5 чужой; фильтр — словами (ss их склеит)
     # shellcheck disable=SC2086
-    for l in $(ss -tne state established state syn-sent $1 2>/dev/null | awk -v o=" $2 " -v x=" $3 " 'NR > 1 {
+    for l in $(ss -tne state established state syn-sent $1 2>/dev/null | awk -v o=" $2 " -v x=" $3 " -v m="${4:-0}" 'NR > 1 {
             u = "-"; for (i = 6; i <= NF; i++) if ($i ~ /^uid:/) { u = substr($i, 5); break }
+            if (m > 0 && (u == "-" || u + 0 < m || $5 ~ /^(127\.|\[::1\]|\[::ffff:127\.)/)) next
             if ((o == "  " || index(o, " " u " ")) && !index(x, " " u " ")) print $4 "|" $5 }'); do
         lp=${l%%|*}; p=${l#*|}
         a=${p%:*}; a=${a#[}; a=${a%]}
@@ -1145,13 +1204,16 @@ warp_kill_each() {   # "фильтр" "только uid" "кроме uid"
 # намеренно (раздача при WARP_TETHER=0, root и система), не трогаем. «ct» — только conntrack (второй вызов на
 # старте: сокеты телефона к тому времени уже переподключились с меткой, рвать их снова незачем)
 warp_drop_unmarked() {   # причина [ct] [ифейсы раздачи — по умолчанию LAST_TETHER_IFACES]
-    local i s m c n=0 ifs="${3-$LAST_TETHER_IFACES}"
-    if [ -n "$CONNTRACK_BIN" ] && [ "$WARP_TETHER" = 1 ]; then
+    local i s m c n=0 ifs="${3-$LAST_TETHER_IFACES}" nets
+    if [ -n "$CONNTRACK_BIN" ] && { [ "$WARP_TETHER" = 1 ] || [ "$WARP_ALL_TETHER" = 1 ]; }; then
+        # весь трафик раздачи — все записи без метки, не только к сетям групп («-» — без -d)
+        nets=$(warp_dst4); [ "$WARP_ALL_TETHER" = 1 ] && nets="-"
         for i in $ifs; do
             s=$($ip -4 addr show dev "$i" 2>/dev/null | awk '/inet / { print $2; exit }')
             [ -n "$s" ] || continue
-            for m in $(warp_dst4); do
-                c=$($CONNTRACK_BIN -D -s "$s" -d "$m" --mark 0/$WARP_MARK 2>&1 | sed -n 's/.* \([0-9][0-9]*\) flow entries.*/\1/p')
+            for m in $nets; do
+                # shellcheck disable=SC2046
+                c=$($CONNTRACK_BIN -D -s "$s" $([ "$m" != "-" ] && echo "-d $m") --mark 0/$WARP_MARK 2>&1 | sed -n 's/.* \([0-9][0-9]*\) flow entries.*/\1/p')
                 n=$((n + ${c:-0}))
             done
         done
@@ -1196,12 +1258,13 @@ warp_start_block() {   # [1 — второй вызов]
         warp_drop_unmarked "старт демона, раздача" ct
         return 0
     else
-        WARP_APP_UIDS=$(warp_app_uids); WARP_APP_TS=$(date +%s)
-        tif=""; [ "$WARP_TETHER" = 1 ] && tif=$(get_active_tether_ifaces)
+        WARP_APP_UIDS=$(warp_app_uids); WARP_ALL_X=$(warp_all_excl_uids); WARP_APP_TS=$(date +%s)
+        tif=""; { [ "$WARP_TETHER" = 1 ] || [ "$WARP_ALL_TETHER" = 1 ]; } && tif=$(get_active_tether_ifaces)
         warp_block_set "$WARP_STRICT"
         warp_routes_apply "$tif" || return 0
         # подпись пустая — первый же reconcile пересоберёт с раздачей и доменами; группы — как сейчас
         WARP_RT_SIG=""; WARP_RT_DST=$(warp_dst4); WARP_RT_GRP="$WARP_GOOGLE$WARP_TELEGRAM$WARP_PHONE|$WARP_DOMAINS"
+        WARP_RT_ALL="$WARP_ALL_PHONE$WARP_ALL_TETHER"
     fi
     warp_drop_unmarked "старт демона" "" "$tif"
 }
@@ -1270,9 +1333,20 @@ warp_routes_apply() {   # ифейсы раздачи
         echo "-A $CHAIN_WARP_OUT -m conntrack ! --ctstate NEW -j RETURN"
         for u in $uids; do echo "-A $CHAIN_WARP_OUT -m owner --uid-owner $u -j $CHAIN_WARP_SET"; done
         [ "$WARP_PHONE" = "1" ] && echo "-A $CHAIN_WARP_OUT -j $CHAIN_WARP_DST"
+        # весь трафик телефона: после групп (у «мимо» группы остаются) — всё остальное приложений
+        if [ "$WARP_ALL_PHONE" = 1 ]; then
+            for u in $WARP_ALL_X; do echo "-A $CHAIN_WARP_OUT -m owner --uid-owner $u -j RETURN"; done
+            echo "-A $CHAIN_WARP_OUT -j $CHAIN_WARP_SET"
+        fi
         for i in $tif; do
             echo "-A $CHAIN_WARP_PRE -i $i -m connmark --mark $WARP_MARK/$WARP_MARK -j MARK --set-xmark $WARP_MARK/$WARP_MARK"
-            echo "-A $CHAIN_WARP_PRE -i $i -m conntrack --ctstate NEW -j $CHAIN_WARP_DST"
+            if [ "$WARP_ALL_TETHER" = 1 ]; then
+                # весь трафик раздачи: кроме локальных сетей (DNS и WebUI телефона, локалка клиента)
+                echo "-A $CHAIN_WARP_PRE -i $i -d 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10 -j RETURN"
+                echo "-A $CHAIN_WARP_PRE -i $i -m conntrack --ctstate NEW -j $CHAIN_WARP_SET"
+            else
+                echo "-A $CHAIN_WARP_PRE -i $i -m conntrack --ctstate NEW -j $CHAIN_WARP_DST"
+            fi
         done
         echo "COMMIT"
     } > "$f"
@@ -1313,10 +1387,24 @@ warp_routes_apply() {   # ифейсы раздачи
         $ip6tables -A "$CHAIN_WARP_V6" $m -p tcp -j REJECT --reject-with tcp-reset
         $ip6tables -A "$CHAIN_WARP_V6" $m -j REJECT --reject-with icmp6-adm-prohibited
     done
+    if [ "$WARP_ALL_PHONE" = 1 ]; then
+        # весь трафик телефона: v6 приложений — отбить целиком (кроме самого телефона и локальных), уйдут на v4
+        $ip6tables -A "$CHAIN_WARP_V6" -o lo -j RETURN
+        $ip6tables -A "$CHAIN_WARP_V6" -d fe80::/10,fc00::/7,ff00::/8 -j RETURN
+        for u in $WARP_ALL_X; do $ip6tables -A "$CHAIN_WARP_V6" -m owner --uid-owner "$u" -j RETURN; done
+        $ip6tables -A "$CHAIN_WARP_V6" -p tcp -j REJECT --reject-with tcp-reset
+        $ip6tables -A "$CHAIN_WARP_V6" -j REJECT --reject-with icmp6-adm-prohibited
+    fi
     $ip6tables -C OUTPUT -j "$CHAIN_WARP_V6" 2>/dev/null || $ip6tables -I OUTPUT 1 -j "$CHAIN_WARP_V6"
     # v6 клиентов раздачи к адресам групп — тоже отбить (Windows идёт на v6 первым)
     $ip6tables -N "$CHAIN_WARP_V6F" 2>/dev/null; $ip6tables -F "$CHAIN_WARP_V6F"
     for i in $tif; do
+        if [ "$WARP_ALL_TETHER" = 1 ]; then
+            $ip6tables -A "$CHAIN_WARP_V6F" -i "$i" -d fe80::/10,fc00::/7,ff00::/8 -j RETURN
+            $ip6tables -A "$CHAIN_WARP_V6F" -i "$i" -p tcp -j REJECT --reject-with tcp-reset
+            $ip6tables -A "$CHAIN_WARP_V6F" -i "$i" -j REJECT --reject-with icmp6-adm-prohibited
+            continue
+        fi
         warp_dst6 | while read -r m; do
             $ip6tables -A "$CHAIN_WARP_V6F" -i "$i" -d "$m" -p tcp -j REJECT --reject-with tcp-reset
             $ip6tables -A "$CHAIN_WARP_V6F" -i "$i" -d "$m" -j REJECT --reject-with icmp6-adm-prohibited
@@ -1331,8 +1419,26 @@ warp_routes_apply() {   # ифейсы раздачи
     [ -n "$m" ] && what="$what клиенты Telegram целиком ($m),"
     [ -n "$WARP_APPS" ] && what="$what приложения $WARP_APPS,"
     [ -n "$m$WARP_APPS" ] && what="$what uid ${uids:-не установлены},"
+    [ "$WARP_ALL_PHONE" = 1 ] && what="$what весь трафик приложений телефона (мимо uid: ${WARP_ALL_X:-нет}),"
+    [ "$WARP_ALL_TETHER" = 1 ] && [ -n "$tif" ] && what="$what весь трафик раздачи,"
     WARP_RT_ON=1
     log "WARP: в туннель —${what:- ничего,} $n4 сетей v4, v6 отбито: $n6; для:$([ "$WARP_PHONE" = 1 ] && echo ' телефона')${tif:+ раздачи [$tif]}"
+}
+
+# «Весь трафик» сменился: телефон — сокеты всех приложений (кроме мимо), раздача — все её записи conntrack
+# (метка ставится только новым соединениям: без этого старые шли бы прежним путём до своего конца)
+warp_all_moved() {
+    local n=0 m=0 c i s
+    [ "${WARP_RT_ALL%?}" != "$WARP_ALL_PHONE" ] && n=$(warp_kill_each "" "" "$WARP_ALL_X" 10000)
+    if [ "${WARP_RT_ALL#?}" != "$WARP_ALL_TETHER" ] && [ -n "$CONNTRACK_BIN" ]; then
+        for i in $LAST_TETHER_IFACES; do
+            s=$($ip -4 addr show dev "$i" 2>/dev/null | awk '/inet / { print $2; exit }')
+            [ -n "$s" ] || continue
+            c=$($CONNTRACK_BIN -D -s "$s" 2>&1 | sed -n 's/.* \([0-9][0-9]*\) flow entries.*/\1/p')
+            m=$((m + ${c:-0}))
+        done
+    fi
+    log "WARP: весь трафик — телефон: $([ "$WARP_ALL_PHONE" = 1 ] && echo да || echo нет), раздача: $([ "$WARP_ALL_TETHER" = 1 ] && echo да || echo нет); закрыто соединений телефона: ${n:-0}, раздачи: $m — переподключатся новым путём"
 }
 
 # Из цикла, пока туннель поднят: пересобрать, если что-то поменялось
@@ -1340,12 +1446,12 @@ warp_routes_reconcile() {
     local now sig tif
     now=$(date +%s)
     [ $((now - WARP_DOM_TS)) -ge $WARP_DOM_SECS ] && warp_domains_refresh
-    if [ $((now - WARP_APP_TS)) -ge 30 ]; then WARP_APP_UIDS=$(warp_app_uids); WARP_APP_TS=$now; fi
+    if [ $((now - WARP_APP_TS)) -ge 30 ]; then WARP_APP_UIDS=$(warp_app_uids); WARP_ALL_X=$(warp_all_excl_uids); WARP_APP_TS=$now; fi
     tif="$LAST_TETHER_IFACES"
     # WARP_TETHER=0 — раздаче без WARP: нет ифейсов — нет правил клиентов
-    # (PREROUTING, FORWARD, v6); телефон — по WARP_PHONE, как раньше
-    [ "$WARP_TETHER" = "1" ] || tif=""
-    sig="$WARP_GOOGLE$WARP_TELEGRAM$WARP_PHONE|$tif|$WARP_APP_UIDS|$WARP_DOM_IPS"
+    # (PREROUTING, FORWARD, v6); телефон — по WARP_PHONE, как раньше. Весь трафик раздачи — ифейсы нужны
+    [ "$WARP_TETHER" = "1" ] || [ "$WARP_ALL_TETHER" = "1" ] || tif=""
+    sig="$WARP_GOOGLE$WARP_TELEGRAM$WARP_PHONE|$tif|$WARP_APP_UIDS|$WARP_DOM_IPS|$WARP_ALL_PHONE$WARP_ALL_TETHER|$WARP_ALL_X"
     # netd мог перетряхнуть цепочки — проверяем, что хук на месте
     [ "$WARP_RT_ON" = "1" ] && [ "$sig" = "$WARP_RT_SIG" ] && \
         $iptables -t mangle -C OUTPUT -j "$CHAIN_WARP_OUT" 2>/dev/null && \
@@ -1363,7 +1469,9 @@ warp_routes_reconcile() {
     elif [ -n "$WARP_RT_GRP" ] && [ "$grp" != "$WARP_RT_GRP" ]; then
         warp_kill_sockets "сменились группы" "$(printf '%s\n%s\n' "$old" "$new" | grep . | sort | uniq -u)" -
     fi
-    WARP_RT_GRP="$grp"
+    # «весь трафик» включили или выключили при поднятых маршрутах — открытое раньше шло другим путём
+    [ "$was" = "1" ] && [ -n "$WARP_RT_ALL" ] && [ "$WARP_RT_ALL" != "$WARP_ALL_PHONE$WARP_ALL_TETHER" ] && warp_all_moved
+    WARP_RT_GRP="$grp"; WARP_RT_ALL="$WARP_ALL_PHONE$WARP_ALL_TETHER"
     return 0
 }
 
