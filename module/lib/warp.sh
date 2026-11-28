@@ -81,7 +81,8 @@ WARP_MQ_SU=""                        # как запускать от uid 1000 (
 WARP_MQ_REG_TS=0                     # когда начата регистрация (0 — не идёт)
 WARP_MQ_WARN=""                      # «MASQUE только arm64» — в журнал один раз
 # Перебор, если не поднялся (28.11): днём YOTA режет UDP 443 к Cloudflare до 0,2–2,5 Мбит/с, другие порты — 12–18;
-# сначала выбранный (WARP_MASQUE_PORT, HTTP/2 — если выбран он), дальше остальные QUIC и в конце HTTP/2 443
+# сначала выбранный (WARP_MASQUE_PORT, HTTP/2 — если выбран он), дальше остальные QUIC, HTTP/2 443 и в конце — запасные
+# адреса (WARP_MQ_ALT_*)
 WARP_MQ_PORTS="4443 443 8443 500 1701 4500 8095"   # все проверены 28.11 (13T, YOTA): подключаются
 # Запасные адреса — в конце перебора, если на адресах аккаунта (162.159.198.x) не поднялся ни один вариант: на случай
 # блока подсети. 28.11 (13T, YOTA): MASQUE по QUIC отвечает только на 162.159.198.1/.2 и 162.159.199.1/.2, по HTTP/2 —
@@ -501,22 +502,22 @@ warp_mq_hold() {   # заметка пауза_с [строка журнала] 
     return 1
 }
 warp_mq_seq() {   # варианты по порядку: q<порт> — QUIC, h<порт> — HTTP/2; @адрес — запасной вместо адреса аккаунта
-    local p a out alt=""
-    for a in $WARP_MQ_ALT_Q; do alt="$alt q$WARP_MASQUE_PORT@$a"; done
-    for a in $WARP_MQ_ALT_H; do alt="$alt h443@$a"; done
+    local p a out
     if [ "$WARP_MASQUE_H2" = 1 ]; then
         # выбран HTTP/2 (UDP у оператора закрыт): сначала он на выбранном порту и на 443 (проверен 28.11), потом QUIC
         # (ревью 28.11: без h443 при порте 4443 TCP-запасного не было вовсе); запасные адреса — HTTP/2 первым
         out="h$WARP_MASQUE_PORT"; [ "$WARP_MASQUE_PORT" = 443 ] || out="$out h443"
         for p in $WARP_MQ_PORTS; do out="$out q$p"; done
-        alt=""; for a in $WARP_MQ_ALT_H; do alt="$alt h443@$a"; done
-        for a in $WARP_MQ_ALT_Q; do alt="$alt q$WARP_MASQUE_PORT@$a"; done
+        for a in $WARP_MQ_ALT_H; do out="$out h443@$a"; done
+        for a in $WARP_MQ_ALT_Q; do out="$out q$WARP_MASQUE_PORT@$a"; done
     else
         out="q$WARP_MASQUE_PORT"
         for p in $WARP_MQ_PORTS; do [ "$p" = "$WARP_MASQUE_PORT" ] || out="$out q$p"; done
         out="$out h443"
+        for a in $WARP_MQ_ALT_Q; do out="$out q$WARP_MASQUE_PORT@$a"; done
+        for a in $WARP_MQ_ALT_H; do out="$out h443@$a"; done
     fi
-    echo $out $alt
+    echo $out
 }
 # следующий вариант; 1 — круг пройден (снова выбранный): тогда как с обычным конфигом — «не поднялся», повтор через минуту
 warp_mq_next() {
@@ -565,8 +566,8 @@ warp_mq_start() {
             -e "s/\"endpoint_h2_v4\":[[:space:]]*\"[^\"]*\"/\"endpoint_h2_v4\": \"$addr\"/" "$WARP_MQ_CONF" > "$WARP_MQ_DIR/config.json")
     else
         (umask 077; cp -f "$WARP_MQ_CONF" "$WARP_MQ_DIR/config.json")
-    fi
-    chown $WARP_MQ_UID:$WARP_MQ_UID "$WARP_MQ_DIR/config.json"
+    fi && [ -s "$WARP_MQ_DIR/config.json" ] && chown $WARP_MQ_UID:$WARP_MQ_UID "$WARP_MQ_DIR/config.json" || {
+        warp_mq_fail "MASQUE: нет копии аккаунта" 60 "не скопировать аккаунт в $WARP_MQ_DIR (нет места?)"; return 1; }
     : > "$WARP_MQ_DIR/usque.log"; chown $WARP_MQ_UID:$WARP_MQ_UID "$WARP_MQ_DIR/usque.log"
     $WARP_MQ_SU -c "exec $WARP_MQ_DIR/usque nativetun -c $WARP_MQ_DIR/config.json -n $WARP_IF -I --always-reconnect -m 1280 -P $port${sni:+ -s $sni}$h2 >> $WARP_MQ_DIR/usque.log 2>&1" \
         < /dev/null > /dev/null 2>&1 &
@@ -854,8 +855,12 @@ warp_reconcile() {
                 fi
                 WARP_LAST_UP="$WARP_CUR"   # за него держится «Не менять сервер», если основной не выбран
                 log "WARP: $WARP_CUR поднят за $(( $(date +%s) - WARP_TS )) с${WARP_COLO:+ (площадка $WARP_COLO)}"
-                [ "$WARP_CUR" = "$WARP_MQ_NAME" ] && [ "$WARP_MQ_IDX" -gt 0 ] && \
-                    log "WARP: MASQUE работает через запасной вариант — $WARP_MQ_VIA (выбранный не поднялся; его можно выбрать в настройках)"
+                if [ "$WARP_CUR" = "$WARP_MQ_NAME" ] && [ "$WARP_MQ_IDX" -gt 0 ]; then
+                    case "$WARP_MQ_VIA" in
+                        *,*) log "WARP: MASQUE работает через запасной адрес — $WARP_MQ_VIA (на адресах аккаунта не поднялся ни один вариант)" ;;
+                        *)   log "WARP: MASQUE работает через запасной вариант — $WARP_MQ_VIA (выбранный не поднялся; его можно выбрать в настройках)" ;;
+                    esac
+                fi
                 if [ "$WARP_CF" = 1 ] && warp_colo_ru; then
                     log "WARNING: WARP: только российская площадка Cloudflare ($WARP_COLO) — Telegram и часть сайтов через WARP могут не открываться"
                 elif [ "$WARP_CF" = 1 ] && [ -n "$WARP_EP_CUR" ]; then

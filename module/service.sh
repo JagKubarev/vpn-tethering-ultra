@@ -1043,7 +1043,8 @@ WARP_ENGINE=awg         # awg — AmneziaWG (конфиги ниже); masque �
 WARP_MASQUE_SNI="apteka.ru"   # имя в первом пакете MASQUE; пусто — как у Cloudflare (consumer-masque.cloudflareclient.com:
                         # 28.11 на YOTA в 00:20 с ним туннель не поднимался, в 01:46 — за 3 с; с apteka.ru — оба раза)
 WARP_MASQUE_PORT=4443   # порт MASQUE: 28.11 днём на YOTA UDP 443 к Cloudflare — 0,2–2,5 Мбит/с, 4443/8443/500/1701/4500/8095 —
-                        # 12–18 (полка висит на порту 443). Не поднялся — модуль сам перебирает остальные и HTTP/2 (warp_mq_next)
+                        # 12–18 (полка висит на порту 443). Не поднялся — модуль сам перебирает остальные, HTTP/2 и запасные
+                        # адреса 162.159.199.x (warp_mq_next)
 WARP_MASQUE_H2=0        # 1 — MASQUE по HTTP/2 через TCP 443, если оператор режет UDP к Cloudflare; имя — всегда Cloudflare
                         # (с apteka.ru по TCP «Connected», а трафика нет; без имени 28.11 днём на YOTA — 17,5 Мбит/с)
 WARP_CHAIN=""           # свой сервер после WARP (имя своего конфига): AmneziaWG к нему внутри туннеля Cloudflare —
