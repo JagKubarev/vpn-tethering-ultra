@@ -127,6 +127,8 @@ h2 { font-size: 17px; font-weight: 650; letter-spacing: -.005em; color: var(--te
 .btn.primary:active:not(:disabled) { background: var(--accent); filter: brightness(.92); }
 .btn:disabled { opacity: .5; cursor: default; }
 .btn:focus-visible, summary:focus-visible, .chip button:focus-visible, .offnote:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* после касания пальцем WebView считает фокус «видимым» — синие полосы у «Подробнее» (28.11): рамка только при Tab */
+.ptr summary:focus, .ptr .btn:focus, .ptr .offnote:focus { outline: none; }
 /* у вкладок рамки фокуса нет: WebView KernelSU рисовал её и после нажатия пальцем,
    а активная вкладка и так видна по цвету */
 #tabbar button:focus { outline: none; }
@@ -1072,7 +1074,16 @@ details > summary::after { border-color: currentColor; }
   <div class="row col" data-dep="WARP_ENABLE" id="warpMqSniRow" hidden>
     <div class="txt"><div class="t">Имя для MASQUE</div>
       <div class="s">Имя в первом пакете подключения. С именем Cloudflare (пусто) на YOTA MASQUE поднимается не всегда, с apteka.ru — да. Не подключается — попробуйте другое имя. По HTTP/2 — всегда имя Cloudflare.</div></div>
-    <input type="text" data-key="WARP_MASQUE_SNI" placeholder="пусто — consumer-masque.cloudflareclient.com" aria-label="Имя для MASQUE" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <input type="text" data-key="WARP_MASQUE_SNI" list="mqSniList" placeholder="пусто — consumer-masque.cloudflareclient.com" aria-label="Имя для MASQUE" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <!-- с ними MASQUE поднимался на YOTA 11–13.11 (QUIC; скорость от имени не зависела — от порта) -->
+    <datalist id="mqSniList">
+      <option value="apteka.ru">
+      <option value="max.ru">
+      <option value="ya.ru">
+      <option value="fd.oneme.ru">
+      <option value="www.google.com">
+    </datalist>
+    <div class="s mt8">Подсказки — имена, с которыми MASQUE на YOTA поднимался; можно вписать своё.</div>
     <div class="s mt8">Аккаунт Cloudflare для MASQUE модуль создал сам. Перестал подключаться совсем — создайте новый.</div>
     <div class="mt8"><button class="btn small" id="warpMqReset">Новый аккаунт MASQUE</button></div>
   </div>
@@ -2683,7 +2694,8 @@ let WARP_N = 0, WARP_HTML = '';
 // свои I1 (собраны на этом телефоне: warp.sh i1gen) — в выбор «Имя в I1»; готовое с тем же именем — «(своё)».
 // Один раз (и после сборки), в фоне: loadWarp зовут раз в 10 с, а синхронный exec морозил страницу на MT6580
 let I1_LOADED = false;
-const i1Label = (n) => (/^dns_/.test(n) ? 'DNS-запрос ' + n.slice(4) : n);
+// .рф и др. — по-русски (punyToU), в конфиг уходит как есть
+const i1Label = (n) => (/^dns_/.test(n) ? 'DNS-запрос ' + punyToU(n.slice(4)) : punyToU(n));
 async function loadI1() {
   I1_LOADED = true;
   const r = await ctlBg('warp-i1list'), sel = $('[data-key=WARP_I1]');
@@ -2712,6 +2724,9 @@ async function i1Build(dns) {
   } finally { b.disabled = false; b.textContent = was; }
 }
 $('#i1Gen').addEventListener('click', () => i1Build(false));
+// касание — без рамки фокуса, Tab — с ней
+document.addEventListener('pointerdown', () => document.documentElement.classList.add('ptr'), true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Tab') document.documentElement.classList.remove('ptr'); }, true);
 $('#warpMqReset').addEventListener('click', async () => {
   if (!confirm('Удалить аккаунт MASQUE и создать новый? WARP переподключится.')) return;
   const b = $('#warpMqReset'); b.disabled = true;
