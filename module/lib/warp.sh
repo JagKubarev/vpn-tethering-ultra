@@ -83,6 +83,11 @@ WARP_MQ_WARN=""                      # «MASQUE только arm64» — в жу
 # Перебор, если не поднялся (28.11): днём YOTA режет UDP 443 к Cloudflare до 0,2–2,5 Мбит/с, другие порты — 12–18;
 # сначала выбранный (WARP_MASQUE_PORT, HTTP/2 — если выбран он), дальше остальные QUIC и в конце HTTP/2 443
 WARP_MQ_PORTS="4443 443 8443 500 1701 4500 8095"   # все проверены 28.11 (13T, YOTA): подключаются
+# Запасные адреса — в конце перебора, если на адресах аккаунта (162.159.198.x) не поднялся ни один вариант: на случай
+# блока подсети. 28.11 (13T, YOTA): MASQUE по QUIC отвечает только на 162.159.198.1/.2 и 162.159.199.1/.2, по HTTP/2 —
+# на 198.2–254 и 199.2–254; адреса WARP AmneziaWG (162.159.192–195, 188.114.96–99), 1.1.1.1 — не MASQUE
+WARP_MQ_ALT_Q="162.159.199.1 162.159.199.2"
+WARP_MQ_ALT_H="162.159.199.2"
 WARP_MQ_IDX=0                        # номер варианта в warp_mq_seq; 0 — выбранный в настройках
 WARP_MQ_VIA=""                       # как поднят сейчас: «UDP 4443» / «TCP 443» — в журнал и статус
 
@@ -495,19 +500,23 @@ warp_mq_hold() {   # заметка пауза_с [строка журнала] 
     WARP_RETRY_TS=$(( $(date +%s) + $2 )); warp_set_state fail "$1"
     return 1
 }
-warp_mq_seq() {   # варианты по порядку: q<порт> — QUIC, h<порт> — HTTP/2
-    local p out
+warp_mq_seq() {   # варианты по порядку: q<порт> — QUIC, h<порт> — HTTP/2; @адрес — запасной вместо адреса аккаунта
+    local p a out alt=""
+    for a in $WARP_MQ_ALT_Q; do alt="$alt q$WARP_MASQUE_PORT@$a"; done
+    for a in $WARP_MQ_ALT_H; do alt="$alt h443@$a"; done
     if [ "$WARP_MASQUE_H2" = 1 ]; then
         # выбран HTTP/2 (UDP у оператора закрыт): сначала он на выбранном порту и на 443 (проверен 28.11), потом QUIC
-        # (ревью 28.11: без h443 при порте 4443 TCP-запасного не было вовсе)
+        # (ревью 28.11: без h443 при порте 4443 TCP-запасного не было вовсе); запасные адреса — HTTP/2 первым
         out="h$WARP_MASQUE_PORT"; [ "$WARP_MASQUE_PORT" = 443 ] || out="$out h443"
         for p in $WARP_MQ_PORTS; do out="$out q$p"; done
+        alt=""; for a in $WARP_MQ_ALT_H; do alt="$alt h443@$a"; done
+        for a in $WARP_MQ_ALT_Q; do alt="$alt q$WARP_MASQUE_PORT@$a"; done
     else
         out="q$WARP_MASQUE_PORT"
         for p in $WARP_MQ_PORTS; do [ "$p" = "$WARP_MASQUE_PORT" ] || out="$out q$p"; done
         out="$out h443"
     fi
-    echo $out
+    echo $out $alt
 }
 # следующий вариант; 1 — круг пройден (снова выбранный): тогда как с обычным конфигом — «не поднялся», повтор через минуту
 warp_mq_next() {
@@ -522,7 +531,7 @@ warp_mq_fail() {   # то же, но туннель уже начали подн
 }
 
 warp_mq_start() {
-    local a4 a6 sni="$WARP_MASQUE_SNI" i=0 h2="" how v port
+    local a4 a6 sni="$WARP_MASQUE_SNI" i=0 h2="" how v port addr
     # su и аккаунт — до warp_down: зовут из off/fail или после warp_down (warp_reconnect), туннеля нет; повтор раз
     # в 10 с, пока создаётся аккаунт, иначе при блоке (WARP_STRICT) каждый раз закрывал сокеты приложений (ревью 28.11)
     warp_mq_su || { warp_mq_hold "MASQUE: нет su $WARP_MQ_UID" $WARP_RETRY_SECS "не запустить от uid $WARP_MQ_UID (su $WARP_MQ_UID не работает)"; return 1; }
@@ -535,7 +544,6 @@ warp_mq_start() {
     warp_down
     [ -e /dev/net/tun ] || { mkdir -p /dev/net && ln -s /dev/tun /dev/net/tun; } 2>/dev/null
     warp_mq_prep || { warp_mq_fail "MASQUE: нет каталога" 60 "не подготовить $WARP_MQ_DIR"; return 1; }
-    (umask 077; cp -f "$WARP_MQ_CONF" "$WARP_MQ_DIR/config.json") && chown $WARP_MQ_UID:$WARP_MQ_UID "$WARP_MQ_DIR/config.json"
     a4=$(sed -n 's/.*"ipv4"[[:space:]]*:[[:space:]]*"\([0-9.]*\)".*/\1/p' "$WARP_MQ_CONF" | head -1)
     a6=$(sed -n 's/.*"ipv6"[[:space:]]*:[[:space:]]*"\([0-9a-fA-F:]*\)".*/\1/p' "$WARP_MQ_CONF" | head -1)
     [ -n "$a4" ] || { warp_mq_fail "MASQUE: в аккаунте нет адреса" $WARP_RETRY_SECS "в $WARP_MQ_CONF нет адреса ipv4"; return 1; }
@@ -544,11 +552,21 @@ warp_mq_start() {
     # вариант из перебора (warp_mq_seq); HTTP/2 — только с именем Cloudflare: с чужим (apteka.ru) TLS по TCP
     # Cloudflare принимает, «Connected», но трафик не возит (28.11 13T: с apteka.ru — 0, без имени — 17,5 Мбит/с днём)
     v=$(warp_mq_seq | tr ' ' '\n' | sed -n "$((WARP_MQ_IDX + 1))p"); [ -n "$v" ] || { WARP_MQ_IDX=0; v=$(warp_mq_seq | cut -d' ' -f1); }
+    addr=""; case "$v" in *@*) addr=${v#*@}; v=${v%@*} ;; esac
     port=${v#?}
     case "$v" in
         h*) h2=" --http2"; sni=""; how="HTTP/2 по TCP $port"; WARP_MQ_VIA="TCP $port" ;;
         *)  how="HTTP/3 по UDP $port"; WARP_MQ_VIA="UDP $port" ;;
     esac
+    # копия аккаунта для usque; запасной адрес — вместо адресов из аккаунта (и QUIC, и HTTP/2)
+    if [ -n "$addr" ]; then
+        how="$how, запасной адрес $addr"; WARP_MQ_VIA="$WARP_MQ_VIA, $addr"
+        (umask 077; sed -e "s/\"endpoint_v4\":[[:space:]]*\"[^\"]*\"/\"endpoint_v4\": \"$addr\"/" \
+            -e "s/\"endpoint_h2_v4\":[[:space:]]*\"[^\"]*\"/\"endpoint_h2_v4\": \"$addr\"/" "$WARP_MQ_CONF" > "$WARP_MQ_DIR/config.json")
+    else
+        (umask 077; cp -f "$WARP_MQ_CONF" "$WARP_MQ_DIR/config.json")
+    fi
+    chown $WARP_MQ_UID:$WARP_MQ_UID "$WARP_MQ_DIR/config.json"
     : > "$WARP_MQ_DIR/usque.log"; chown $WARP_MQ_UID:$WARP_MQ_UID "$WARP_MQ_DIR/usque.log"
     $WARP_MQ_SU -c "exec $WARP_MQ_DIR/usque nativetun -c $WARP_MQ_DIR/config.json -n $WARP_IF -I --always-reconnect -m 1280 -P $port${sni:+ -s $sni}$h2 >> $WARP_MQ_DIR/usque.log 2>&1" \
         < /dev/null > /dev/null 2>&1 &
