@@ -525,7 +525,7 @@ details > summary::after { border-color: currentColor; }
 </div>
 <h2>Стратегия</h2>
 <div class="card">
-  <div class="tip" id="pickTip" data-nfqws1>Для лучшей работы подберите стратегию под свою сеть, отдельно для YouTube и Discord: кнопки в «Подборе стратегии» выше.</div>
+  <div class="tip" id="pickTip" data-nfqws1>Для лучшей работы подберите стратегию под свою сеть, отдельно для YouTube и Discord: кнопки в «Подборе стратегии» ниже.</div>
   <div class="row col" data-dep="ZAPRET_ENABLE" id="zEngRow">
     <div class="txt"><div class="t">Движок обхода</div>
       <div class="s" id="zEngSub">nfqws2 (zapret2) — стратегии из nfqws2-android, многие сами подбирают приём под сайт. nfqws1 — прежний движок, с подбором и автопроверкой.</div></div>
@@ -1065,7 +1065,7 @@ details > summary::after { border-color: currentColor; }
   </div>
   <div class="row col" data-dep="WARP_ENABLE" id="warpEngRow">
     <div class="txt"><div class="t">Как подключаться</div>
-      <div class="s">AmneziaWG — конфиги ниже. MASQUE — как приложение 1.1.1.1: HTTP/3 к Cloudflare, свой аккаунт модуль создаёт сам. Ночью на YOTA MASQUE был быстрее (37–44 Мбит/с против 20–29) и с меньшей задержкой; днём, бывает, упирается в те же 2–3 Мбит/с. Свой сервер после WARP работает и с ним.</div></div>
+      <div class="s">AmneziaWG — конфиги ниже. MASQUE — как приложение 1.1.1.1: HTTP/3 к Cloudflare, свой аккаунт модуль создаёт сам; часто быстрее и с меньшей задержкой. Если один медленный или не подключается — попробуйте другой. Свой сервер после WARP работает с обоими.</div></div>
     <select data-key="WARP_ENGINE">
       <option value="awg">AmneziaWG (WireGuard)</option>
       <option value="masque">MASQUE (HTTP/3)</option>
@@ -1073,9 +1073,9 @@ details > summary::after { border-color: currentColor; }
   </div>
   <div class="row col" data-dep="WARP_ENABLE" id="warpMqSniRow" hidden>
     <div class="txt"><div class="t">Имя для MASQUE</div>
-      <div class="s">Имя в первом пакете подключения. С именем Cloudflare (пусто) на YOTA MASQUE поднимается не всегда, с apteka.ru — да. Не подключается — попробуйте другое имя. По HTTP/2 — всегда имя Cloudflare.</div></div>
+      <div class="s">Имя сайта в первом пакете подключения: по нему оператор может узнать туннель. Не подключается — попробуйте другое; пусто — имя Cloudflare. По HTTP/2 — всегда имя Cloudflare.</div></div>
     <input type="text" data-key="WARP_MASQUE_SNI" list="mqSniList" placeholder="пусто — consumer-masque.cloudflareclient.com" aria-label="Имя для MASQUE" autocapitalize="off" autocorrect="off" spellcheck="false">
-    <!-- с ними MASQUE поднимался на YOTA 11–13.11 (QUIC; скорость от имени не зависела — от порта) -->
+    <!-- с ними MASQUE поднимался на YOTA 11–13.11 (QUIC; скорость от имени не зависела — от порта); в подписях оператора не называем (29.11) -->
     <datalist id="mqSniList">
       <option value="apteka.ru">
       <option value="max.ru">
@@ -1083,13 +1083,13 @@ details > summary::after { border-color: currentColor; }
       <option value="fd.oneme.ru">
       <option value="www.google.com">
     </datalist>
-    <div class="s mt8">Подсказки — имена, с которыми MASQUE на YOTA поднимался; можно вписать своё.</div>
+    <div class="s mt8">В подсказках — проверенные имена; можно вписать своё.</div>
     <div class="s mt8">Аккаунт Cloudflare для MASQUE модуль создал сам. Перестал подключаться совсем — создайте новый.</div>
     <div class="mt8"><button class="btn small" id="warpMqReset">Новый аккаунт MASQUE</button></div>
   </div>
   <div class="row col" data-dep="WARP_ENABLE" id="warpMqPortRow" hidden>
     <div class="txt"><div class="t">Порт MASQUE</div>
-      <div class="s">Днём YOTA режет UDP 443 к Cloudflare до 0,2–2,5 Мбит/с, на других портах — 12–18. Не подключается — модуль сам пробует остальные порты и в конце HTTP/2; в плитке видно, на чём работает.</div></div>
+      <div class="s">Некоторые операторы режут скорость на UDP 443 — тогда помогает другой порт. Не подключается — модуль сам пробует остальные порты и в конце HTTP/2; в плитке видно, на чём работает.</div></div>
     <select data-key="WARP_MASQUE_PORT">
       <option value="4443">4443 (по умолчанию)</option>
       <option value="443">443</option>
@@ -1102,12 +1102,12 @@ details > summary::after { border-color: currentColor; }
   </div>
   <div class="row" data-dep="WARP_ENABLE" id="warpMqH2Row" hidden>
     <div class="txt"><div class="t">MASQUE по TCP (HTTP/2)</div>
-      <div class="s">Если оператор режет UDP к Cloudflare: тот же туннель через TCP (порт — выше), всегда с именем Cloudflare. На YOTA днём 28.11 — 17,5–22 Мбит/с; задержка обычно больше, чем по UDP.</div></div>
+      <div class="s">Если оператор режет UDP к Cloudflare: тот же туннель через TCP (порт — выше), всегда с именем Cloudflare. Задержка обычно больше, чем по UDP.</div></div>
     <label class="sw"><input type="checkbox" data-key="WARP_MASQUE_H2"><span></span></label>
   </div>
   <div class="row col" data-dep="WARP_ENABLE" id="warpI1Row">
     <div class="txt"><div class="t">Имя в I1</div>
-      <div class="s">I1 — поддельный QUIC-пакет перед подключением: по имени в нём оператор узнаёт туннель. Если WARP днём упирается в 2–3 Мбит/с — попробуйте другое имя. Меняется только у конфигов Cloudflare, сам конфиг не трогаю.</div></div>
+      <div class="s">I1 — поддельный QUIC-пакет перед подключением: по имени в нём оператор узнаёт туннель. Если WARP подключается, но работает медленно, — попробуйте другое имя. Меняется только у конфигов Cloudflare, сам конфиг не трогаю.</div></div>
     <select data-key="WARP_I1">
       <option value="">Как в конфиге (у созданных — apteka.ru)</option>
       <option value="apteka.ru">apteka.ru</option>
