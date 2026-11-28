@@ -1,2 +1,3 @@
 vtgid — свой код VPN Tethering Ultra (GPL-3.0, см. LICENSE модуля).
 Исходник и сборка — в репозитории: tools/vtgid/vtgid.c, tools/vtgid/build.sh (NDK r28, статически, android21).
+28.11: вторая форма — vtgid GID UID G1[,G2…] -c КОМАНДА (uid и дополнительные группы; usque для MASQUE).

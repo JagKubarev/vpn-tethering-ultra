@@ -420,8 +420,13 @@ warp_start() {   # имя конфига
 # ---- MASQUE (usque) ----
 warp_mq_su() {   # WARP_MQ_SU — запуск от uid 1000 (с группой 3999, если su умеет); 1 — никак
     [ -n "$WARP_MQ_SU" ] && return 0
+    # bin/vtgid: uid 1000, группа 3999 и дополнительная inet (3003) — на ядрах 3.x не-root без inet не откроет и сокет
+    # («socket: permission denied», MT6580 28.11), а su 1000 её не даёт (Magisk 25 — ни -g, ни -G). Одинаково на
+    # KernelSU и любом Magisk; старый vtgid (без второй формы) — su ниже
+    if [ -x "$VTGID_BIN" ] && "$VTGID_BIN" "$DNSPROXY_GID" $WARP_MQ_UID "3003,$DNSPROXY_GID" -c true >/dev/null 2>&1; then
+        WARP_MQ_SU="$VTGID_BIN $DNSPROXY_GID $WARP_MQ_UID 3003,$DNSPROXY_GID"
     # KernelSU понимает -g и после uid; Magisk разбирает опции только до uid (ревью 28.11) — оба порядка, потом без группы
-    if su $WARP_MQ_UID -g "$DNSPROXY_GID" -c true >/dev/null 2>&1; then WARP_MQ_SU="su $WARP_MQ_UID -g $DNSPROXY_GID"
+    elif su $WARP_MQ_UID -g "$DNSPROXY_GID" -c true >/dev/null 2>&1; then WARP_MQ_SU="su $WARP_MQ_UID -g $DNSPROXY_GID"
     elif su -g "$DNSPROXY_GID" $WARP_MQ_UID -c true >/dev/null 2>&1; then WARP_MQ_SU="su -g $DNSPROXY_GID $WARP_MQ_UID"
     elif su $WARP_MQ_UID -c true >/dev/null 2>&1; then WARP_MQ_SU="su $WARP_MQ_UID"
     else return 1; fi
