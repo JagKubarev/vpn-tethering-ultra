@@ -259,15 +259,30 @@ pre.log { margin: 0; padding: 12px 14px; background: var(--input); font: 12px/1.
   .tabbar .in { padding: 0 2px; }
   .tabbar button { font-size: 11px; }
 }
-details.more { margin-top: 18px; }
 details.kvbox { margin: 14px -16px -16px; border-top: 1px solid var(--line); }
 details.kvbox > summary { padding: 12px 16px; min-height: 46px; font-size: 14px; color: var(--muted); }
 details.kvbox .kv { border-top: 0; margin: 0; padding: 0 16px 16px; }
 details.res { margin-top: 12px; border-top: 1px solid var(--line); }
 details.res > summary { padding: 12px 0 0; min-height: 36px; font-size: 14px; color: var(--muted); }
 details.res .kv { border-top: 0; margin-top: 10px; padding-top: 0; }
-details.more > summary, .card > details > summary { color: var(--accent); }
+.card > details > summary { color: var(--accent); }
 details > summary::after { border-color: currentColor; }
+/* Раздел вкладки (29.11): свёрнут — строка-карточка «название / итог / шеврон», раскрыт — заголовок над карточкой,
+   как прежний h2. Итог (.sv) — в renderSums; что раскрыто — localStorage vtFold */
+details.sect > summary { margin: 22px 0 0; padding: 12px 16px; min-height: 56px; background: var(--card); border-radius: 16px; color: var(--text); }
+details.sect:not([open]) + details.sect:not([open]) > summary { margin-top: 8px; }
+details.sect > summary .sx { min-width: 0; flex: 1 1 auto; }
+details.sect > summary h2 { margin: 0; font-size: 16px; }
+details.sect > summary .sv { font-size: 13px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+details.sect > summary .sv:empty { display: none; }
+details.sect > summary::after { color: var(--muted); }
+details.sect[open] > summary { margin: 28px 0 10px; padding: 0 4px; min-height: 0; background: none; border-radius: 0; }
+details.sect[open] > summary h2 { font-size: 17px; }
+details.sect[open] > summary .sv { display: none; }
+#aiAll .row.item { padding-left: 0; padding-right: 0; }
+#aiAll .t { display: flex; align-items: center; gap: 8px; }
+#aiAll .best { font-size: 12px; color: var(--green); font-weight: 600; }
+.aiFirst { margin-top: 10px; }
 .hint { color: var(--muted); font-size: 13px; margin: 8px 4px 0; }
 .tipbox { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--accent); border-radius: 6px; background: var(--input); color: var(--text); font-size: 13px; line-height: 1.45; }
 .offnote { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 10px 16px; font-size: 13.5px; color: var(--amber-text); background: var(--input); cursor: pointer; }
@@ -472,7 +487,8 @@ details > summary::after { border-color: currentColor; }
 <div class="exitline" id="exitLine"></div>
 <div class="wavebox" id="waveBox"></div>
 
-<h2>Основное</h2>
+<details class="sect" data-fold="main" open>
+<summary><div class="sx"><h2>Основное</h2><div class="sv" data-sv="main"></div></div></summary>
 <div class="card">
   <div class="row">
     <div class="txt"><div class="t">Обход блокировок</div>
@@ -505,13 +521,17 @@ details > summary::after { border-color: currentColor; }
     <label class="sw"><input type="checkbox" data-key="KILL_SWITCH_STRICT"><span></span></label>
   </div>
 </div>
-<h2>Устройства в раздаче</h2>
+</details>
+
+<details class="sect" data-fold="clients" open>
+<summary><div class="sx"><h2>Устройства в раздаче</h2><div class="sv" data-sv="clients"></div></div></summary>
 <div class="card">
   <div id="clients"><div class="row"><div class="txt"><div class="s">Загрузка…</div></div></div></div>
 </div>
 <div class="hint">Заблокированное устройство остаётся в точке доступа, но без интернета; новый «случайный» MAC блокировку обходит. «Всего» — с подключения (или по открытым соединениям), скорость — за последние 3 секунды.</div>
 <div class="hint" id="zEngWin">Ноутбук или ПК на Windows через раздачу: если часть сайтов не открывается или Windows пишет «Нет подключения к интернету», включите на нём метки времени TCP — один раз, в командной строке от администратора: <code id="zEngWinCmd" style="user-select:all">netsh interface tcp set global timestamps=enabled</code>. Без них модуль подстраивает приёмы под Windows сам, с ними обход работает как для телефона.
   <br><button class="btn small" id="zEngWinCopy" style="margin-top:6px">Скопировать команду</button></div>
+</details>
 
 </section>
 
@@ -523,7 +543,8 @@ details > summary::after { border-color: currentColor; }
     <label class="sw"><input type="checkbox" data-key="ZAPRET_ENABLE" aria-label="Обход блокировок"><span></span></label>
   </div>
 </div>
-<h2>Стратегия</h2>
+<details class="sect" data-fold="strat" open>
+<summary><div class="sx"><h2>Стратегия</h2><div class="sv" data-sv="strat"></div></div></summary>
 <div class="card">
   <div class="tip" id="pickTip" data-nfqws1>Для лучшей работы подберите стратегию под свою сеть, отдельно для YouTube и Discord: кнопки в «Подборе стратегии» ниже.</div>
   <div class="row col" data-dep="ZAPRET_ENABLE" id="zEngRow">
@@ -538,77 +559,85 @@ details > summary::after { border-color: currentColor; }
     <div class="txt"><div class="t">Стратегия nfqws2</div>
       <div class="s">Наборы приёмов из nfqws2-android, после тире — автор. Это общая: у сети может быть своя — ниже. Под Windows на раздаче приёмы подстраиваются сами.</div></div>
     <select data-key="ZAPRET2_STRATEGY">
-      <option value="hardcorp74">hardcorp74</option>
-      <option value="alt">alt — Flowseal</option>
-      <option value="alt10">alt10 — Flowseal</option>
-      <option value="alt11">alt11 — Flowseal</option>
-      <option value="alt12">alt12 — Flowseal</option>
-      <option value="alt13">alt13 — Flowseal</option>
-      <option value="alt14">alt14 — kinlay0</option>
-      <option value="alt14e">alt14e — kinlay0</option>
-      <option value="alt15">alt15 — kinlay0</option>
-      <option value="alt16">alt16 — kinlay0</option>
-      <option value="alt2">alt2 — Flowseal</option>
-      <option value="alt3">alt3 — Flowseal</option>
-      <option value="alt4">alt4 — Flowseal</option>
-      <option value="alt4_mod">alt4_mod — Flowseal</option>
-      <option value="alt5">alt5 — Flowseal</option>
-      <option value="alt6">alt6 — Flowseal</option>
-      <option value="alt7">alt7 — Flowseal</option>
-      <option value="alt8">alt8 — Flowseal</option>
-      <option value="alt9">alt9 — Flowseal</option>
-      <option value="anti_throttle">anti_throttle — Zephyron</option>
-      <option value="circular">circular — kinlay0</option>
-      <option value="circular1">circular1 — kinlay0</option>
-      <option value="double_fake">double_fake — kinlay0</option>
-      <option value="double_fake_alt">double_fake_alt — kinlay0</option>
-      <option value="double_fake_alt2">double_fake_alt2 — kinlay0</option>
-      <option value="eduncey">eduncey</option>
-      <option value="exp">exp — Flowseal</option>
-      <option value="exp1">exp1 — kinlay0</option>
-      <option value="exp2">exp2 — kinlay0</option>
-      <option value="exp3">exp3 — kinlay0</option>
-      <option value="exp4">exp4 — kinlay0</option>
-      <option value="exp5">exp5 — kinlay0</option>
-      <option value="experimental_ts">experimental_ts — kinlay0</option>
-      <option value="fake_disorder">fake_disorder — TheFirstNoob</option>
-      <option value="fake_tls_auto">fake_tls_auto — Flowseal</option>
-      <option value="fake_tls_auto_alt">fake_tls_auto_alt — Flowseal</option>
-      <option value="fake_tls_auto_alt2">fake_tls_auto_alt2 — Flowseal</option>
-      <option value="fake_tls_auto_alt3">fake_tls_auto_alt3 — Flowseal</option>
-      <option value="fake_tls_auto_alt4">fake_tls_auto_alt4 — kinlay0</option>
-      <option value="fake_tls_auto_alt5">fake_tls_auto_alt5 — kinlay0</option>
-      <option value="fake_tls_auto_alt6">fake_tls_auto_alt6 — kinlay0</option>
-      <option value="general">general — Flowseal</option>
-      <option value="hostfakesplit_ts">hostfakesplit_ts — kinlay0</option>
-      <option value="hostfakesplit_ts_alt">hostfakesplit_ts_alt — kinlay0</option>
-      <option value="k0_exp">k0_exp — kinlay0</option>
-      <option value="k0_fake_tls_auto">k0_fake_tls_auto — kinlay0</option>
-      <option value="k0_simple_fake">k0_simple_fake — kinlay0</option>
-      <option value="k0_simple_fake_alt">k0_simple_fake_alt — kinlay0</option>
-      <option value="k0_simple_fake_alt2">k0_simple_fake_alt2 — kinlay0</option>
-      <option value="krushaaa">krushaaa</option>
-      <option value="legacy">legacy — kinlay0</option>
-      <option value="legacy10">legacy10 — kinlay0</option>
-      <option value="legacy11">legacy11 — kinlay0</option>
-      <option value="MartinBacker">MartinBacker</option>
-      <option value="nzapret">nzapret</option>
-      <option value="rostelecom">rostelecom — Flowseal</option>
-      <option value="simple_fake">simple_fake — Flowseal</option>
-      <option value="simple_fake_alt">simple_fake_alt — Flowseal</option>
-      <option value="simple_fake_alt2">simple_fake_alt2 — Flowseal</option>
-      <option value="simple_fake_alt3">simple_fake_alt3 — kinlay0</option>
-      <option value="simple_fake_alt4">simple_fake_alt4 — kinlay0</option>
-      <option value="single_fake">single_fake — kinlay0</option>
-      <option value="single_fake_alt">single_fake_alt — kinlay0</option>
-      <option value="syndata">syndata — kinlay0</option>
-      <option value="universal_v12">universal_v12 — Zephyron</option>
-      <option value="universal_v13">universal_v13 — RixyPow</option>
-      <option value="Uvvi2">Uvvi2</option>
-      <option value="vt_soft_crck">vt_soft_crck — Kubarev, по умолчанию</option>
-      <option value="vt_soft_crck_clone">vt_soft_crck_clone — Kubarev</option>
-      <option value="z2r_rocket">z2r_rocket — IndeecFOX</option>
-      <option value="z_attacker">z_attacker — GAME-OVER-op</option>
+      <optgroup label="Kubarev">
+        <option value="vt_soft_crck">vt_soft_crck, по умолчанию</option>
+        <option value="vt_soft_crck_clone">vt_soft_crck_clone</option>
+      </optgroup>
+      <optgroup label="Flowseal">
+        <option value="alt">alt</option>
+        <option value="alt10">alt10</option>
+        <option value="alt11">alt11</option>
+        <option value="alt12">alt12</option>
+        <option value="alt13">alt13</option>
+        <option value="alt2">alt2</option>
+        <option value="alt3">alt3</option>
+        <option value="alt4">alt4</option>
+        <option value="alt4_mod">alt4_mod</option>
+        <option value="alt5">alt5</option>
+        <option value="alt6">alt6</option>
+        <option value="alt7">alt7</option>
+        <option value="alt8">alt8</option>
+        <option value="alt9">alt9</option>
+        <option value="exp">exp</option>
+        <option value="fake_tls_auto">fake_tls_auto</option>
+        <option value="fake_tls_auto_alt">fake_tls_auto_alt</option>
+        <option value="fake_tls_auto_alt2">fake_tls_auto_alt2</option>
+        <option value="fake_tls_auto_alt3">fake_tls_auto_alt3</option>
+        <option value="general">general</option>
+        <option value="rostelecom">rostelecom</option>
+        <option value="simple_fake">simple_fake</option>
+        <option value="simple_fake_alt">simple_fake_alt</option>
+        <option value="simple_fake_alt2">simple_fake_alt2</option>
+      </optgroup>
+      <optgroup label="kinlay0">
+        <option value="alt14">alt14</option>
+        <option value="alt14e">alt14e</option>
+        <option value="alt15">alt15</option>
+        <option value="alt16">alt16</option>
+        <option value="circular">circular</option>
+        <option value="circular1">circular1</option>
+        <option value="double_fake">double_fake</option>
+        <option value="double_fake_alt">double_fake_alt</option>
+        <option value="double_fake_alt2">double_fake_alt2</option>
+        <option value="exp1">exp1</option>
+        <option value="exp2">exp2</option>
+        <option value="exp3">exp3</option>
+        <option value="exp4">exp4</option>
+        <option value="exp5">exp5</option>
+        <option value="experimental_ts">experimental_ts</option>
+        <option value="fake_tls_auto_alt4">fake_tls_auto_alt4</option>
+        <option value="fake_tls_auto_alt5">fake_tls_auto_alt5</option>
+        <option value="fake_tls_auto_alt6">fake_tls_auto_alt6</option>
+        <option value="hostfakesplit_ts">hostfakesplit_ts</option>
+        <option value="hostfakesplit_ts_alt">hostfakesplit_ts_alt</option>
+        <option value="k0_exp">k0_exp</option>
+        <option value="k0_fake_tls_auto">k0_fake_tls_auto</option>
+        <option value="k0_simple_fake">k0_simple_fake</option>
+        <option value="k0_simple_fake_alt">k0_simple_fake_alt</option>
+        <option value="k0_simple_fake_alt2">k0_simple_fake_alt2</option>
+        <option value="legacy">legacy</option>
+        <option value="legacy10">legacy10</option>
+        <option value="legacy11">legacy11</option>
+        <option value="simple_fake_alt3">simple_fake_alt3</option>
+        <option value="simple_fake_alt4">simple_fake_alt4</option>
+        <option value="single_fake">single_fake</option>
+        <option value="single_fake_alt">single_fake_alt</option>
+        <option value="syndata">syndata</option>
+      </optgroup>
+      <optgroup label="Другие авторы">
+        <option value="hardcorp74">hardcorp74</option>
+        <option value="eduncey">eduncey</option>
+        <option value="krushaaa">krushaaa</option>
+        <option value="MartinBacker">MartinBacker</option>
+        <option value="nzapret">nzapret</option>
+        <option value="Uvvi2">Uvvi2</option>
+        <option value="anti_throttle">anti_throttle — Zephyron</option>
+        <option value="universal_v12">universal_v12 — Zephyron</option>
+        <option value="fake_disorder">fake_disorder — TheFirstNoob</option>
+        <option value="universal_v13">universal_v13 — RixyPow</option>
+        <option value="z2r_rocket">z2r_rocket — IndeecFOX</option>
+        <option value="z_attacker">z_attacker — GAME-OVER-op</option>
+      </optgroup>
     </select>
     <details style="margin-top:8px"><summary>Для опытных</summary>
       <div class="s" style="margin-top:8px">Имя в подделке</div>
@@ -678,8 +707,10 @@ details > summary::after { border-color: currentColor; }
     <label class="sw"><input type="checkbox" data-key="ZAPRET_AUTOPICK"><span></span></label>
   </div>
 </div>
+</details>
 
-<h2>Подбор стратегии</h2>
+<details class="sect" data-fold="pick">
+<summary><div class="sx"><h2>Подбор стратегии</h2><div class="sv" data-sv="pick"></div></div></summary>
 <div class="card">
   <div class="pad">
   <div class="s muted" style="font-size:13px;margin-top:2px">Ищет рабочую стратегию для этой сети по сайтам ниже, в фоне. При сбое автопроверка запускает его сама.</div>
@@ -704,8 +735,10 @@ details > summary::after { border-color: currentColor; }
   <div id="scRes" class="mt8"></div>
   </div>
 </div>
+</details>
 
-<h2>Сайты для обхода</h2>
+<details class="sect" data-fold="zsites">
+<summary><div class="sx"><h2>Сайты для обхода</h2><div class="sv" data-sv="zsites"></div></div></summary>
 <div class="card">
   <div class="row col" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Какие сайты обходить</div></div>
@@ -756,8 +789,10 @@ details > summary::after { border-color: currentColor; }
     </div>
   </details>
 </div>
+</details>
 
-<h2>YouTube</h2>
+<details class="sect" data-fold="yt">
+<summary><div class="sx"><h2>YouTube</h2><div class="sv" data-sv="yt"></div></div></summary>
 <div class="card">
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Повтор зависших видеосоединений</div>
@@ -791,8 +826,10 @@ details > summary::after { border-color: currentColor; }
     <label class="sw"><input type="checkbox" data-key="YT_GGC_BLOCK"><span></span></label>
   </div>
 </div>
+</details>
 
-<h2>QUIC</h2>
+<details class="sect" data-fold="quic">
+<summary><div class="sx"><h2>QUIC</h2><div class="sv" data-sv="quic"></div></div></summary>
 <div class="card">
   <div class="row col">
     <div class="txt"><div class="t">YouTube и Google Play</div><div class="s" id="quicYtSub"></div></div>
@@ -811,8 +848,10 @@ details > summary::after { border-color: currentColor; }
     <div class="mt8"><button class="btn small" id="quicAdd">Добавить приложение</button></div>
   </div>
 </div>
+</details>
 
-<h2>Телефон</h2>
+<details class="sect" data-fold="zphone">
+<summary><div class="sx"><h2>Телефон</h2><div class="sv" data-sv="zphone"></div></div></summary>
 <div class="card">
   <div class="row" data-dep="ZAPRET_ENABLE">
     <div class="txt"><div class="t">Обход для самого телефона</div>
@@ -826,6 +865,7 @@ details > summary::after { border-color: currentColor; }
     <div class="mt8"><button class="btn small" id="zexAdd">Добавить приложение</button></div>
   </div>
 </div>
+</details>
 
 <div class="card" style="margin-top:16px">
   <div class="row wrap">
@@ -844,7 +884,36 @@ details > summary::after { border-color: currentColor; }
     <label class="sw"><input type="checkbox" data-key="DNSPROXY_ENABLE" aria-label="Зашифрованный DNS"><span></span></label>
   </div>
 </div>
-<h2>Серверы</h2>
+<details class="sect" data-fold="ai" open>
+<summary><div class="sx"><h2>Сервисы для ИИ</h2><div class="sv" data-sv="ai"></div></div></summary>
+<div class="card">
+  <div class="row col" data-dep="DNSPROXY_ENABLE">
+    <div class="txt"><div class="t">Сейчас через <span id="aiNow">—</span></div>
+      <div class="s">ChatGPT, Gemini, Claude и другие закрытые для России сервисы получают адреса прокси от гео-DoH.</div></div>
+  </div>
+  <div class="row col">
+    <div class="head">
+      <div class="txt"><div class="t">Проверить сервисы</div>
+        <div class="s">Отдаёт ли гео-DoH прокси для ChatGPT, Gemini, Claude, Spotify и других и отвечает ли прокси. Около 5 с. Пустит ли сам сервис, так не узнать.</div></div>
+      <button class="btn small" id="geoChkBtn">Проверить</button>
+    </div>
+    <select id="geoChkVia" aria-label="Через какой DNS проверять" style="margin-top:10px"></select>
+    <details class="res" id="geoChkBox" style="display:none" open><summary id="geoChkSum"></summary>
+      <div class="kv" id="geoChkOut"></div></details>
+  </div>
+  <div class="row col" data-dep="DNSPROXY_ENABLE" data-gm="off">
+    <div class="head">
+      <div class="txt"><div class="t">Сравнить все гео-DoH</div>
+        <div class="s">Каждый сервер из списка по очереди, около 5 с на сервер. Лучший — кнопкой «Первым», потом «Применить».</div></div>
+      <button class="btn small" id="aiAllBtn">Сравнить</button>
+    </div>
+    <div id="aiAll"></div>
+  </div>
+</div>
+</details>
+
+<details class="sect" data-fold="dnsup">
+<summary><div class="sx"><h2>Серверы DNS</h2><div class="sv" data-sv="dnsup"></div></div></summary>
 <div class="card">
   <div class="row col" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Какие DNS спрашивать</div>
@@ -879,8 +948,10 @@ details > summary::after { border-color: currentColor; }
     <button class="btn small" id="dnsFlushBtn">Сбросить</button>
   </div>
 </div>
+</details>
 
-<h2>Гео-DoH</h2>
+<details class="sect" data-fold="geo">
+<summary><div class="sx"><h2>Серверы гео-DoH</h2><div class="sv" data-sv="geo"></div></div></summary>
 <div class="card">
   <div class="row col" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Серверы гео-DoH</div>
@@ -892,16 +963,6 @@ details > summary::after { border-color: currentColor; }
     <div class="err" id="geoErr" style="display:none"></div>
   </div>
 <datalist id="dnsKnownUp"></datalist><datalist id="dnsKnownGeo"></datalist>
-  <div class="row col">
-    <div class="head">
-      <div class="txt"><div class="t">Проверка сервисов</div>
-        <div class="s">Отдаёт ли гео-DoH прокси для ChatGPT, Gemini, Claude, Spotify и других и отвечает ли прокси. Около 5 с. Пустит ли сам сервис, так не узнать.</div></div>
-      <button class="btn small" id="geoChkBtn">Проверить</button>
-    </div>
-    <select id="geoChkVia" aria-label="Через какой DNS проверять" style="margin-top:10px"></select>
-    <details class="res" id="geoChkBox" style="display:none" open><summary id="geoChkSum"></summary>
-      <div class="kv" id="geoChkOut"></div></details>
-  </div>
   <div class="row" data-dep="DNSPROXY_ENABLE" data-gm="off" data-gm2="all">
     <div class="txt"><div class="t">Без гео-DoH — не давать адреса</div>
       <div class="s">Молчат все гео-DoH — сервисы гео-списка ждут без адреса. Выключено — получат настоящие: из России не откроются, а приложения запомнят их ещё на несколько минут.</div></div>
@@ -913,8 +974,10 @@ details > summary::after { border-color: currentColor; }
     <input type="text" data-key="DNS_GEO_DOMAINS" placeholder="example.com" autocapitalize="off" autocorrect="off" spellcheck="false">
   </div>
 </div>
+</details>
 
-<h2>Для кого</h2>
+<details class="sect" data-fold="dnswho">
+<summary><div class="sx"><h2>Для кого</h2><div class="sv" data-sv="dnswho"></div></div></summary>
 <div class="card">
   <div class="row" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Для самого телефона</div>
@@ -937,8 +1000,10 @@ details > summary::after { border-color: currentColor; }
     </select>
   </div>
 </div>
+</details>
 
-<h2>Instagram, Facebook и WhatsApp</h2>
+<details class="sect" data-fold="meta">
+<summary><div class="sx"><h2>Instagram, Facebook и WhatsApp</h2><div class="sv" data-sv="meta"></div></div></summary>
 <div class="card">
   <div class="row" data-dep="DNSPROXY_ENABLE">
     <div class="txt"><div class="t">Европейские адреса</div>
@@ -963,9 +1028,11 @@ details > summary::after { border-color: currentColor; }
     <div id="metaRes" style="font-size:14px"></div>
   </div>
 </div>
+</details>
 
-<details class="card more">
-  <summary>Для опытных</summary>
+<details class="sect" data-fold="dnsadv">
+<summary><div class="sx"><h2>Для опытных</h2><div class="sv" data-sv="dnsadv"></div></div></summary>
+<div class="card">
   <div class="row col">
     <div class="txt"><div class="t">Серверы DoH через VPN</div>
       <div class="s">Для режима «DoH через туннель».</div></div>
@@ -986,7 +1053,9 @@ details > summary::after { border-color: currentColor; }
       <div class="s">Как часто проверять после сбоя, 2–600 с.</div></div>
     <input type="number" min="2" max="600" data-key="DNS_HEALTH_RECOVER">
   </div>
+</div>
 </details>
+
 <div class="card" style="margin-top:16px">
   <div class="row wrap">
     <div class="txt"><div class="t">Сбросить настройки вкладки</div>
@@ -1009,7 +1078,24 @@ details > summary::after { border-color: currentColor; }
 </div>
 <div class="hint">WARP — бесплатный туннель Cloudflare, Opera — прокси браузера Opera. Работают, когда VPN на телефоне выключен: для того, что не открывает обход.</div>
 
-<h2>WARP</h2>
+<details class="sect" data-fold="routes" open>
+<summary><div class="sx"><h2>Что куда идёт</h2><div class="sv" data-sv="routes"></div></div></summary>
+<div class="card" id="routeGroups"></div>
+</details>
+
+<details class="sect" data-fold="rsites">
+<summary><div class="sx"><h2>Отдельные сайты <small id="routeSitesN"></small></h2><div class="sv" data-sv="rsites"></div></div></summary>
+<div class="card" id="routeSites"></div>
+</details>
+
+<details class="sect" data-fold="rapps">
+<summary><div class="sx"><h2>Отдельные приложения <small id="routeAppsN"></small></h2><div class="sv" data-sv="rapps"></div></div></summary>
+<div class="card" id="routeApps"></div>
+<div class="hint">Всё, чего нет здесь, идёт как выбрано на Главной: через VPN телефона или напрямую с обходом.</div>
+</details>
+
+<details class="sect" data-fold="warp">
+<summary><div class="sx"><h2>WARP: для кого</h2><div class="sv" data-sv="warp"></div></div></summary>
 <div class="card">
   <div class="row" data-dep="WARP_ENABLE">
     <div class="txt"><div class="t">Для самого телефона</div>
@@ -1058,11 +1144,12 @@ details > summary::after { border-color: currentColor; }
       <option value="2">Только свой сервер: он не отвечает — блок</option>
     </select>
   </div>
-  <div class="row" data-dep="WARP_ENABLE">
-    <div class="txt"><div class="t">Не менять сервер</div>
-      <div class="s">Только основной конфиг: замолчал — переподключается он же, на другие не переходит.</div></div>
-    <label class="sw"><input type="checkbox" data-key="WARP_STICK"><span></span></label>
-  </div>
+</div>
+</details>
+
+<details class="sect" data-fold="warpc">
+<summary><div class="sx"><h2>WARP: подключение</h2><div class="sv" data-sv="warpc"></div></div></summary>
+<div class="card">
   <div class="row col" data-dep="WARP_ENABLE" id="warpEngRow">
     <div class="txt"><div class="t">Как подключаться</div>
       <div class="s">AmneziaWG — конфиги ниже. MASQUE — как приложение 1.1.1.1: HTTP/3 к Cloudflare, свой аккаунт модуль создаёт сам; часто быстрее и с меньшей задержкой. Если один медленный или не подключается — попробуйте другой. Свой сервер после WARP работает с обоими.</div></div>
@@ -1139,9 +1226,16 @@ details > summary::after { border-color: currentColor; }
 <div class="s" style="padding:0 16px 12px">«Создать» регистрирует конфиг в Cloudflare с телефона; «Из файла» и «Вставить» — .conf из AmneziaVPN или WireGuard (и zip). «Подключить» — сделать основным; замолчит — модуль возьмёт следующий. «Переподключить» — новая сессия.</div>
 <div class="s" style="padding:0 16px 12px">«Сохранить» кладёт конфиг в «Загрузки». В файле закрытый ключ: не публикуйте и удалите после переноса.</div>
   </details>
+  <div class="row" data-dep="WARP_ENABLE">
+    <div class="txt"><div class="t">Не менять сервер</div>
+      <div class="s">Только основной конфиг: замолчал — переподключается он же, на другие не переходит.</div></div>
+    <label class="sw"><input type="checkbox" data-key="WARP_STICK"><span></span></label>
+  </div>
 </div>
+</details>
 
-<h2>Opera</h2>
+<details class="sect" data-fold="opera">
+<summary><div class="sx"><h2>Opera</h2><div class="sv" data-sv="opera"></div></div></summary>
 <div class="card">
   <div class="row col" data-dep="OPERA_ENABLE">
     <div class="txt"><div class="t">Регион</div>
@@ -1175,16 +1269,8 @@ details > summary::after { border-color: currentColor; }
   </details>
   <div class="row"><div class="txt"><div class="s">Только TCP и IPv4, звонков нет. Opera видит, куда вы ходите.</div></div></div>
 </div>
+</details>
 
-<h2>Что куда идёт</h2>
-<div class="card" id="routeGroups"></div>
-
-<h2>Отдельные сайты <small id="routeSitesN"></small></h2>
-<div class="card" id="routeSites"></div>
-
-<h2>Отдельные приложения <small id="routeAppsN"></small></h2>
-<div class="card" id="routeApps"></div>
-<div class="hint">Всё, чего нет здесь, идёт как выбрано на Главной: через VPN телефона или напрямую с обходом.</div>
 <div class="card" style="margin-top:16px">
   <div class="row wrap">
     <div class="txt"><div class="t">Сбросить настройки вкладки</div>
@@ -1195,7 +1281,8 @@ details > summary::after { border-color: currentColor; }
 </section>
 
 <section class="tab" data-tab="tools">
-<h2>Диагностика</h2>
+<details class="sect" data-fold="diag" open>
+<summary><div class="sx"><h2>Диагностика</h2><div class="sv" data-sv="diag"></div></div></summary>
 <div class="card">
   <div class="row col">
     <div class="txt"><div class="t">Проверить сайт</div>
@@ -1217,8 +1304,10 @@ details > summary::after { border-color: currentColor; }
     <div class="kv" id="diagOut" style="display:none"></div>
   </div>
 </div>
+</details>
 
-<h2>Сеть</h2>
+<details class="sect" data-fold="tnet" open>
+<summary><div class="sx"><h2>Сеть</h2><div class="sv" data-sv="tnet"></div></div></summary>
 <div class="card">
   <div class="row col">
     <div class="txt"><div class="t">Переподключить сеть</div>
@@ -1232,8 +1321,10 @@ details > summary::after { border-color: currentColor; }
     <label class="sw"><input type="checkbox" data-key="NET_PROFILE_ADAPTIVE"><span></span></label>
   </div>
 </div>
+</details>
 
-<h2>Модуль</h2>
+<details class="sect" data-fold="tmod">
+<summary><div class="sx"><h2>Модуль</h2><div class="sv" data-sv="tmod"></div></div></summary>
 <div class="card">
   <div class="row wrap">
     <div class="txt"><div class="t">Обновления</div>
@@ -1256,8 +1347,10 @@ details > summary::after { border-color: currentColor; }
     <div class="seg" id="themeSeg" role="radiogroup" aria-label="Оформление" style="margin-top:10px"><button data-t="" role="radio">Системная</button><button data-t="light" role="radio">Светлая</button><button data-t="dark" role="radio">Тёмная</button></div>
   </div>
 </div>
+</details>
 
-<h2>Резервная копия и сброс</h2>
+<details class="sect" data-fold="tbak">
+<summary><div class="sx"><h2>Резервная копия и сброс</h2><div class="sv" data-sv="tbak"></div></div></summary>
 <div class="card">
   <div class="row wrap">
     <div class="txt"><div class="t">Экспорт настроек</div>
@@ -1276,8 +1369,10 @@ details > summary::after { border-color: currentColor; }
     <button class="btn small bad" id="resetAll">Сбросить</button>
   </div>
 </div>
+</details>
 
-<h2>Журналы</h2>
+<details class="sect" data-fold="tlog">
+<summary><div class="sx"><h2>Журналы</h2><div class="sv" data-sv="tlog"></div></div></summary>
 <div class="card">
   <div class="row wrap">
     <div class="txt"><div class="t">Отправить логи</div>
@@ -1302,6 +1397,7 @@ details > summary::after { border-color: currentColor; }
     <pre class="log" id="log"></pre>
   </details>
 </div>
+</details>
 
 <h2>Автор и помощь</h2>
 <div class="card links" id="links"></div>
@@ -2077,6 +2173,7 @@ function renderDeps() {
   $('#zaltMin').textContent = fmtMin(CUR.ZAPRET_ALT_MIN, 1440);
   $('#zStratSub').textContent = pn ? 'Используется в сетях без своей стратегии.'
     : 'Метод обхода DPI.';
+  renderSums();
 }
 
 const MASTER_SUB = {
@@ -2120,6 +2217,7 @@ function renderBar() {
   const n = changedKeys().length + (zlistDirty() ? 1 : 0);
   $('#applybar').classList.toggle('show', n > 0);
   $('#applyMsg').textContent = n ? 'Изменений: ' + n : '';
+  renderSums();   // «Свои сайты» меняются и без renderDeps (ввод, загрузка списка)
 }
 
 function setCur(k, v) {
@@ -2132,6 +2230,65 @@ function setCur(k, v) {
   // подписи в списках DNS зависят от режима
   if (k === 'DNS_GEO_MODE') renderDnsLists();
   renderDeps(); renderBar();
+}
+
+// ---------------------------------------------------------------- итог свёрнутого раздела (29.11)
+// Строка под названием свёрнутого раздела — что в нём выбрано сейчас (по форме, до «Применить»)
+const optText = (k) => {
+  const el = $('select[data-key="' + k + '"]'), v = CUR[k] || '';
+  const o = el && Array.from(el.options).find((x) => x.value === v);
+  return o ? o.text : v;
+};
+const isOn = (k) => CUR[k] === '1';
+const nWords = (k) => (CUR[k] || '').split(/\s+/).filter(Boolean).length;
+const sumJoin = (a) => a.filter(Boolean).join(' · ');
+const QUIC_SUM = { off: 'как есть', block: 'закрыт', fake: 'пробивать' };
+const routeSum = (g) => (CUR['WARP_' + g] === '1' ? 'WARP' : CUR['OPERA_' + g] === '1' ? 'Opera' : 'прямо');
+let AI_LAST = '';   // итог последней проверки сервисов через DNS модуля: «работают 7 из 8»
+const SUMS = {
+  main: () => 'включено ' + ['ZAPRET_ENABLE', 'DNSPROXY_ENABLE', 'TETHER_STEALTH', 'KILL_SWITCH'].filter(isOn).length + ' из 4',
+  strat: () => !isOn('ZAPRET_ENABLE') ? 'обход выключен' : sumJoin([
+    CUR.ZAPRET_ENGINE === 'nfqws1' ? 'nfqws1 · ' + optText('ZAPRET_STRATEGY').replace(/^\d · /, '').replace(/ — .*/, '') : 'nfqws2 · ' + (CUR.ZAPRET2_STRATEGY || ''),
+    isOn('ZAPRET_PER_NET') ? 'своя для каждой сети' : '', isOn('ZAPRET_AUTOPICK') ? 'автоподбор' : '']),
+  pick: () => (CUR.ZAPRET_ENGINE === 'nfqws1' ? 'быстрый ~2 мин, полный ~7 мин, YouTube, Discord' : 'перебор всех стратегий, ~6 мин'),
+  zsites: () => {
+    const n = $('#zlist').value.split(/\s+/).filter(Boolean).length;
+    return sumJoin([CUR.ZAPRET_MODE === 'all' ? 'все сайты' : 'из списков и автосписка', n ? 'свои: ' + n : '', isOn('ZAPRET_ALT') ? 'отдельные стратегии' : '']);
+  },
+  yt: () => sumJoin([isOn('YT_DEAD_FAILFAST') ? 'повтор зависших' : '', isOn('YT_DEAD_FAILFAST') && isOn('YT_WSSIZE_RAMP') ? 'малое окно' : '',
+    isOn('YT_GGC_BLOCK') ? 'без кэшей оператора' : '']) || 'всё выключено',
+  quic: () => sumJoin(['YouTube: ' + QUIC_SUM[quicMode(QUIC_SEG.quicYt)], 'раздача: ' + QUIC_SUM[quicMode(QUIC_SEG.quicTeth)],
+    nWords('QUIC_BLOCK_APPS') ? 'приложений без QUIC: ' + nWords('QUIC_BLOCK_APPS') : '']),
+  zphone: () => sumJoin([isOn('ZAPRET_PHONE') ? 'обход и для телефона' : 'только для раздачи', nWords('ZAPRET_EXCL_APPS') ? 'мимо: ' + nWords('ZAPRET_EXCL_APPS') : '']),
+  ai: () => CUR.DNS_GEO_MODE === 'off' ? 'гео-DoH не спрашивается' : sumJoin([geoList()[0] ? dnsName(geoList()[0]) : 'гео-DoH не задан', AI_LAST]),
+  dnsup: () => CUR.DNS_GEO_MODE === 'all' ? 'не используются: всё через гео-DoH' :
+    sumJoin([dnsName(upList()[0] || '—'), upList().length > upN() ? 'запасных: ' + (upList().length - upN()) : '']),
+  geo: () => CUR.DNS_GEO_MODE === 'off' ? 'не спрашиваются' : geoList().length ? sumJoin(['первый: ' + dnsName(geoList()[0]), 'всего ' + geoList().length]) : 'пусто',
+  dnswho: () => sumJoin([isOn('DNS_PHONE') ? 'телефон' : '', CUR.DNS_DIRECT !== 'plain' ? 'раздача напрямую' : '', 'при VPN: ' + optText('DNS_VPN')]),
+  meta: () => (isOn('DNS_META_EU') ? 'европейские адреса' : 'выключено'),
+  dnsadv: () => 'DoH через VPN, начальный DNS, интервалы проверки',
+  routes: () => sumJoin(['Telegram → ' + routeSum('TELEGRAM'), 'Google → ' + routeSum('GOOGLE')]),
+  rsites: () => { const n = nWords('WARP_DOMAINS') + nWords('OPERA_DOMAINS'); return n ? 'сайтов: ' + n : 'нет'; },
+  rapps: () => { const n = nWords('WARP_APPS') + nWords('OPERA_APPS'); return n ? 'приложений: ' + n : 'нет'; },
+  warp: () => !isOn('WARP_ENABLE') ? 'WARP выключен' : sumJoin([
+    isOn('WARP_ALL_PHONE') ? 'весь трафик телефона' : isOn('WARP_PHONE') ? 'телефон' : '',
+    isOn('WARP_ALL_TETHER') ? 'весь трафик раздачи' : isOn('WARP_TETHER') ? 'раздача' : '',
+    ['запасной путь', 'без WARP — блок', 'только свой сервер'][+CUR.WARP_STRICT || 0]]),
+  warpc: () => !isOn('WARP_ENABLE') ? 'WARP выключен' : CUR.WARP_ENGINE === 'masque'
+    ? sumJoin(['MASQUE', (isOn('WARP_MASQUE_H2') ? 'TCP ' : 'UDP ') + (CUR.WARP_MASQUE_PORT || '4443'), CUR.WARP_MASQUE_SNI || 'имя Cloudflare'])
+    : sumJoin(['AmneziaWG', 'I1: ' + optText('WARP_I1').replace(/ \(.*\)$/, ''), isOn('WARP_STICK') ? 'не менять сервер' : '']),
+  opera: () => !isOn('OPERA_ENABLE') ? 'Opera выключена' : sumJoin([{ EU: 'Европа', AS: 'Азия', AM: 'Америка' }[CUR.OPERA_COUNTRY] || 'Европа',
+    isOn('OPERA_ALL_PHONE') ? 'весь TCP телефона' : isOn('OPERA_PHONE') ? 'телефон' : '', isOn('OPERA_ALL_TETHER') ? 'весь TCP раздачи' : isOn('OPERA_TETHER') ? 'раздача' : '']),
+  tnet: () => (isOn('NET_PROFILE_ADAPTIVE') ? 'переподключить сеть · адаптация TCP включена' : 'переподключить сеть'),
+  tmod: () => 'обновления, перезапуск, оформление',
+  tbak: () => 'экспорт, импорт, сброс',
+  tlog: () => 'отправить логи, журнал модуля',
+};
+function renderSums() {
+  // зовут из renderDeps/renderBar: ошибка в одной строке не должна ломать форму
+  $$('[data-sv]').forEach((el) => { let t = ''; try { t = SUMS[el.dataset.sv] ? SUMS[el.dataset.sv]() : ''; } catch (e) { t = ''; } el.textContent = t; });
+  const g = geoList()[0];
+  $('#aiNow').textContent = CUR.DNS_GEO_MODE === 'off' ? 'основной DNS' : g ? dnsName(g) : '—';
 }
 
 $$('[data-key]:not(.seg)').forEach((el) => {
@@ -2250,6 +2407,19 @@ $$('[data-offnote]').forEach((n) => {
 let _tab0 = 'home';
 try { _tab0 = localStorage.getItem('vtTab') || 'home'; } catch (e) { /* по умолчанию — Главная */ }
 showTab(_tab0);
+// разделы: что раскрыто/свёрнуто руками — в localStorage vtFold; по умолчанию — атрибут open в разметке
+(function () {
+  let st = {};
+  try { st = JSON.parse(localStorage.getItem('vtFold') || '{}') || {}; } catch (e) { st = {}; }
+  $$('details.sect').forEach((d) => {
+    const k = d.dataset.fold;
+    if (k in st) d.open = !!st[k];
+    // только нажатие: toggle браузер шлёт и на open из разметки — умолчания застыли бы в хранилище
+    d.querySelector(':scope > summary').addEventListener('click', () => setTimeout(() => {
+      st[k] = d.open; try { localStorage.setItem('vtFold', JSON.stringify(st)); } catch (e) { /* не запомнится */ }
+    }));
+  });
+})();
 
 // оформление: не настройка модуля (без «Применить»), а этого WebUI — в localStorage
 function themeSegSync(p) {
@@ -2972,10 +3142,11 @@ $('#diagBtn').addEventListener('click', async () => {
   } finally { b.disabled = false; b.textContent = 'Проверить ещё раз'; }
 });
 // u — адрес гео-DoH (выбор «Через …»): спрашиваем прямо его; без u — DNS модуля, как получит телефон
-let geoChkBusy = false;
+let geoChkBusy = false, aiAllBusy = false;
 async function runGeoCheck(u) {
-  if (geoChkBusy) { toast('Идёт проверка — подождите'); return; }
+  if (geoChkBusy || aiAllBusy) { toast('Идёт проверка — подождите'); return; }
   const b = $('#geoChkBtn'), o = $('#geoChkOut'), box = $('#geoChkBox'), sum = $('#geoChkSum');
+  $$('.aiFirst').forEach((x) => x.remove());
   const via = u ? 'через ' + dnsName(u) : 'через DNS модуля';
   box.style.display = ''; box.open = true; sum.textContent = 'Проверяю 8 сервисов ' + via + '…';
   geoChkBusy = true; b.disabled = true; b.textContent = 'Проверяю…';
@@ -2991,9 +3162,61 @@ async function runGeoCheck(u) {
     // итог — только по сервисам (служебные строки «VPN», «Проверка» не в счёт)
     const svc = rows.filter((f) => !['vpn', 'via'].includes(f[0])), ok = svc.filter((f) => f[1] === 'ok').length;
     sum.textContent = svc.length ? 'Работают ' + ok + ' из ' + svc.length + ' · ' + via : 'Не получилось проверить · ' + via;
+    // через DNS модуля — итог в заголовок раздела; через не первый гео-DoH — сразу предложить сделать его первым
+    if (!u && svc.length) { AI_LAST = 'работают ' + ok + ' из ' + svc.length; renderSums(); }
+    if (u && svc.length && geoList().includes(u) && geoList()[0] !== u) {
+      const f = document.createElement('button');
+      f.className = 'btn small aiFirst'; f.textContent = 'Сделать ' + dnsName(u) + ' первым';
+      f.addEventListener('click', () => { geoFirst(u); f.remove(); });
+      box.after(f);
+    }
   } finally { geoChkBusy = false; b.disabled = false; b.textContent = 'Проверить ещё раз'; }
 }
 $('#geoChkBtn').addEventListener('click', () => runGeoCheck($('#geoChkVia').value));
+// гео-DoH — первым в списке (запишется после «Применить»)
+function geoFirst(u) {
+  const l = geoList();
+  if (!l.includes(u) || l[0] === u) return;
+  DNS_OPEN.geo = false;
+  setDnsList('geo', [u].concat(l.filter((x) => x !== u)));
+  toast(dnsName(u) + ' — первым. Запишется после «Применить»');
+}
+// «Сравнить все гео-DoH»: geocheck через каждый по очереди, итог «N из M» и кнопка «Первым»
+let AI_RES = {};   // адрес гео-DoH -> итог; по адресу, а не номеру: список могут переставить после сравнения
+const geoCount = (out) => {
+  const rows = (out || '').split('\n').filter((l) => l.indexOf('R ') === 0).map((l) => l.slice(2).split('|')).filter((f) => !['vpn', 'via'].includes(f[0]));
+  return { ok: rows.filter((f) => f[1] === 'ok').length, n: rows.length, bad: rows.filter((f) => f[1] !== 'ok').map((f) => f[2] || f[0]) };
+};
+function drawAiAll(list, cur) {   // cur — номер проверяемого сейчас, -1 — сравнение закончено
+  const best = Math.max(0, ...Object.values(AI_RES).map((r) => r.ok));
+  $('#aiAll').innerHTML = list.map((u, i) => {
+    const r = AI_RES[u], first = u === geoList()[0];
+    const dot = !r ? '' : r.n && r.ok === r.n ? 'green' : r.ok ? 'amber' : 'red';
+    const sub = r ? (r.n ? 'работают ' + r.ok + ' из ' + r.n + (r.bad.length ? ' · нет: ' + r.bad.slice(0, 3).join(', ') + (r.bad.length > 3 ? '…' : '') : '') : 'не ответил')
+      : i === cur ? 'проверяю…' : cur < 0 ? 'не проверялся' : 'ждёт';
+    return '<div class="row item"><div class="txt"><div class="t">' + (dot ? '<span class="dot ' + dot + '"></span>' : '') + esc(dnsName(u)) +
+      (r && r.ok && r.ok === best && cur < 0 ? '<span class="best">лучший</span>' : '') + '</div><div class="s">' + esc((first ? 'первый · ' : '') + sub) + '</div></div>' +
+      (first ? '' : '<button class="btn small" data-aifirst="' + esc(u) + '"' + (cur >= 0 ? ' disabled' : '') + '>Первым</button>') + '</div>';
+  }).join('');
+}
+$('#aiAllBtn').addEventListener('click', async () => {
+  if (aiAllBusy || geoChkBusy) { toast('Идёт проверка — подождите'); return; }
+  const b = $('#aiAllBtn'), list = geoList();
+  if (!list.length) { $('#aiAll').innerHTML = '<div class="s mt8">Список гео-DoH пуст.</div>'; return; }
+  aiAllBusy = true; b.disabled = true; AI_RES = {};
+  try {
+    for (let i = 0; i < list.length; i++) {
+      b.textContent = (i + 1) + ' из ' + list.length + '…'; drawAiAll(list, i);
+      if (!HAS_KSU) await new Promise((r) => setTimeout(r, 600));   // предпросмотр: заглушка отвечает мгновенно
+      AI_RES[list[i]] = geoCount((await ctlBg('geocheck ' + q(list[i]))).out);
+    }
+  } finally { aiAllBusy = false; b.disabled = false; b.textContent = 'Ещё раз'; drawAiAll(geoList(), -1); }
+});
+$('#aiAll').addEventListener('click', (e) => {
+  const x = e.target.closest('[data-aifirst]'); if (!x || x.disabled) return;
+  geoFirst(x.dataset.aifirst);
+  drawAiAll(geoList(), -1);
+});
 $('#fakeSniSel').addEventListener('change', () => {
   const v = $('#fakeSniSel').value; $('#fakeSniErr').style.display = 'none';
   if (v === '*') { fakeOwnPick = true; renderFakeSni(); $('#fakeSniIn').focus(); return; }
@@ -3766,6 +3989,15 @@ function mockExec(cmd) {
   if (a === 'zauto-clear') return { errno: 0, out: 'OK' };
   if (/^zalt( |$)/.test(a)) return { errno: 0, out: 'rutracker.org|--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld|2026-10-22 18:00\nnnmclub.to|--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld|2026-10-22 18:00\n' };
   if (a === 'zalt-clear') return { errno: 0, out: 'OK' };
+  // «Сравнить все гео-DoH»: у разных серверов — разный итог (от имени), иначе сравнивать нечего
+  const mgeo = /^geocheck '([^']+)'$/.exec(a);
+  if (mgeo) {
+    let hh = 7, k = 0; for (const c of mgeo[1]) hh = (hh * 31 + c.charCodeAt(0)) >>> 0;
+    const r = mockExec(CTL + ' geocheck');
+    r.out = r.out.split('\n').map((l) => (/^R [^|]+\|ok\|/.test(l) && k++ < hh % 4 ? l.replace(/\|ok\|([^|]*)\|.*/, '|bad|$1|адреса прокси не отдал') : l))
+      .join('\n').replace(/^H .*/m, 'H ' + dnsHost(mgeo[1]));
+    return r;
+  }
   if (a === 'geocheck' || a.indexOf('geocheck ') === 0) return { errno: 0, out: 'H not-a-dns.quic.best\nR gpt|ok|ChatGPT|прокси 201.58.191.60, ответ за 432 мс, выход: PL\nR gemini|ok|Gemini|прокси 201.58.191.60, ответ за 485 мс\nR claude|ok|Claude|прокси 201.58.191.60, ответ за 426 мс, выход: PL\nR grok|ok|Grok|прокси 201.58.191.60, ответ за 449 мс, выход: PL\nR spotify|ok|Spotify|прокси 201.58.191.60, ответ за 727 мс\nR notion|bad|Notion|прокси нет: настоящий адрес 208.103.161.2, из России закрыт\nR jb|warn|JetBrains|прокси 201.58.191.60, ответ за 2535 мс — медленно\nR deepl|bad|DeepL|прокси нет: сервис видит Россию (адрес 172.64.148.47)\n' };
   if (a === 'diag') return { errno: 0, out: 'R dns|warn|Подмена DNS|оператор подменяет ответы обычного DNS (2 из 3: rutracker.org:195.208.4.1) — без DoH заблокированные сайты получат заглушку\nR tcp16|ok|Обрыв на 16–64 КБ|нет: 128 КБ скачались (4 из 4)\nR wl|ok|Белые списки|нет: зарубежные сайты открываются (4 из 4)\nR tg|bad|Telegram|закрыт по IP: серверы (0 из 5) и веб-версия недоступны — только через VPN\n' };
   if (/^zevents/.test(a)) return { errno: 0, out: '2026-10-21 12:40|YOTA|сторож: стратегия работает\n2026-10-21 13:44|YOTA|сторож: стратегия не открывает заблокированные (www.youtube.com discord.com) — ищу замену\n2026-10-21 13:45|YOTA|сторож: вернул прежнюю стратегию: --dpi-desync=multisplit --dpi-desync-split-pos=1,host+1,midsld --dpi-desync-split-seqovl=1\n' };
