@@ -1163,7 +1163,7 @@ warp_kill_sockets() {   # причина [сети — по умолчанию �
         (
             n=$(warp_kill_each "" "" "$WARP_ALL_X $WARP_KILL_KEEP" 10000)
             [ -n "$f" ] && [ -n "$WARP_ALL_X" ] && k=$(warp_kill_each "( $f )" "$WARP_ALL_X" "$WARP_KILL_KEEP")
-            [ "$((${n:-0} + ${k:-0}))" -gt 0 ] && log "WARP: закрыто соединений приложений телефона (весь трафик через WARP): ${n:-0}$([ "${k:-0}" -gt 0 ] && echo ", из «мимо» к сетям групп: $k") ($1) — переподключатся сразу"
+            [ "$((${n:-0} + ${k:-0}))" -gt 0 ] && log_bg "WARP: закрыто соединений приложений телефона (весь трафик через WARP): ${n:-0}$([ "${k:-0}" -gt 0 ] && echo ", из «мимо» к сетям групп: $k") ($1) — переподключатся сразу"
         ) < /dev/null > /dev/null 2>&1 &
         return 0
     fi
@@ -1458,7 +1458,7 @@ warp_all_moved() {
     if [ "${WARP_RT_ALL%?}" != "$WARP_ALL_PHONE" ]; then
         x=$(warp_all_excl_uids)
         ( c=$(warp_kill_each "" "" "$x" 10000)
-          [ "${c:-0}" -gt 0 ] && log "WARP: весь трафик телефона $([ "$WARP_ALL_PHONE" = 1 ] && echo включён || echo выключен) — закрыто соединений приложений: $c"
+          [ "${c:-0}" -gt 0 ] && log_bg "WARP: весь трафик телефона $([ "$WARP_ALL_PHONE" = 1 ] && echo включён || echo выключен) — закрыто соединений приложений: $c"
         ) < /dev/null > /dev/null 2>&1 &
     fi
 }

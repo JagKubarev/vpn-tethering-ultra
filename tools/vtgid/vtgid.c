@@ -21,7 +21,8 @@ static int num(const char *s, long *v)
 
 	errno = 0;
 	*v = strtol(s, &end, 10);
-	return !(errno || *end || end == s || *v < 0 || *v > 65535);
+	// до 2^31−1: uid приложений второго пользователя и клонов — N*100000 + appId (ревью 28.11: было до 65535)
+	return !(errno || *end || end == s || *v < 0 || *v > 2147483647L);
 }
 
 int main(int argc, char **argv)
