@@ -1084,12 +1084,12 @@ details.sect[open] > summary .sv { display: none; }
 </details>
 
 <details class="sect" data-fold="rsites">
-<summary><div class="sx"><h2>Отдельные сайты <small id="routeSitesN"></small></h2><div class="sv" data-sv="rsites"></div></div></summary>
+<summary><div class="sx"><h2>Отдельные сайты</h2><div class="sv" data-sv="rsites"></div></div></summary>
 <div class="card" id="routeSites"></div>
 </details>
 
 <details class="sect" data-fold="rapps">
-<summary><div class="sx"><h2>Отдельные приложения <small id="routeAppsN"></small></h2><div class="sv" data-sv="rapps"></div></div></summary>
+<summary><div class="sx"><h2>Отдельные приложения</h2><div class="sv" data-sv="rapps"></div></div></summary>
 <div class="card" id="routeApps"></div>
 <div class="hint">Всё, чего нет здесь, идёт как выбрано на Главной: через VPN телефона или напрямую с обходом.</div>
 </details>
@@ -1226,7 +1226,7 @@ details.sect[open] > summary .sv { display: none; }
 <div class="s" style="padding:0 16px 12px">«Создать» регистрирует конфиг в Cloudflare с телефона; «Из файла» и «Вставить» — .conf из AmneziaVPN или WireGuard (и zip). «Подключить» — сделать основным; замолчит — модуль возьмёт следующий. «Переподключить» — новая сессия.</div>
 <div class="s" style="padding:0 16px 12px">«Сохранить» кладёт конфиг в «Загрузки». В файле закрытый ключ: не публикуйте и удалите после переноса.</div>
   </details>
-  <div class="row" data-dep="WARP_ENABLE">
+  <div class="row" data-dep="WARP_ENABLE" id="warpStickRow">
     <div class="txt"><div class="t">Не менять сервер</div>
       <div class="s">Только основной конфиг: замолчал — переподключается он же, на другие не переходит.</div></div>
     <label class="sw"><input type="checkbox" data-key="WARP_STICK"><span></span></label>
@@ -1902,7 +1902,6 @@ function renderRoutes() {
   ROUTE_HTML = html;
   $('#routeGroups').innerHTML = g; $('#routeSites').innerHTML = sh; $('#routeApps').innerHTML = ah;
   $('#routeSiteIn').value = typed;
-  $('#routeSitesN').textContent = sites.length || ''; $('#routeAppsN').textContent = apps.length || '';
 }
 function moveItem(kind, id, to) {
   const [wk, ok] = kind === 'site' ? ['WARP_DOMAINS', 'OPERA_DOMAINS'] : ['WARP_APPS', 'OPERA_APPS'];
@@ -2132,6 +2131,7 @@ function renderDeps() {
   // MASQUE: своё имя и HTTP/2; I1 у него нет — строку I1 прячем
   const mq = CUR.WARP_ENGINE === 'masque';
   $('#warpMqSniRow').hidden = !mq; $('#warpMqH2Row').hidden = !mq; $('#warpMqPortRow').hidden = !mq; $('#warpI1Row').hidden = mq;
+  $('#warpStickRow').hidden = mq;
   warpMqOpt();
   // мимо своего сервера уходит только то, что у приложения идёт в WARP: целиком (WARP_APPS, клиенты Telegram) или по
   // группам и сайтам (WARP_PHONE); без WARP_PHONE и не целиком — правило не действует
@@ -2244,13 +2244,17 @@ const nWords = (k) => (CUR[k] || '').split(/\s+/).filter(Boolean).length;
 const sumJoin = (a) => a.filter(Boolean).join(' · ');
 const QUIC_SUM = { off: 'как есть', block: 'закрыт', fake: 'пробивать' };
 const routeSum = (g) => (CUR['WARP_' + g] === '1' ? 'WARP' : CUR['OPERA_' + g] === '1' ? 'Opera' : 'прямо');
-let AI_LAST = '';   // итог последней проверки сервисов через DNS модуля: «работают 7 из 8»
+let AI_LAST = '';
+let CL_SUM = '';   // итог «Устройств в раздаче» (loadClients): «в сети: 2 · заблокировано: 1»
+let SC_SUM = '';   // подбор идёт — его ход в итоге свёрнутого «Подбора стратегии» (scRefresh)   // итог последней проверки сервисов через DNS модуля: «работают 7 из 8»
 const SUMS = {
+  clients: () => CL_SUM,
+  diag: () => 'проверить сайт, скорость YouTube, проверка оператора',
   main: () => 'включено ' + ['ZAPRET_ENABLE', 'DNSPROXY_ENABLE', 'TETHER_STEALTH', 'KILL_SWITCH'].filter(isOn).length + ' из 4',
   strat: () => !isOn('ZAPRET_ENABLE') ? 'обход выключен' : sumJoin([
     CUR.ZAPRET_ENGINE === 'nfqws1' ? 'nfqws1 · ' + optText('ZAPRET_STRATEGY').replace(/^\d · /, '').replace(/ — .*/, '') : 'nfqws2 · ' + (CUR.ZAPRET2_STRATEGY || ''),
     isOn('ZAPRET_PER_NET') ? 'своя для каждой сети' : '', isOn('ZAPRET_AUTOPICK') ? 'автоподбор' : '']),
-  pick: () => (CUR.ZAPRET_ENGINE === 'nfqws1' ? 'быстрый ~2 мин, полный ~7 мин, YouTube, Discord' : 'перебор всех стратегий, ~6 мин'),
+  pick: () => SC_SUM || (CUR.ZAPRET_ENGINE === 'nfqws1' ? 'быстрый ~2 мин, полный ~7 мин, YouTube, Discord' : 'перебор всех стратегий, ~6 мин'),
   zsites: () => {
     const n = $('#zlist').value.split(/\s+/).filter(Boolean).length;
     return sumJoin([CUR.ZAPRET_MODE === 'all' ? 'все сайты' : 'из списков и автосписка', n ? 'свои: ' + n : '', isOn('ZAPRET_ALT') ? 'отдельные стратегии' : '']);
@@ -2270,14 +2274,14 @@ const SUMS = {
   routes: () => sumJoin(['Telegram → ' + routeSum('TELEGRAM'), 'Google → ' + routeSum('GOOGLE')]),
   rsites: () => { const n = nWords('WARP_DOMAINS') + nWords('OPERA_DOMAINS'); return n ? 'сайтов: ' + n : 'нет'; },
   rapps: () => { const n = nWords('WARP_APPS') + nWords('OPERA_APPS'); return n ? 'приложений: ' + n : 'нет'; },
-  warp: () => !isOn('WARP_ENABLE') ? 'WARP выключен' : sumJoin([
+  warp: () => !isOn('WARP_ENABLE') ? 'выключен' : sumJoin([
     isOn('WARP_ALL_PHONE') ? 'весь трафик телефона' : isOn('WARP_PHONE') ? 'телефон' : '',
     isOn('WARP_ALL_TETHER') ? 'весь трафик раздачи' : isOn('WARP_TETHER') ? 'раздача' : '',
     ['запасной путь', 'без WARP — блок', 'только свой сервер'][+CUR.WARP_STRICT || 0]]),
-  warpc: () => !isOn('WARP_ENABLE') ? 'WARP выключен' : CUR.WARP_ENGINE === 'masque'
+  warpc: () => !isOn('WARP_ENABLE') ? 'выключен' : CUR.WARP_ENGINE === 'masque'
     ? sumJoin(['MASQUE', (isOn('WARP_MASQUE_H2') ? 'TCP ' : 'UDP ') + (CUR.WARP_MASQUE_PORT || '4443'), CUR.WARP_MASQUE_SNI || 'имя Cloudflare'])
-    : sumJoin(['AmneziaWG', 'I1: ' + optText('WARP_I1').replace(/ \(.*\)$/, ''), isOn('WARP_STICK') ? 'не менять сервер' : '']),
-  opera: () => !isOn('OPERA_ENABLE') ? 'Opera выключена' : sumJoin([{ EU: 'Европа', AS: 'Азия', AM: 'Америка' }[CUR.OPERA_COUNTRY] || 'Европа',
+    : sumJoin(['AmneziaWG', 'I1: ' + optText('WARP_I1').replace(/ \(.*\)$/, '').replace(/^Как /, 'как '), isOn('WARP_STICK') ? 'не менять сервер' : '']),
+  opera: () => !isOn('OPERA_ENABLE') ? 'выключена' : sumJoin([{ EU: 'Европа', AS: 'Азия', AM: 'Америка' }[CUR.OPERA_COUNTRY] || 'Европа',
     isOn('OPERA_ALL_PHONE') ? 'весь TCP телефона' : isOn('OPERA_PHONE') ? 'телефон' : '', isOn('OPERA_ALL_TETHER') ? 'весь TCP раздачи' : isOn('OPERA_TETHER') ? 'раздача' : '']),
   tnet: () => (isOn('NET_PROFILE_ADAPTIVE') ? 'переподключить сеть · адаптация TCP включена' : 'переподключить сеть'),
   tmod: () => 'обновления, перезапуск, оформление',
@@ -2378,6 +2382,9 @@ async function loadClients() {
     CL_PREV[mac] = { t: now, d, u, r: r2 };
   });
   CLIENTS_N = rows.filter((f) => f[6] !== '1' && f[2] !== '-').length;
+  const clBl = rows.filter((f) => f[6] === '1').length;
+  CL_SUM = rows.length ? sumJoin([CLIENTS_N ? 'подключено: ' + CLIENTS_N : 'никто не подключён', clBl ? 'заблокировано: ' + clBl : '']) : 'никто не подключён';
+  renderSums();
   $('#clients').innerHTML = rows.length ? rows.map(clientRow).join('')
     : '<div class="row"><div class="txt"><div class="s">Сейчас никто не подключён к раздаче.</div></div></div>';
 }
@@ -3556,6 +3563,8 @@ async function scRefresh() {
   if (blocked.length && !sites) prog += '<div class="muted" style="font-size:13px;margin-top:4px">Заблокировано без обхода: ' + esc(blocked.join(', ')) + '</div>';
   if (sites) prog += '<div class="muted" style="font-size:13px;margin-top:4px">Стратегии для отдельных сайтов: итог — во вкладке «Обход», раздел «Сайты для обхода».</div>';
   $('#scProg').innerHTML = prog;
+  SC_SUM = s.kind === 'check' ? '' : (s.state === 'running' || running) ? 'идёт подбор' + (+s.total ? ' · ' + s.done + ' из ' + s.total : '') : '';
+  renderSums();
 
   const rows = sites ? [] : scAggregate(rs.out, blocked.length);
   if (rows.some((r) => /^z2:/.test(r.a))) await loadZ2Kind();
